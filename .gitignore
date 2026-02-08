@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# IDE / tooling
+.vscode/
+.DS_Store
+
+# Logs / recordings / run artifacts
+runs/
+*.mp4
+*.gif
+
+# Planner outputs
+sas_plan*
+
+*.log

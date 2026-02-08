@@ -1,0 +1,62 @@
+{
+  "receptacles": {
+    "prep_table": ["knife", "cutting_board"],
+    "service_counter": ["cup", "plate", "napkin"],
+    "pantry_drawer": ["measuring_spoon", "tea_bag"],
+    "storage_shelf": ["mixing_bowl", "colander"],
+    "shipping_crate": ["sensor_core", "toolkit"],
+    "charging_pad": [],
+    "dishwasher_rack": [],
+    "packing_table": [],
+    "assembly_mat": []
+  },
+  "tasks": [
+    {
+      "name": "Set Tea Service",
+      "description": "Move the cup and tea_bag onto the prep_table for brewing.",
+      "steps": [
+        {"object": "cup", "source": "service_counter", "target": "prep_table"},
+        {"object": "tea_bag", "source": "pantry_drawer", "target": "prep_table"}
+      ]
+    },
+    {
+      "name": "Clear Prep Table",
+      "description": "Stow prep tools so the surface is free.",
+      "steps": [
+        {"object": "knife", "source": "prep_table", "target": "pantry_drawer"},
+        {"object": "cutting_board", "source": "prep_table", "target": "storage_shelf"}
+      ]
+    },
+    {
+      "name": "Load Dishwasher",
+      "description": "Place used dishes into the dishwasher rack.",
+      "steps": [
+        {"object": "plate", "source": "service_counter", "target": "dishwasher_rack"},
+        {"object": "cup", "source": "prep_table", "target": "dishwasher_rack"}
+      ]
+    },
+    {
+      "name": "Stage Packing Materials",
+      "description": "Gather packaging items on the packing table.",
+      "steps": [
+        {"object": "mixing_bowl", "source": "storage_shelf", "target": "packing_table"},
+        {"object": "colander", "source": "storage_shelf", "target": "packing_table"}
+      ]
+    },
+    {
+      "name": "Assemble Sensor Kit",
+      "description": "Bring the sensor components to the assembly mat.",
+      "steps": [
+        {"object": "sensor_core", "source": "shipping_crate", "target": "assembly_mat"},
+        {"object": "toolkit", "source": "shipping_crate", "target": "assembly_mat"}
+      ]
+    },
+    {
+      "name": "Charge Toolkit",
+      "description": "Place the toolkit on the charging pad after use.",
+      "steps": [
+        {"object": "toolkit", "source": "assembly_mat", "target": "charging_pad"}
+      ]
+    }
+  ]
+}

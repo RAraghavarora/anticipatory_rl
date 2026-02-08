@@ -1,0 +1,328 @@
+"""
+MiniWorld recreation of the earlier gridworld rearrangement setting.
+
+The environment keeps the same discrete action semantics
+(`move_{up,down,left,right}`, `pick`, `place`) while leveraging MiniWorld's
+rendering and Gymnasium integration. The world is a 6x6 grid with labeled
+receptacles (charging pad, storage bays, assembly zone, shipping area) and the
+same starter objects (red/blue crate stack plus sensor kit items).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import IntEnum
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from gymnasium import spaces, utils
+
+from miniworld.entity import Box, COLORS
+from miniworld.miniworld import MiniWorldEnv
+
+Coord = Tuple[int, int]
+
+
+@dataclass(frozen=True)
+class ReceptacleSpec:
+    name: str
+    tiles: List[Coord]
+    color: str
+
+
+CUSTOM_COLORS = {
+    "orange": np.array([1.0, 0.6, 0.0]),
+    "teal": np.array([0.0, 0.65, 0.65]),
+    "pink": np.array([1.0, 0.45, 0.7]),
+    "navy": np.array([0.1, 0.15, 0.45]),
+}
+
+for name, rgb in CUSTOM_COLORS.items():
+    if name not in COLORS:
+        COLORS[name] = rgb
+
+RECEPTACLES: List[ReceptacleSpec] = [
+    ReceptacleSpec("charging_pad", [(0, 0), (1, 0)], "orange"),
+    ReceptacleSpec("storage_a", [(1, 1), (2, 1), (1, 2), (2, 2)], "teal"),
+    ReceptacleSpec("storage_b", [(4, 1), (4, 2), (5, 1), (5, 2)], "pink"),
+    ReceptacleSpec("assembly_zone", [(3, 3), (4, 3), (3, 4), (4, 4)], "navy"),
+    ReceptacleSpec("shipping", [(0, 5), (1, 5)], "grey"),
+]
+
+
+@dataclass(frozen=True)
+class ObjectSpec:
+    name: str
+    color: str
+    start_tile: Coord
+    home_region: str
+    stack_index: int = 0
+
+
+OBJECTS: List[ObjectSpec] = [
+    ObjectSpec("blue_crate", "blue", (1, 1), "storage_a", stack_index=0),
+    ObjectSpec("red_crate", "red", (1, 1), "storage_a", stack_index=1),
+    ObjectSpec("sensor_pack", "green", (4, 2), "storage_b", stack_index=1),
+    ObjectSpec("shipping_label", "yellow", (5, 2), "storage_b", stack_index=0),
+    ObjectSpec("toolkit", "purple", (3, 4), "assembly_zone", stack_index=0),
+]
+
+
+class SixAction(IntEnum):
+    move_up = 0
+    move_down = 1
+    move_left = 2
+    move_right = 3
+    pick = 4
+    place = 5
+
+
+class MiniWorldGridRearrange(MiniWorldEnv, utils.EzPickle):
+    """
+    MiniWorld environment with discrete grid actions and pick/place semantics.
+    """
+
+    def __init__(self, grid_size: int = 6, tile_size: float = 1.0, **kwargs) -> None:
+        self.grid_size = grid_size
+        self.tile_size = tile_size
+
+        self.tile_contents: Dict[Coord, List[str]] = {}
+        self.object_registry: Dict[str, Dict[str, object]] = {}
+        self.tile_to_receptacle: Dict[Coord, str] = {}
+        self.receptacle_entities: Dict[str, Box] = {}
+        self.carrying: Optional[str] = None
+        self.agent_grid: Coord = (0, 0)
+
+        MiniWorldEnv.__init__(
+            self,
+            max_episode_steps=200,
+            view="top",
+            **kwargs,
+        )
+        utils.EzPickle.__init__(self, grid_size, tile_size, **kwargs)
+
+        # Override action space with custom six-action enumeration
+        self.actions = SixAction
+        self.action_space = spaces.Discrete(len(self.actions))
+
+    # ------------------------------------------------------------------ World setup
+    def _gen_world(self) -> None:
+        self.tile_contents = {}
+        self.object_registry = {}
+        self.tile_to_receptacle = {}
+        self.receptacle_entities = {}
+        self.carrying = None
+
+        # Build a single rectangular room matching the discrete grid extents.
+        self.add_rect_room(
+            min_x=0,
+            max_x=self.grid_size,
+            min_z=0,
+            max_z=self.grid_size,
+            wall_tex="brick_wall",
+            floor_tex="asphalt",
+            ceil_tex="ceiling_tiles",
+            no_ceiling=True,
+        )
+
+        self._place_receptacle_surfaces()
+        self._spawn_objects()
+        self._place_agent()
+
+    def _place_receptacle_surfaces(self) -> None:
+        for spec in RECEPTACLES:
+            for tile in spec.tiles:
+                self.tile_to_receptacle[tile] = spec.name
+
+            xs = [tile[0] for tile in spec.tiles]
+            zs = [tile[1] for tile in spec.tiles]
+            min_x = min(xs)
+            max_x = max(xs) + 1
+            min_z = min(zs)
+            max_z = max(zs) + 1
+
+            width = (max_x - min_x) * self.tile_size
+            depth = (max_z - min_z) * self.tile_size
+            center = np.array(
+                [
+                    (min_x + max_x) * 0.5 * self.tile_size,
+                    0.0,
+                    (min_z + max_z) * 0.5 * self.tile_size,
+                ]
+            )
+
+            surface = Box(color=spec.color, size=[width, 0.05, depth])
+            self.place_entity(surface, pos=center, dir=0.0)
+            self.receptacle_entities[spec.name] = surface
+
+    def _spawn_objects(self) -> None:
+        for spec in sorted(OBJECTS, key=lambda s: (s.start_tile, s.stack_index)):
+            entity = Box(color=spec.color, size=0.4)
+            self.place_entity(entity, pos=self._grid_to_world(spec.start_tile))
+            entity.dir = 0.0
+
+            self.object_registry[spec.name] = {
+                "entity": entity,
+                "tile": spec.start_tile,
+                "region": spec.home_region,
+            }
+            stack = self.tile_contents.setdefault(spec.start_tile, [])
+            stack.append(spec.name)
+            self._update_stack_poses(spec.start_tile)
+
+    def _place_agent(self) -> None:
+        self.agent_grid = (0, 0)
+        start_pos = self._grid_to_world(self.agent_grid)
+        self.place_agent(pos=start_pos, dir=0.0)
+        self.agent.carrying = None
+
+    # ------------------------------------------------------------------ Helpers
+    def _grid_to_world(self, tile: Coord, height_offset: float = 0.0) -> np.ndarray:
+        x, y = tile
+        return np.array(
+            [(x + 0.5) * self.tile_size, height_offset, (y + 0.5) * self.tile_size]
+        )
+
+    def _region_for_tile(self, tile: Coord) -> Optional[str]:
+        return self.tile_to_receptacle.get(tile)
+
+    def _update_stack_poses(self, tile: Coord) -> None:
+        stack = self.tile_contents.get(tile)
+        if not stack:
+            self.tile_contents.pop(tile, None)
+            return
+
+        for level, name in enumerate(stack):
+            entity = self.object_registry[name]["entity"]
+            height = level * 0.45
+            entity.pos = self._grid_to_world(tile, height_offset=height)
+
+    def _move_agent(self, dx: int, dy: int) -> bool:
+        nx = self.agent_grid[0] + dx
+        ny = self.agent_grid[1] + dy
+        if not (0 <= nx < self.grid_size and 0 <= ny < self.grid_size):
+            return False
+
+        self.agent_grid = (nx, ny)
+        self.agent.pos = self._grid_to_world(self.agent_grid)
+        self.agent.dir = 0.0
+
+        if self.carrying:
+            carried_entity = self.object_registry[self.carrying]["entity"]
+            carried_entity.pos = self._get_carry_pos(self.agent.pos, carried_entity)
+
+        return True
+
+    def _top_object_at_agent(self) -> Optional[str]:
+        stack = self.tile_contents.get(self.agent_grid, [])
+        return stack[-1] if stack else None
+
+    # ------------------------------------------------------------------ State/query
+    def get_state(self) -> Dict[str, object]:
+        return {
+            "agent": {
+                "grid_pos": self.agent_grid,
+                "carrying": self.carrying,
+            },
+            "objects": {
+                name: {
+                    "tile": data["tile"],
+                    "region": data["region"],
+                }
+                for name, data in self.object_registry.items()
+            },
+        }
+
+    # ------------------------------------------------------------------ Actions
+    def step(self, action: int):
+        try:
+            action_enum = self.actions(action)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid action {action}; expected one of {list(self.actions)}"
+            ) from exc
+
+        self.step_count += 1
+        if action_enum == self.actions.move_up:
+            self._move_agent(0, -1)
+        elif action_enum == self.actions.move_down:
+            self._move_agent(0, 1)
+        elif action_enum == self.actions.move_left:
+            self._move_agent(-1, 0)
+        elif action_enum == self.actions.move_right:
+            self._move_agent(1, 0)
+        elif action_enum == self.actions.pick:
+            self._handle_pick()
+        elif action_enum == self.actions.place:
+            self._handle_place()
+
+        obs = self.render_obs()
+        truncation = self.step_count >= self.max_episode_steps
+        info = {"state": self.get_state()}
+        return obs, 0.0, False, truncation, info
+
+    def act(self, action_name: str):
+        """
+        Convenience helper: apply an action by its string name.
+        """
+        if not hasattr(self.actions, action_name):
+            raise KeyError(f"Unknown action '{action_name}'")
+        action = getattr(self.actions, action_name)
+        return self.step(int(action))
+
+    def _handle_pick(self) -> bool:
+        if self.carrying:
+            return False
+
+        top_object = self._top_object_at_agent()
+        if top_object is None:
+            return False
+
+        stack = self.tile_contents[self.agent_grid]
+        stack.pop()
+        self._update_stack_poses(self.agent_grid)
+
+        self.carrying = top_object
+        obj_data = self.object_registry[top_object]
+        obj_data["tile"] = None
+        obj_data["region"] = None
+        self.agent.carrying = obj_data["entity"]
+        obj_data["entity"].pos = self._get_carry_pos(
+            self.agent.pos, obj_data["entity"]
+        )
+        return True
+
+    def _handle_place(self) -> bool:
+        if not self.carrying:
+            return False
+
+        stack = self.tile_contents.setdefault(self.agent_grid, [])
+        name = self.carrying
+        stack.append(name)
+        self._update_stack_poses(self.agent_grid)
+
+        obj_data = self.object_registry[name]
+        obj_data["tile"] = self.agent_grid
+        obj_data["region"] = self._region_for_tile(self.agent_grid)
+        self.agent.carrying = None
+        self.carrying = None
+        return True
+
+
+def demo_episode(steps: int = 5) -> None:
+    """
+    Simple manual rollout for quick verification without a training loop.
+    """
+
+    env = MiniWorldGridRearrange()
+    obs, _ = env.reset()
+    print(f"Initial state: {env.get_state()}")
+    for action_name in ["move_right", "move_down", "move_down", "pick"]:
+        try:
+            env.act(action_name)
+        except RuntimeError as err:
+            print(f"Action {action_name} failed: {err}")
+    print(f"Final state: {env.get_state()}")
+
+
+if __name__ == "__main__":
+    demo_episode()
