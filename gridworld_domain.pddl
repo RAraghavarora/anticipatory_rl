@@ -1,0 +1,83 @@
+(define (domain gridworld-rearrangement)
+  (:requirements :typing :negative-preconditions :conditional-effects :universal-preconditions)
+  (:types
+    agent
+    support
+    location - support
+    cargo - support
+    receptacle)
+
+  (:predicates
+    (agent-at ?a - agent ?l - location)
+    (adjacent ?l1 - location ?l2 - location)
+    (handfree ?a - agent)
+    (carrying ?a - agent ?o - cargo)
+    (clear ?s - support)
+    (supported-on ?o - cargo ?s - support)
+    (object-at ?o - cargo ?l - location)
+    (tile-of ?l - location ?r - receptacle)
+    (in ?o - cargo ?r - receptacle)
+  )
+
+  (:action move
+    :parameters (?a - agent ?from - location ?to - location)
+    :precondition (and (agent-at ?a ?from) (adjacent ?from ?to))
+    :effect (and (agent-at ?a ?to)
+                 (not (agent-at ?a ?from))))
+
+  (:action pick
+    :parameters (?a - agent ?obj - cargo ?sup - support ?loc - location)
+    :precondition (and (agent-at ?a ?loc)
+                       (object-at ?obj ?loc)
+                       (supported-on ?obj ?sup)
+                       (clear ?obj)
+                       (handfree ?a))
+    :effect (and (carrying ?a ?obj)
+                 (not (handfree ?a))
+                 (not (supported-on ?obj ?sup))
+                 (clear ?sup)
+                 (clear ?obj)
+                 (forall (?l - location)
+                     (when (object-at ?obj ?l)
+                       (not (object-at ?obj ?l))))
+                 (forall (?r - receptacle)
+                     (when (in ?obj ?r)
+                       (not (in ?obj ?r))))))
+
+  (:action place-on-location
+    :parameters (?a - agent ?obj - cargo ?loc - location)
+    :precondition (and (carrying ?a ?obj)
+                       (agent-at ?a ?loc)
+                       (clear ?loc))
+    :effect (and (handfree ?a)
+                 (not (carrying ?a ?obj))
+                 (supported-on ?obj ?loc)
+                 (not (clear ?loc))
+                 (clear ?obj)
+                 (forall (?l - location)
+                     (when (object-at ?obj ?l)
+                       (not (object-at ?obj ?l))))
+                 (object-at ?obj ?loc)
+                 (forall (?r - receptacle)
+                     (when (tile-of ?loc ?r)
+                       (in ?obj ?r)))))
+
+  (:action stack-on-object
+    :parameters (?a - agent ?obj - cargo ?base - cargo ?loc - location)
+    :precondition (and (carrying ?a ?obj)
+                       (agent-at ?a ?loc)
+                       (object-at ?base ?loc)
+                       (clear ?base))
+    :effect (and (handfree ?a)
+                 (not (carrying ?a ?obj))
+                 (supported-on ?obj ?base)
+                 (not (clear ?base))
+                 (clear ?obj)
+                 (forall (?l - location)
+                     (when (object-at ?obj ?l)
+                       (not (object-at ?obj ?l))))
+                 (object-at ?obj ?loc)
+                 (forall (?r - receptacle)
+                     (when (in ?base ?r)
+                       (in ?obj ?r)))))
+)
