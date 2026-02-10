@@ -1,61 +1,50 @@
 {
   "receptacles": {
-    "prep_table": ["knife", "cutting_board"],
-    "service_counter": ["cup", "plate", "napkin"],
-    "pantry_drawer": ["measuring_spoon", "tea_bag"],
-    "storage_shelf": ["mixing_bowl", "colander"],
-    "shipping_crate": ["sensor_core", "toolkit"],
-    "charging_pad": [],
-    "dishwasher_rack": [],
-    "packing_table": [],
-    "assembly_mat": []
+    "kitchen_table": [],
+    "kitchen_counter": ["water_bottle", "tiffin_box"],
+    "dining_table": ["apple", "soda_can"],
+    "study_table": ["drinking_glass"],
+    "shelf": []
   },
   "tasks": [
     {
-      "name": "Set Tea Service",
-      "description": "Move the cup and tea_bag onto the prep_table for brewing.",
+      "name": "Set Study Refreshments",
+      "description": "Move a pair of items to the study table for a work session.",
       "steps": [
-        {"object": "cup", "source": "service_counter", "target": "prep_table"},
-        {"object": "tea_bag", "source": "pantry_drawer", "target": "prep_table"}
+        {"object": "water_bottle", "source": "kitchen_counter", "target": "study_table"},
+        {"object": "soda_can", "source": "dining_table", "target": "study_table"}
       ]
     },
     {
-      "name": "Clear Prep Table",
-      "description": "Stow prep tools so the surface is free.",
+      "name": "Reset Kitchen Counter",
+      "description": "Return items to their home receptacles so the counter is tidy.",
       "steps": [
-        {"object": "knife", "source": "prep_table", "target": "pantry_drawer"},
-        {"object": "cutting_board", "source": "prep_table", "target": "storage_shelf"}
+        {"object": "water_bottle", "source": "study_table", "target": "kitchen_counter"},
+        {"object": "tiffin_box", "source": "kitchen_table", "target": "kitchen_counter"}
       ]
     },
     {
-      "name": "Load Dishwasher",
-      "description": "Place used dishes into the dishwasher rack.",
+      "name": "Stage Lunch Service",
+      "description": "Collect lunch items at the kitchen table.",
       "steps": [
-        {"object": "plate", "source": "service_counter", "target": "dishwasher_rack"},
-        {"object": "cup", "source": "prep_table", "target": "dishwasher_rack"}
+        {"object": "tiffin_box", "source": "kitchen_counter", "target": "kitchen_table"},
+        {"object": "drinking_glass", "source": "study_table", "target": "kitchen_table"}
       ]
     },
     {
-      "name": "Stage Packing Materials",
-      "description": "Gather packaging items on the packing table.",
+      "name": "Restock Refrigerated Items",
+      "description": "Move perishables off the dining table and back into storage.",
       "steps": [
-        {"object": "mixing_bowl", "source": "storage_shelf", "target": "packing_table"},
-        {"object": "colander", "source": "storage_shelf", "target": "packing_table"}
+        {"object": "apple", "source": "dining_table", "target": "kitchen_counter"},
+        {"object": "soda_can", "source": "study_table", "target": "kitchen_counter"}
       ]
     },
     {
-      "name": "Assemble Sensor Kit",
-      "description": "Bring the sensor components to the assembly mat.",
+      "name": "Shelf Inventory",
+      "description": "Consolidate unused items on the shelf for quick access.",
       "steps": [
-        {"object": "sensor_core", "source": "shipping_crate", "target": "assembly_mat"},
-        {"object": "toolkit", "source": "shipping_crate", "target": "assembly_mat"}
-      ]
-    },
-    {
-      "name": "Charge Toolkit",
-      "description": "Place the toolkit on the charging pad after use.",
-      "steps": [
-        {"object": "toolkit", "source": "assembly_mat", "target": "charging_pad"}
+        {"object": "drinking_glass", "source": "kitchen_table", "target": "shelf"},
+        {"object": "water_bottle", "source": "kitchen_counter", "target": "shelf"}
       ]
     }
   ]

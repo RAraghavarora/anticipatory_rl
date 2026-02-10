@@ -242,19 +242,19 @@ class GridWorld:
 
 def build_sample_world() -> GridWorld:
     regions = [
-        Region("charging_pad", [(0, 0), (1, 0)]),
-        Region("storage_a", [(1, 1), (2, 1), (1, 2), (2, 2)]),
-        Region("storage_b", [(4, 1), (4, 2), (5, 1), (5, 2)]),
-        Region("assembly_zone", [(3, 3), (4, 3), (3, 4), (4, 4)]),
-        Region("shipping", [(0, 5), (1, 5)]),
+        Region("kitchen_table", [(0, 0), (1, 0)]),
+        Region("kitchen_counter", [(1, 1), (2, 1), (1, 2), (2, 2)]),
+        Region("dining_table", [(4, 1), (4, 2), (5, 1), (5, 2)]),
+        Region("study_table", [(3, 3), (4, 3), (3, 4), (4, 4)]),
+        Region("shelf", [(0, 5), (1, 5)]),
     ]
 
     objects = [
-        GridObject("red_crate", position=(1, 1), region="storage_a"),
-        GridObject("blue_crate", position=(1, 1), region="storage_a", obstructed_by=["red_crate"]),
-        GridObject("sensor_pack", position=(4, 2), region="storage_b"),
-        GridObject("toolkit", position=(3, 4), region="assembly_zone"),
-        GridObject("shipping_label", position=(5, 2), region="storage_b", obstructed_by=["sensor_pack"]),
+        GridObject("water_bottle", position=(1, 1), region="kitchen_counter"),
+        GridObject("tiffin_box", position=(1, 1), region="kitchen_counter", obstructed_by=["water_bottle"]),
+        GridObject("apple", position=(4, 2), region="dining_table"),
+        GridObject("drinking_glass", position=(3, 4), region="study_table"),
+        GridObject("soda_can", position=(5, 2), region="dining_table", obstructed_by=["apple"]),
     ]
 
     agent = Agent("mobile_bot", position=(0, 0))
