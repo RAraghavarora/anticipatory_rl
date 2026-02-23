@@ -1,0 +1,50 @@
+task_distribution:
+  bring_single: 0.5
+  bring_pair: 0.25
+  clear_receptacle: 0.25
+
+object_distribution:
+  water_bottle: 0.25
+  tiffin_box: 0.2
+  apple: 0.2
+  soda_can: 0.2
+  drinking_glass: 0.15
+
+surface_distribution:
+  kitchen_table: 0.2
+  kitchen_counter: 0.25
+  dining_table: 0.2
+  study_table: 0.2
+  shelf: 0.15
+
+object_source_distribution:
+  water_bottle:
+    kitchen_table: 0.2
+    kitchen_counter: 0.4
+    dining_table: 0.3
+    study_table: 0.09
+    shelf: 0.01
+  tiffin_box:
+    kitchen_table: 0.35
+    kitchen_counter: 0.4
+    dining_table: 0.15
+    study_table: 0.08
+    shelf: 0.02
+  apple:
+    kitchen_table: 0.1
+    kitchen_counter: 0.2
+    dining_table: 0.5
+    study_table: 0.15
+    shelf: 0.05
+  soda_can:
+    kitchen_table: 0.05
+    kitchen_counter: 0.15
+    dining_table: 0.55
+    study_table: 0.2
+    shelf: 0.05
+  drinking_glass:
+    kitchen_table: 0.25
+    kitchen_counter: 0.25
+    dining_table: 0.15
+    study_table: 0.3
+    shelf: 0.05

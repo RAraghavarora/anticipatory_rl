@@ -12,9 +12,12 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 from anticipatory_rl.tasks.build_problem_from_task import (
+    CONFIG as PROBLEM_CONFIG,
+    _parse_template,
     build_problem_text_for_task,
     load_tasks,
 )
+from anticipatory_rl.tasks.planner_utils import plan_cost, run_planner
 
 
 def _parse_args() -> argparse.Namespace:
@@ -24,7 +27,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tasks-file",
         type=Path,
-        default=Path("runs") / "tasks_200.json",
+        default=Path("runs") / "tasks_1000.json",
         help="JSON file containing sampled tasks.",
     )
     parser.add_argument(
@@ -72,54 +75,23 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _run_planner(
-    planner: Path, domain: Path, problem: Path, search: str, workdir: Path
-) -> Path:
-    cmd = [
-        sys.executable,
-        str(planner),
-        str(domain),
-        str(problem.resolve()),
-        "--search",
-        search,
-    ]
-    proc = subprocess.run(
-        cmd, cwd=workdir, capture_output=True, text=True, check=False
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Planner failed (code {proc.returncode}).\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-        )
-    plan_candidates = sorted(workdir.glob("sas_plan*"))
-    if not plan_candidates:
-        raise FileNotFoundError(
-            "Planner succeeded but produced no sas_plan* output."
-        )
-    return plan_candidates[0]
-
-
-def _plan_cost(plan_path: Path) -> int:
-    cost = 0
-    for line in plan_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith(";"):
-            continue
-        if line.startswith("("):
-            cost += 1
-    return cost
-
-
 def evaluate_tasks(args: argparse.Namespace) -> Dict[str, object]:
     tasks = load_tasks(args.tasks_file)
     rng = random.Random(args.task_seed)
     results: List[Dict[str, object]] = []
+    template = _parse_template(args.template)
+    surface_dist = PROBLEM_CONFIG.get("surface_distribution", {})
 
     for eval_id in range(args.num_tasks):
         task_index = rng.randrange(len(tasks))
         task = tasks[task_index]
         problem_name = f"task-{task_index}-eval-{eval_id}"
         problem_text = build_problem_text_for_task(
-            task, args.template, problem_name
+            task,
+            template,
+            problem_name,
+            surface_dist=surface_dist,
+            rng=random.Random(rng.randint(0, 10**9)),
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -127,10 +99,10 @@ def evaluate_tasks(args: argparse.Namespace) -> Dict[str, object]:
             problem_path = tmp_path / "problem.pddl"
             problem_path.write_text(problem_text)
             try:
-                plan_path = _run_planner(
+                plan_path = run_planner(
                     args.planner, args.domain, problem_path, args.search, tmp_path
                 )
-                cost = _plan_cost(plan_path)
+                cost = plan_cost(plan_path)
                 status = "solved"
             except Exception as exc:
                 cost = None
