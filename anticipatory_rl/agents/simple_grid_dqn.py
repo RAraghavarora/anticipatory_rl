@@ -100,10 +100,13 @@ def train(args: argparse.Namespace) -> None:
     env = SimpleGridEnv(
         success_reward=args.success_reward,
         num_objects=initial_objects,
-        grid_size=4,
+        grid_size=6,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
     )
+    grid_dir = Path("runs") / f"{env.grid_size}_dqn"
+    grid_dir.mkdir(parents=True, exist_ok=True)
+    args.output = grid_dir / args.output.name
     curriculum_switch = min(args.curriculum_single_steps, args.total_steps) if curriculum_enabled else None
     curriculum_applied = not curriculum_enabled
     replay = PrioritizedReplayBuffer(args.replay_size)
@@ -122,9 +125,17 @@ def train(args: argparse.Namespace) -> None:
     tasks_completed = 0
     total_tasks = 0
     step_rewards: List[float] = []
+    greedy_value_history: List[float] = []
+    td_error_history: List[float] = []
+    target_value_history: List[float] = []
     episode_returns: List[float] = []
     task_length_history: List[int] = []
     tasks_since_reset = 0
+    rolling_success_history: List[float] = []
+    rolling_return_history: List[float] = []
+    rolling_history_x: List[int] = []
+    recent_returns: Deque[float] = deque(maxlen=100)
+    recent_successes: Deque[int] = deque(maxlen=100)
 
     progress = tqdm(total=args.total_steps, desc="SimpleGrid DQN")
     state, _ = env.reset(seed=args.seed)
@@ -139,12 +150,17 @@ def train(args: argparse.Namespace) -> None:
 
     while global_step < args.total_steps:
         eps = current_epsilon(global_step)
+        with torch.no_grad():
+            inp = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+            q_vals = q_net(inp)
+            greedy_action = int(torch.argmax(q_vals, dim=1).item())
+            greedy_value = float(torch.max(q_vals).item())
+        greedy_value_history.append(greedy_value)
+
         if random.random() < eps:
             action = env.action_space.sample()
         else:
-            with torch.no_grad():
-                inp = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-                action = int(torch.argmax(q_net(inp), dim=1).item())
+            action = greedy_action
 
         obs, reward, success, horizon, info = env.step(action)
         done = success or horizon
@@ -167,11 +183,20 @@ def train(args: argparse.Namespace) -> None:
             total_tasks += 1
             if success:
                 tasks_completed += 1
+            recent_returns.append(task_return)
+            recent_successes.append(1 if success else 0)
             task_return = 0.0
             task_steps = 0
             avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
             avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
             success_rate = tasks_completed / total_tasks if total_tasks > 0 else 0.0
+            rolling_success_history.append(
+                float(np.mean(recent_successes)) if recent_successes else 0.0
+            )
+            rolling_return_history.append(
+                float(np.mean(recent_returns)) if recent_returns else 0.0
+            )
+            rolling_history_x.append(total_tasks)
             progress.set_postfix(
                 ret=avg_ret,
                 steps=f"{avg_len:.1f}" if avg_len else "n/a",
@@ -217,9 +242,11 @@ def train(args: argparse.Namespace) -> None:
             loss = (weights_t * td_errors.pow(2)).mean()
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(q_net.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
             optimizer.step()
             replay.update_priorities(indices, td_errors.detach().cpu().numpy().squeeze())
+            td_error_history.append(td_errors.abs().mean().detach().cpu().item())
+            target_value_history.append(target.abs().mean().detach().cpu().item())
 
         if global_step % args.target_update == 0:
             target_net.load_state_dict(q_net.state_dict())
@@ -227,33 +254,108 @@ def train(args: argparse.Namespace) -> None:
     progress.close()
     torch.save(q_net.state_dict(), args.output)
     print(f"Saved DQN weights to {args.output}")
-    _plot_metrics(step_rewards, episode_returns, task_length_history, args.output)
+    _plot_metrics(
+        step_rewards,
+        episode_returns,
+        task_length_history,
+        greedy_value_history,
+        td_error_history,
+        target_value_history,
+        args.output,
+    )
+    _plot_rolling_stats(
+        rolling_history_x,
+        rolling_success_history,
+        rolling_return_history,
+        args.output,
+    )
 
 
 def _plot_metrics(
     step_rewards: List[float],
     episode_returns: List[float],
     task_lengths: List[int],
+    greedy_values: List[float],
+    td_errors: List[float],
+    target_values: List[float],
     weight_path: Path,
 ) -> None:
     if not step_rewards:
         return
     plot_path = weight_path.with_name(weight_path.stem + "_metrics.png")
     plot_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 1, figsize=(10, 6))
-    axes[0].plot(step_rewards, linewidth=0.5)
-    axes[0].set_title("Per-step reward")
+    fig, axes = plt.subplots(5, 1, figsize=(10, 12))
+    reward_window = 100
+    step_ma = _moving_average(step_rewards, reward_window)
+    axes[0].plot(step_rewards, linewidth=0.4, alpha=0.15, color="#1f77b4")
+    if step_ma is not None:
+        ma_x = np.arange(reward_window - 1, reward_window - 1 + len(step_ma))
+        axes[0].plot(ma_x, step_ma, linewidth=1.2, color="#1f77b4")
+    axes[0].set_title(f"Per-step reward (MA window={reward_window})")
     axes[0].set_ylabel("Reward")
-    axes[1].plot(episode_returns, linewidth=0.8)
-    axes[1].set_title("Per-task return")
+    return_window = 100
+    return_ma = _moving_average(episode_returns, return_window)
+    axes[1].plot(episode_returns, linewidth=0.6, alpha=0.2, color="#ff7f0e")
+    if return_ma is not None:
+        ma_x = np.arange(return_window - 1, return_window - 1 + len(return_ma))
+        axes[1].plot(ma_x, return_ma, linewidth=1.2, color="#ff7f0e")
+    axes[1].set_title(f"Per-task return (MA window={return_window})")
     axes[1].set_xlabel("Episode")
     axes[1].set_ylabel("Return")
+    if greedy_values:
+        axes[2].plot(greedy_values, linewidth=0.5)
+        axes[2].set_title("Greedy action value")
+        axes[2].set_xlabel("Step")
+        axes[2].set_ylabel("Q-value")
+    else:
+        axes[2].set_visible(False)
+    if td_errors:
+        axes[3].plot(td_errors, linewidth=0.5, color="#d62728")
+        axes[3].set_title("Mean TD error")
+        axes[3].set_xlabel("Update step")
+        axes[3].set_ylabel("|δ|")
+    else:
+        axes[3].set_visible(False)
+    if target_values:
+        axes[4].plot(target_values, linewidth=0.5, color="#9467bd")
+        axes[4].set_title("Target value magnitude")
+        axes[4].set_xlabel("Update step")
+        axes[4].set_ylabel("|Target|")
+    else:
+        axes[4].set_visible(False)
     fig.tight_layout()
     fig.savefig(plot_path)
     plt.close(fig)
     print(f"Saved training curves to {plot_path}")
     if task_lengths:
         _plot_avg_task_steps(task_lengths, weight_path)
+
+
+def _plot_rolling_stats(
+    task_indices: List[int],
+    success_history: List[float],
+    return_history: List[float],
+    weight_path: Path,
+) -> None:
+    if not task_indices:
+        return
+    plot_path = weight_path.with_name(weight_path.stem + "_rolling.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+    axes[0].plot(task_indices, success_history, linewidth=0.8, color="#1f77b4")
+    axes[0].set_ylabel("Success rate")
+    axes[0].set_ylim(0.0, 1.05)
+    axes[0].set_title("Rolling success rate (window≈100)")
+    axes[1].plot(task_indices, return_history, linewidth=0.8, color="#ff7f0e")
+    axes[1].set_ylabel("Return")
+    axes[1].set_xlabel("Completed task")
+    axes[1].set_title("Rolling return (window≈100)")
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved rolling metrics to {plot_path}")
+    plt.close()
+    print(f"Saved rolling metrics to {plot_path}")
 
 
 def _plot_avg_task_steps(task_lengths: List[int], weight_path: Path, window: int = 100) -> None:
@@ -274,6 +376,13 @@ def _plot_avg_task_steps(task_lengths: List[int], weight_path: Path, window: int
     plt.savefig(plot_path)
     plt.close()
     print(f"Saved avg task length plot to {plot_path}")
+
+
+def _moving_average(series: List[float], window: int) -> np.ndarray | None:
+    if len(series) < window or window <= 0:
+        return None
+    kernel = np.ones(window, dtype=np.float32) / window
+    return np.convolve(series, kernel, mode="valid")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train DQN on the NxN SimpleGrid pick and place task.")
@@ -319,6 +428,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of global steps to decay epsilon from start to final (ignored if --epsilon is set).",
     )
     parser.add_argument("--target-update", type=int, default=1_000)
+    parser.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=1.0,
+        help="Gradient clipping value applied to Q-network updates.",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=Path("runs") / "simple_grid_dqn.pt")
     parser.add_argument("--success-reward", type=float, default=10.0, help="Reward bonus when task is completed.")
