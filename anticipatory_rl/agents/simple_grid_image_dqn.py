@@ -103,19 +103,64 @@ class PrioritizedReplayBuffer:
             self.priorities[idx] = float(np.abs(prio) + self.eps)
 
 
+class VectorEnv:
+    """Lock-step wrapper around multiple SimpleGridImageEnv instances."""
+
+    def __init__(self, make_env, num_envs: int) -> None:
+        self.envs = [make_env() for _ in range(num_envs)]
+        self.num_envs = num_envs
+        self.grid_size = self.envs[0].grid_size
+        self.action_space = self.envs[0].action_space
+
+    def reset(self, seed: int | None = None):
+        obs_list = []
+        infos = []
+        for idx, env in enumerate(self.envs):
+            env_seed = None if seed is None else seed + idx
+            ob, info = env.reset(seed=env_seed)
+            obs_list.append(ob)
+            infos.append(info)
+        return np.stack(obs_list), infos
+
+    def reset_env(self, idx: int, seed: int | None = None):
+        env_seed = None if seed is None else seed + idx
+        return self.envs[idx].reset(seed=env_seed)
+
+    def step(self, actions: np.ndarray):
+        results = [
+            env.step(int(action))
+            for env, action in zip(self.envs, actions)
+        ]
+        obs, rewards, success, horizon, infos = zip(*results)
+        return (
+            np.stack(obs),
+            np.asarray(rewards, dtype=np.float32),
+            np.asarray(success, dtype=bool),
+            np.asarray(horizon, dtype=bool),
+            infos,
+        )
+
+    def set_active_objects(self, count: int) -> None:
+        for env in self.envs:
+            env.set_active_objects(count)
+
+
 def train(args: argparse.Namespace) -> None:
     if torch.backends.mps.is_available():
         device = torch.device("mps")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    env = SimpleGridImageEnv(
-        grid_size=args.grid_size,
-        success_reward=args.success_reward,
-        num_objects=args.num_objects,
-        distance_reward=True,
-        distance_reward_scale=args.distance_reward_scale,
-    )
+    def make_env():
+        return SimpleGridImageEnv(
+            grid_size=args.grid_size,
+            success_reward=args.success_reward,
+            num_objects=args.num_objects,
+            distance_reward=True,
+            distance_reward_scale=args.distance_reward_scale,
+        )
+
+    env = VectorEnv(make_env, max(1, args.num_envs))
     grid_dir = Path("runs") / f"{env.grid_size}_image_dqn"
     grid_dir.mkdir(parents=True, exist_ok=True)
     args.output = grid_dir / args.output.name
@@ -130,7 +175,7 @@ def train(args: argparse.Namespace) -> None:
     )
 
     state, _ = env.reset(seed=args.seed)
-    obs_shape = state.shape
+    obs_shape = state.shape[1:]
     action_dim = env.action_space.n
     q_net = ConvQNetwork(obs_shape, hidden_dim=args.hidden_dim, num_actions=action_dim).to(device)
     target_net = ConvQNetwork(obs_shape, hidden_dim=args.hidden_dim, num_actions=action_dim).to(device)
@@ -149,8 +194,9 @@ def train(args: argparse.Namespace) -> None:
     target_value_history: List[float] = []
     episode_returns: List[float] = []
     task_length_history: List[int] = []
-    episode_transitions: List[Transition] = []
-    tasks_since_reset = 0
+    num_envs = env.num_envs
+    episode_transitions: List[List[Transition]] = [[] for _ in range(num_envs)]
+    tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
     rolling_success_history: List[float] = []
     rolling_return_history: List[float] = []
     rolling_history_x: List[int] = []
@@ -161,8 +207,8 @@ def train(args: argparse.Namespace) -> None:
     goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
 
     progress = tqdm(total=args.total_steps, desc="SimpleGrid Image DQN")
-    task_return = 0.0
-    task_steps = 0
+    task_return = np.zeros(num_envs, dtype=np.float32)
+    task_steps = np.zeros(num_envs, dtype=np.int64)
 
     def current_epsilon(step: int) -> float:
         if args.epsilon is not None:
@@ -177,74 +223,87 @@ def train(args: argparse.Namespace) -> None:
         else:
             eps = base_eps
         with torch.no_grad():
-            inp = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+            inp = torch.tensor(state, dtype=torch.float32, device=device)
             q_vals = q_net(inp)
-            greedy_action = int(torch.argmax(q_vals, dim=1).item())
+            greedy_actions = torch.argmax(q_vals, dim=1).cpu().numpy()
             greedy_value = float(torch.max(q_vals).item())
         greedy_value_history.append(greedy_value)
 
-        if random.random() < eps:
-            action = env.action_space.sample()
-        else:
-            action = greedy_action
+        random_mask = np.random.rand(num_envs) < eps
+        random_actions = np.asarray(
+            [env.action_space.sample() for _ in range(num_envs)]
+        )
+        actions = np.where(random_mask, random_actions, greedy_actions).astype(np.int64)
 
-        obs, reward, success, horizon, info = env.step(action)
-        done = success or horizon
-        next_state = obs
-        transition = Transition(state, action, reward, next_state, done)
-        replay.push(transition)
-        episode_transitions.append(transition)
-        step_rewards.append(reward)
+        next_state, reward, success, horizon, info = env.step(actions)
+        done = success | horizon
+        for idx in range(num_envs):
+            transition = Transition(
+                state[idx],
+                int(actions[idx]),
+                float(reward[idx]),
+                next_state[idx],
+                bool(done[idx]),
+            )
+            replay.push(transition)
+            episode_transitions[idx].append(transition)
+            step_rewards.append(float(reward[idx]))
 
         state = next_state
         task_return += reward
         task_steps += 1
-        global_step += 1
-        progress.update(1)
+        global_step += num_envs
+        progress.update(num_envs)
 
-        if success or horizon:
-            tasks_since_reset += 1
-            returns.append(task_return)
-            task_lengths.append(task_steps)
-            episode_returns.append(task_return)
-            task_length_history.append(task_steps)
-            total_tasks += 1
-            if success:
-                tasks_completed += 1
-            recent_returns.append(task_return)
-            recent_successes.append(1 if success else 0)
-            task_return = 0.0
-            task_steps = 0
-            avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
-            avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
-            success_rate = tasks_completed / total_tasks if total_tasks > 0 else 0.0
-            window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
-            rolling_success_history.append(window_success)
-            rolling_return_history.append(
-                float(np.mean(recent_returns)) if recent_returns else 0.0
-            )
-            rolling_history_x.append(total_tasks)
-            progress.set_postfix(
-                ret=avg_ret,
-                steps=f"{avg_len:.1f}" if avg_len else "n/a",
-                success=f"{success_rate:.2f}",
-                eps=f"{eps:.2f}",
-                tasks=tasks_completed,
-            )
-            if success and args.goal_buffer_size > 0 and episode_transitions:
-                for trans in episode_transitions:
-                    goal_buffer.append(trans)
-            episode_transitions.clear()
-            if tasks_since_reset >= args.tasks_per_reset:
-                state, _ = env.reset()
-                tasks_since_reset = 0
-                episode_transitions.clear()
-            if (
-                window_success < args.epsilon_restart_threshold
-                and global_step >= last_restart_step + args.epsilon_restart_cooldown
-            ):
-                epsilon_restart_until = global_step + args.epsilon_restart_duration
-                last_restart_step = global_step
+        for idx in range(num_envs):
+            if done[idx]:
+                tasks_since_reset[idx] += 1
+                episode_return = float(task_return[idx])
+                returns.append(episode_return)
+                task_lengths.append(int(task_steps[idx]))
+                episode_returns.append(episode_return)
+                task_length_history.append(int(task_steps[idx]))
+                total_tasks += 1
+                if success[idx]:
+                    tasks_completed += 1
+                recent_returns.append(episode_return)
+                recent_successes.append(1 if success[idx] else 0)
+                window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
+                rolling_success_history.append(window_success)
+                rolling_return_history.append(
+                    float(np.mean(recent_returns)) if recent_returns else 0.0
+                )
+                rolling_history_x.append(total_tasks)
+                if success[idx] and args.goal_buffer_size > 0 and episode_transitions[idx]:
+                    for trans in episode_transitions[idx]:
+                        goal_buffer.append(trans)
+                episode_transitions[idx].clear()
+                task_return[idx] = 0.0
+                task_steps[idx] = 0
+
+                if tasks_since_reset[idx] >= args.tasks_per_reset:
+                    new_obs, _ = env.reset_env(idx)
+                    state[idx] = new_obs
+                    tasks_since_reset[idx] = 0
+                    episode_transitions[idx].clear()
+
+        avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
+        avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
+        success_rate = tasks_completed / total_tasks if total_tasks > 0 else 0.0
+        progress.set_postfix(
+            ret=avg_ret,
+            steps=f"{avg_len:.1f}" if avg_len else "n/a",
+            success=f"{success_rate:.2f}",
+            eps=f"{eps:.2f}",
+            tasks=tasks_completed,
+        )
+        window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
+        if (
+            window_success < args.epsilon_restart_threshold
+            and global_step >= last_restart_step + args.epsilon_restart_cooldown
+        ):
+            epsilon_restart_until = global_step + args.epsilon_restart_duration
+            last_restart_step = global_step
 
         if len(replay) >= args.batch_size:
             beta = min(
@@ -462,6 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--num-objects", type=int, default=4)
+    parser.add_argument("--num-envs", type=int, default=1, help="Parallel env instances to sample each step.")
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--per-alpha", type=float, default=0.6)
     parser.add_argument("--per-beta-start", type=float, default=0.4)
