@@ -109,7 +109,14 @@ def train(args: argparse.Namespace) -> None:
     args.output = grid_dir / args.output.name
     curriculum_switch = min(args.curriculum_single_steps, args.total_steps) if curriculum_enabled else None
     curriculum_applied = not curriculum_enabled
-    replay = PrioritizedReplayBuffer(args.replay_size)
+    replay = PrioritizedReplayBuffer(
+        args.replay_size,
+        alpha=args.per_alpha,
+        eps=args.per_eps,
+    )
+    goal_buffer: Deque[Transition] = deque(
+        maxlen=args.goal_buffer_size if args.goal_buffer_size > 0 else None
+    )
 
     state, _ = env.reset(seed=args.seed)
     input_dim = len(state)
@@ -130,17 +137,21 @@ def train(args: argparse.Namespace) -> None:
     target_value_history: List[float] = []
     episode_returns: List[float] = []
     task_length_history: List[int] = []
+    episode_transitions: List[Transition] = []
     tasks_since_reset = 0
     rolling_success_history: List[float] = []
     rolling_return_history: List[float] = []
     rolling_history_x: List[int] = []
     recent_returns: Deque[float] = deque(maxlen=100)
     recent_successes: Deque[int] = deque(maxlen=100)
+    epsilon_restart_until = -1
+    last_restart_step = -10**9
 
     progress = tqdm(total=args.total_steps, desc="SimpleGrid DQN")
     state, _ = env.reset(seed=args.seed)
     task_return = 0.0
     task_steps = 0
+    goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
 
     def current_epsilon(step: int) -> float:
         if args.epsilon is not None:
@@ -149,7 +160,11 @@ def train(args: argparse.Namespace) -> None:
         return args.epsilon_start + frac * (args.epsilon_final - args.epsilon_start)
 
     while global_step < args.total_steps:
-        eps = current_epsilon(global_step)
+        base_eps = current_epsilon(global_step)
+        if global_step < epsilon_restart_until:
+            eps = max(base_eps, args.epsilon_restart_value)
+        else:
+            eps = base_eps
         with torch.no_grad():
             inp = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
             q_vals = q_net(inp)
@@ -165,7 +180,9 @@ def train(args: argparse.Namespace) -> None:
         obs, reward, success, horizon, info = env.step(action)
         done = success or horizon
         next_state = obs
-        replay.push(Transition(state, action, reward, next_state, done))
+        transition = Transition(state, action, reward, next_state, done)
+        replay.push(transition)
+        episode_transitions.append(transition)
         step_rewards.append(reward)
 
         state = next_state
@@ -190,9 +207,8 @@ def train(args: argparse.Namespace) -> None:
             avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
             avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
             success_rate = tasks_completed / total_tasks if total_tasks > 0 else 0.0
-            rolling_success_history.append(
-                float(np.mean(recent_successes)) if recent_successes else 0.0
-            )
+            window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
+            rolling_success_history.append(window_success)
             rolling_return_history.append(
                 float(np.mean(recent_returns)) if recent_returns else 0.0
             )
@@ -204,10 +220,20 @@ def train(args: argparse.Namespace) -> None:
                 eps=f"{eps:.2f}",
                 tasks=tasks_completed,
             )
+            if success and args.goal_buffer_size > 0 and episode_transitions:
+                for trans in episode_transitions:
+                    goal_buffer.append(trans)
+            episode_transitions.clear()
             if tasks_since_reset >= args.tasks_per_reset:
                 state, _ = env.reset()
                 tasks_since_reset = 0
-            # no epsilon schedule; fixed exploration rate
+                episode_transitions.clear()
+            if (
+                window_success < args.epsilon_restart_threshold
+                and global_step >= last_restart_step + args.epsilon_restart_cooldown
+            ):
+                epsilon_restart_until = global_step + args.epsilon_restart_duration
+                last_restart_step = global_step
 
         if not curriculum_applied and global_step >= curriculum_switch:
             env.set_active_objects(args.num_objects)
@@ -216,6 +242,7 @@ def train(args: argparse.Namespace) -> None:
             task_steps = 0
             curriculum_applied = True
             tasks_since_reset = 0
+            episode_transitions.clear()
 
         if len(replay) >= args.batch_size:
             beta = min(
@@ -223,7 +250,37 @@ def train(args: argparse.Namespace) -> None:
                 args.per_beta_start
                 + (1.0 - args.per_beta_start) * (global_step / max(1, args.total_steps)),
             )
-            batch, indices, weights = replay.sample(args.batch_size, beta=beta)
+            goal_batch_size = 0
+            if args.goal_buffer_size > 0 and goal_fraction > 0.0 and goal_buffer:
+                desired = int(args.batch_size * goal_fraction)
+                if desired > 0:
+                    goal_batch_size = min(desired, len(goal_buffer), args.batch_size)
+            per_batch_size = args.batch_size - goal_batch_size
+
+            per_batch: List[Transition] = []
+            per_indices = np.array([], dtype=np.int64)
+            per_weights = np.array([], dtype=np.float32)
+            if per_batch_size > 0:
+                per_batch, per_indices, per_weights = replay.sample(per_batch_size, beta=beta)
+            goal_samples: List[Transition] = []
+            if goal_batch_size > 0:
+                goal_samples = random.sample(list(goal_buffer), goal_batch_size)
+
+            batch = per_batch + goal_samples
+            if not batch:
+                continue
+
+            weights_list: List[np.ndarray] = []
+            if per_batch_size > 0:
+                weights_list.append(per_weights)
+            if goal_batch_size > 0:
+                weights_list.append(np.ones(goal_batch_size, dtype=np.float32))
+            weights_arr = (
+                np.concatenate(weights_list)
+                if weights_list
+                else np.ones(len(batch), dtype=np.float32)
+            )
+
             states = torch.tensor(np.stack([t.state for t in batch]), dtype=torch.float32, device=device)
             actions = torch.tensor([t.action for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
             rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
@@ -231,11 +288,13 @@ def train(args: argparse.Namespace) -> None:
                 np.stack([t.next_state for t in batch]), dtype=torch.float32, device=device
             )
             dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-            weights_t = torch.tensor(weights, dtype=torch.float32, device=device).unsqueeze(1)
+            weights_t = torch.tensor(weights_arr, dtype=torch.float32, device=device).unsqueeze(1)
 
             q_values = q_net(states).gather(1, actions)
             with torch.no_grad():
-                next_q = target_net(next_states).max(1, keepdim=True)[0]
+                # Double DQN target: action from online net, value from target net.
+                next_actions = torch.argmax(q_net(next_states), dim=1, keepdim=True)
+                next_q = target_net(next_states).gather(1, next_actions)
                 target = rewards + args.gamma * (1.0 - dones) * next_q
 
             td_errors = target - q_values
@@ -244,11 +303,20 @@ def train(args: argparse.Namespace) -> None:
             loss.backward()
             nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
             optimizer.step()
-            replay.update_priorities(indices, td_errors.detach().cpu().numpy().squeeze())
+            if per_batch_size > 0:
+                replay.update_priorities(
+                    per_indices,
+                    td_errors[:per_batch_size].detach().cpu().numpy().squeeze(),
+                )
             td_error_history.append(td_errors.abs().mean().detach().cpu().item())
             target_value_history.append(target.abs().mean().detach().cpu().item())
 
-        if global_step % args.target_update == 0:
+        if args.tau < 1.0:
+            with torch.no_grad():
+                tau = args.tau
+                for target_param, param in zip(target_net.parameters(), q_net.parameters()):
+                    target_param.data.mul_(1.0 - tau).add_(tau * param.data)
+        elif global_step % args.target_update == 0:
             target_net.load_state_dict(q_net.state_dict())
 
     progress.close()
@@ -427,7 +495,37 @@ def build_parser() -> argparse.ArgumentParser:
         default=50_000,
         help="Number of global steps to decay epsilon from start to final (ignored if --epsilon is set).",
     )
+    parser.add_argument(
+        "--epsilon-restart-value",
+        type=float,
+        default=0.5,
+        help="Exploration value to use during warm restarts when success drops.",
+    )
+    parser.add_argument(
+        "--epsilon-restart-threshold",
+        type=float,
+        default=0.7,
+        help="Trigger warm restart when rolling success rate falls below this value.",
+    )
+    parser.add_argument(
+        "--epsilon-restart-duration",
+        type=int,
+        default=20_000,
+        help="Duration in steps to keep epsilon warmed up once triggered.",
+    )
+    parser.add_argument(
+        "--epsilon-restart-cooldown",
+        type=int,
+        default=50_000,
+        help="Minimum steps between warm restarts.",
+    )
     parser.add_argument("--target-update", type=int, default=1_000)
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=1.0,
+        help="Polyak averaging factor for soft target updates (<1 enables soft updates).",
+    )
     parser.add_argument(
         "--max-grad-norm",
         type=float,
@@ -442,6 +540,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of completed tasks before forcing an environment reset (1 = reset every task).",
+    )
+    parser.add_argument(
+        "--goal-buffer-size",
+        type=int,
+        default=5_000,
+        help="Max transitions kept from successful episodes for balanced replay.",
+    )
+    parser.add_argument(
+        "--goal-buffer-fraction",
+        type=float,
+        default=0.25,
+        help="Fraction of each batch drawn from the goal buffer (0 disables).",
     )
     return parser
 

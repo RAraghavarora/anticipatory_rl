@@ -11,8 +11,8 @@ from gymnasium import Env, spaces
 Coord = Tuple[int, int]
 
 
-OBJECT_NAMES = ["obj_a", "obj_b"]
-RECEPTACLE_LIST = ["rec_a", "rec_b"]
+OBJECT_NAMES = ["obj_a", "obj_b", "obj_c", "obj_d"]
+RECEPTACLE_LIST = ["rec_a", "rec_b", "rec_c"]
 
 
 @dataclass
@@ -41,11 +41,11 @@ class SimpleGridEnv(Env):
 
     def __init__(
         self,
-        grid_size: int = 4,
+        grid_size: int = 6,
         max_task_steps: int = 200,
         success_reward: float = 50.0,
         num_objects: int = len(OBJECT_NAMES),
-        correct_pick_bonus: float = 1.0,
+        correct_pick_bonus: float = 0.0,
         distance_reward: bool = False,
         distance_reward_scale: float = 1.0,
     ) -> None:
@@ -64,8 +64,19 @@ class SimpleGridEnv(Env):
         self.active_count = max(1, min(num_objects, self.max_objects))
         self.active_objects = OBJECT_NAMES[: self.active_count]
         self.receptacles = {
-            "rec_a": (0, 0),
-            "rec_b": (self.grid_size - 1, self.grid_size - 1),
+            "rec_a": [(0, 0), (1, 0), (0, 1), (1, 1)],
+            "rec_b": [
+                (self.grid_size - 2, 0),
+                (self.grid_size - 1, 0),
+                (self.grid_size - 2, 1),
+                (self.grid_size - 1, 1),
+            ],
+            "rec_c": [
+                (0, self.grid_size - 2),
+                (1, self.grid_size - 2),
+                (0, self.grid_size - 1),
+                (1, self.grid_size - 1),
+            ],
         }
         obs_dim = self._feature_length()
         self.observation_space = spaces.Box(
@@ -114,7 +125,7 @@ class SimpleGridEnv(Env):
 
     def step(self, action: int):
         self._task_steps += 1
-        reward = -1.0
+        reward = -0.05
         success = False
         horizon = False
 
@@ -122,19 +133,20 @@ class SimpleGridEnv(Env):
         prev_target_dist = self._distance_to_target_receptacle()
 
         if action == self.MOVE_UP:
-            self._move_agent(0, -1)
+            reward += self._move_agent(0, -1)
         elif action == self.MOVE_DOWN:
-            self._move_agent(0, 1)
+            reward += self._move_agent(0, 1)
         elif action == self.MOVE_LEFT:
-            self._move_agent(-1, 0)
+            reward += self._move_agent(-1, 0)
         elif action == self.MOVE_RIGHT:
-            self._move_agent(1, 0)
+            reward += self._move_agent(1, 0)
         elif action == self.PICK:
             picked = self._handle_pick()
-            if picked == self.target_object:
-                reward += self.correct_pick_bonus
+            if picked is None:
+                reward -= 1.0
         elif action == self.PLACE:
-            self._handle_place()
+            if not self._handle_place():
+                reward -= 1.0
 
         if self.distance_reward:
             if self.state.carrying == self.target_object:
@@ -148,9 +160,9 @@ class SimpleGridEnv(Env):
                     prev_obj_dist = new_dist
                 reward += self.distance_reward_scale * (prev_obj_dist - new_dist)
 
-        target_coord = self.receptacles[self.target_receptacle]
+        target_tiles = self.receptacles[self.target_receptacle]
         obj_pos = self._object_position(self.target_object)
-        if obj_pos == target_coord:
+        if obj_pos in target_tiles:
             reward = self.success_reward
             success = True
             self._resample_task()
@@ -162,13 +174,15 @@ class SimpleGridEnv(Env):
         return self._obs(), reward, success, horizon, self._info(success=success)
 
     # ------------------------------------------------------------------ Helpers
-    def _move_agent(self, dx: int, dy: int) -> None:
+    def _move_agent(self, dx: int, dy: int) -> float:
         ax, ay = self.state.agent
         nx = np.clip(ax + dx, 0, self.grid_size - 1)
         ny = np.clip(ay + dy, 0, self.grid_size - 1)
+        penalty = -1.0 if (nx == ax and ny == ay) else 0.0
         self.state.agent = (nx, ny)
         if self.state.carrying is not None:
             self.state.objects[self.state.carrying] = (nx, ny)
+        return penalty
 
     def _handle_pick(self) -> Optional[str]:
         if self.state.carrying is not None:
@@ -179,11 +193,12 @@ class SimpleGridEnv(Env):
                 return name
         return None
 
-    def _handle_place(self) -> None:
+    def _handle_place(self) -> bool:
         if self.state.carrying is None:
-            return
+            return False
         self.state.objects[self.state.carrying] = self.state.agent
         self.state.carrying = None
+        return True
 
     def _validate_coord(self, coord: Coord) -> Coord:
         x, y = coord
@@ -213,12 +228,12 @@ class SimpleGridEnv(Env):
             if not rec_choices:
                 rec_choices = RECEPTACLE_LIST
         rec = self._rng.choice(rec_choices)
-        target_coord = self.receptacles[rec]
+        target_tiles = self.receptacles[rec]
         attempts = 0
-        while self.state.objects.get(obj) == target_coord and attempts < 10:
+        while self.state.objects.get(obj) in target_tiles and attempts < 10:
             obj = self._rng.choice(self.active_objects)
             rec = self._rng.choice(rec_choices)
-            target_coord = self.receptacles[rec]
+            target_tiles = self.receptacles[rec]
             attempts += 1
         self.target_object = obj
         self.target_receptacle = rec
@@ -273,8 +288,8 @@ class SimpleGridEnv(Env):
         return self._distance(self.state.agent, obj_pos)
 
     def _distance_to_target_receptacle(self) -> int | None:
-        target_coord = self.receptacles[self.target_receptacle]
-        return self._distance(self.state.agent, target_coord)
+        tiles = self.receptacles[self.target_receptacle]
+        return min(self._distance(self.state.agent, tile) for tile in tiles)
 
     def _feature_length(self) -> int:
         grid = self.grid_size
