@@ -11,43 +11,69 @@ from typing import Deque, List, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
 
-from anticipatory_rl.envs.simple_grid_env import SimpleGridEnv
+from anticipatory_rl.envs.simple_grid_image_env import SimpleGridImageEnv
+
+
+
+class SimpleGridCNN(BaseFeaturesExtractor):
+    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 256):
+        super().__init__(observation_space, features_dim)
+        channels, height, width = observation_space.shape
+        self.conv = nn.Sequential(
+            nn.Conv2d(channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+        with torch.no_grad():
+            dummy = torch.zeros(1, channels, height, width)
+            conv_out = self.conv(dummy).shape[1]
+        self.proj = nn.Sequential(
+            nn.Linear(conv_out, features_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return self.proj(self.conv(observations))
 
 
 class SimpleGridWrapper(gym.Wrapper):
     """Wrapper to ensure SimpleGridEnv follows Gym API and resets properly."""
     
-    def __init__(self, env: SimpleGridEnv):
+    def __init__(self, env: SimpleGridImageEnv, tasks_per_episode: int = 1):
         super().__init__(env)
-        self._max_steps_per_task = 100  # Maximum steps before forced reset
-        self._current_steps = 0
+        self._tasks_per_episode = max(1, tasks_per_episode)
+        self._tasks_completed = 0
     
     def reset(self, **kwargs):
-        self._current_steps = 0
+        self._tasks_completed = 0
         obs, info = self.env.reset(**kwargs)
         return obs, info
     
     def step(self, action):
-        self._current_steps += 1
         obs, reward, success, horizon, info = self.env.step(action)
-        
-        # Convert to standard Gym API: (obs, reward, terminated, truncated, info)
-        terminated = success  # Task completed successfully
-        truncated = horizon or (self._current_steps >= self._max_steps_per_task)  # Max steps reached
-        
-        # Add success flag to info for metrics
+        terminated = False
+        truncated = horizon
+
+        if success:
+            self._tasks_completed += 1
+            if self._tasks_completed >= self._tasks_per_episode:
+                terminated = True
+                self._tasks_completed = 0
+
+        if truncated:
+            self._tasks_completed = 0
+
         info["success"] = success
-        
-        # Auto-reset if episode is done
-        if terminated or truncated:
-            self._current_steps = 0
-        
         return obs, reward, terminated, truncated, info
 
 
@@ -60,10 +86,10 @@ def make_env(
     distance_reward_scale: float | None = None,
 ) -> DummyVecEnv:
     def _init():
-        env = SimpleGridEnv(
+        env = SimpleGridImageEnv(
             success_reward=success_reward if success_reward is not None else args.success_reward,
             num_objects=num_objects,
-            grid_size=3,
+            grid_size=args.grid_size,
             correct_pick_bonus=args.correct_pick_bonus,
             distance_reward=args.distance_reward,
             distance_reward_scale=distance_reward_scale
@@ -71,7 +97,7 @@ def make_env(
             else args.distance_reward_scale,
         )
         # Wrap with SimpleGridWrapper for proper Gym API and auto-reset
-        env = SimpleGridWrapper(env)
+        env = SimpleGridWrapper(env, tasks_per_episode=args.tasks_per_episode)
         env.reset(seed=seed)
         return env
 
@@ -109,35 +135,55 @@ class MetricsCallback(BaseCallback):
         self.episode_returns: List[float] = []
         self.task_lengths: List[int] = []
         self.success_flags: List[float] = []
-        self._running_returns: np.ndarray | None = None
-        self._running_lengths: np.ndarray | None = None
+        self._task_returns: np.ndarray | None = None
+        self._task_lengths_accum: np.ndarray | None = None
+        self.kl_history: List[float] = []
+        self.value_loss_history: List[float] = []
+        self.critic_mean_history: List[float] = []
 
     def _on_training_start(self) -> None:
         envs = self.training_env.num_envs
-        self._running_returns = np.zeros(envs, dtype=np.float32)
-        self._running_lengths = np.zeros(envs, dtype=np.int32)
+        self._task_returns = np.zeros(envs, dtype=np.float32)
+        self._task_lengths_accum = np.zeros(envs, dtype=np.int32)
 
     def _on_step(self) -> bool:
         rewards: np.ndarray = self.locals["rewards"]
         dones: np.ndarray = self.locals["dones"]
         infos: Sequence[dict] = self.locals.get("infos", [{} for _ in range(len(dones))])
         self.step_rewards.extend(rewards.tolist())
-        if self._running_returns is None or self._running_lengths is None:
+        if self._task_returns is None or self._task_lengths_accum is None:
             envs = len(rewards)
-            self._running_returns = np.zeros(envs, dtype=np.float32)
-            self._running_lengths = np.zeros(envs, dtype=np.int32)
-        self._running_returns += rewards
-        self._running_lengths += 1
+            self._task_returns = np.zeros(envs, dtype=np.float32)
+            self._task_lengths_accum = np.zeros(envs, dtype=np.int32)
+        self._task_returns += rewards
+        self._task_lengths_accum += 1
         for idx, done in enumerate(dones):
-            if done:
-                self.episode_returns.append(float(self._running_returns[idx]))
-                self.task_lengths.append(int(self._running_lengths[idx]))
-                success = float(infos[idx].get("success", False))
-                self.success_flags.append(success)
-                self._running_returns[idx] = 0.0
-                self._running_lengths[idx] = 0
+            info_success = bool(infos[idx].get("success", False))
+            if info_success:
+                self.episode_returns.append(float(self._task_returns[idx]))
+                self.task_lengths.append(int(self._task_lengths_accum[idx]))
+                self.success_flags.append(1.0)
+                self._task_returns[idx] = 0.0
+                self._task_lengths_accum[idx] = 0
+            elif done:
+                self.episode_returns.append(float(self._task_returns[idx]))
+                self.task_lengths.append(int(self._task_lengths_accum[idx]))
+                self.success_flags.append(0.0)
+                self._task_returns[idx] = 0.0
+                self._task_lengths_accum[idx] = 0
         self._log_rollups()
         return True
+
+    def _on_rollout_end(self) -> None:
+        approx_kl = self.logger.name_to_value.get("train/approx_kl")
+        if approx_kl is not None:
+            self.kl_history.append(float(approx_kl))
+        value_loss = self.logger.name_to_value.get("train/value_loss")
+        if value_loss is not None:
+            self.value_loss_history.append(float(value_loss))
+        if hasattr(self.model, "rollout_buffer") and self.model.rollout_buffer.values is not None:
+            critic_mean = float(np.mean(self.model.rollout_buffer.values))
+            self.critic_mean_history.append(critic_mean)
 
     def _log_rollups(self) -> None:
         window_slice = slice(-self.window, None)
@@ -164,6 +210,7 @@ class MetricsCallback(BaseCallback):
         fig.savefig(self.plot_path)
         plt.close(fig)
         self._save_task_length_plot()
+        self._save_diagnostics_plot()
 
     def _save_task_length_plot(self, window: int = 100) -> None:
         if not self.task_lengths:
@@ -183,6 +230,53 @@ class MetricsCallback(BaseCallback):
         plt.savefig(plot_path)
         plt.close()
         print(f"Saved avg task length plot to {plot_path}")
+
+    def _save_diagnostics_plot(self) -> None:
+        if not self.episode_returns and not self.kl_history and not self.value_loss_history:
+            return
+        rows = 2
+        cols = 2
+        fig, axes = plt.subplots(rows, cols, figsize=(12, 8))
+        axes = axes.flatten()
+
+        if self.episode_returns:
+            axes[0].plot(self.episode_returns, linewidth=0.8)
+            axes[0].set_title("Return per Task")
+            axes[0].set_xlabel("Task")
+            axes[0].set_ylabel("Return")
+        else:
+            axes[0].set_visible(False)
+
+        if self.kl_history:
+            axes[1].plot(self.kl_history, linewidth=0.8, color="tab:orange")
+            axes[1].set_title("Approx KL per Rollout")
+            axes[1].set_xlabel("Rollout")
+            axes[1].set_ylabel("KL")
+        else:
+            axes[1].set_visible(False)
+
+        if self.critic_mean_history:
+            axes[2].plot(self.critic_mean_history, linewidth=0.8, color="tab:green")
+            axes[2].set_title("Critic Value Mean")
+            axes[2].set_xlabel("Rollout")
+            axes[2].set_ylabel("V(s)")
+        else:
+            axes[2].set_visible(False)
+
+        if self.value_loss_history:
+            axes[3].plot(self.value_loss_history, linewidth=0.8, color="tab:red")
+            axes[3].set_title("Value Loss")
+            axes[3].set_xlabel("Rollout")
+            axes[3].set_ylabel("Loss")
+        else:
+            axes[3].set_visible(False)
+
+        fig.tight_layout()
+        diag_path = self.plot_path.with_name(self.plot_path.stem.replace("_metrics", "_diagnostics") + ".png")
+        diag_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(diag_path)
+        plt.close(fig)
+        print(f"Saved diagnostics plot to {diag_path}")
 
 
 class SuccessReplayCallback(BaseCallback):
@@ -267,7 +361,11 @@ def _build_model(
     *,
     ent_coef: float,
 ) -> PPO:
-    policy_kwargs = dict(net_arch=[args.hidden_dim, args.hidden_dim])
+    policy_kwargs = dict(
+        features_extractor_class=SimpleGridCNN,
+        features_extractor_kwargs={"features_dim": args.hidden_dim},
+        net_arch=dict(pi=[args.hidden_dim], vf=[args.hidden_dim]),
+    )
     device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
     return PPO(
         "MlpPolicy",
@@ -290,7 +388,10 @@ def _build_model(
 
 
 def train(args: argparse.Namespace) -> None:
-    metrics_path = args.output.with_name(args.output.stem + "_metrics.png")
+    run_dir = Path("runs") / f"{args.grid_size}_ppo_{args.num_objects}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    output_path = args.output if args.output.is_absolute() else run_dir / args.output
+    metrics_path = run_dir / f"{output_path.stem}_metrics.png"
     metrics_cb = MetricsCallback(metrics_path)
 
     curriculum_enabled = args.num_objects > 1 and args.curriculum_single_steps > 0
@@ -349,8 +450,8 @@ def train(args: argparse.Namespace) -> None:
         progress_bar=True,
         reset_num_timesteps=False,
     )
-    model.save(str(args.output))
-    print(f"Saved PPO weights to {args.output}")
+    model.save(str(output_path))
+    print(f"Saved PPO weights to {output_path}")
     metrics_cb.save_plot()
     print(f"Saved training curves to {metrics_path}")
 
@@ -371,6 +472,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--num-objects", type=int, default=2)
     parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument(
+        "--tasks-per-episode",
+        type=int,
+        default=1,
+        help="Number of tasks grouped into a single episode termination signal.",
+    )
     parser.add_argument(
         "--curriculum-single-steps",
         type=int,
@@ -444,8 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Scale for the distance-based shaping reward.",
     )
+    parser.add_argument("--grid-size", type=int, default=3)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--output", type=Path, default=Path("runs") / "simple_grid_ppo.zip")
+    parser.add_argument("--output", type=Path, default=Path("simple_grid_ppo.zip"))
     return parser
 
 
