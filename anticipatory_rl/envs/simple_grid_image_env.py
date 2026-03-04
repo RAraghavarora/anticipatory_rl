@@ -1,4 +1,4 @@
-"""SimpleGrid variant with image-style one-hot observations."""
+"""SimpleGrid variant with MiniWorld-inspired image observations."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from gymnasium import Env, spaces
+from PIL import Image, ImageDraw
 
 Coord = Tuple[int, int]
 
@@ -29,6 +30,12 @@ DEFAULT_OBJECT_COLOR = np.array([0.7, 0.7, 0.7], dtype=np.float32)
 DEFAULT_RECEPTACLE_COLOR = np.array([0.8, 0.4, 0.4], dtype=np.float32)
 AGENT_COLOR = np.array([0.2, 0.3, 0.95], dtype=np.float32)
 AGENT_WITH_OBJECT_COLOR = np.array([0.95, 0.9, 0.1], dtype=np.float32)
+
+BACKGROUND_RGB = (110, 207, 246)
+ROOM_RGB = (128, 128, 128)
+AGENT_TRIANGLE_RGB = (180, 30, 30)
+AGENT_TRIANGLE_OUTLINE = (60, 0, 0)
+OBJECT_OUTLINE_RGB = (10, 10, 10)
 
 
 @dataclass
@@ -64,6 +71,8 @@ class SimpleGridImageEnv(Env):
         correct_pick_bonus: float = 1.0,
         distance_reward: bool = False,
         distance_reward_scale: float = 1.0,
+        render_tile_px: int = 24,
+        render_margin_px: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.grid_size = grid_size
@@ -94,11 +103,16 @@ class SimpleGridImageEnv(Env):
                 (1, self.grid_size - 1),
             ],
         }
+        self.tile_px = max(4, int(render_tile_px))
+        self.margin_px = (
+            max(2, int(render_margin_px)) if render_margin_px is not None else self.tile_px
+        )
+        self.render_size = self.grid_size * self.tile_px + 2 * self.margin_px
         channels = self._channel_count()
         self.observation_space = spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(channels, self.grid_size, self.grid_size),
+            shape=(channels, self.render_size, self.render_size),
             dtype=np.float32,
         )
         self.state = SimpleGridState(agent=(0, 0), objects={}, carrying=None)
@@ -254,48 +268,12 @@ class SimpleGridImageEnv(Env):
         return self.state.objects.get(name, self.state.agent)
 
     def _encode_grid(self) -> np.ndarray:
-        grid = np.zeros((self._channel_count(), self.grid_size, self.grid_size), dtype=np.float32)
-        color_grid = grid[:3]
-
-        def paint(coord: Coord | None, color: np.ndarray, alpha: float = 1.0) -> None:
-            if coord is None:
-                return
-            x, y = coord
-            blended = (1.0 - alpha) * color_grid[:, y, x] + alpha * color
-            color_grid[:, y, x] = np.clip(blended, 0.0, 1.0)
-
-        # Draw receptacles with a lighter alpha so their colors remain visible under objects.
-        for rec_name, tiles in self.receptacles.items():
-            color = RECEPTACLE_COLORS.get(rec_name, DEFAULT_RECEPTACLE_COLOR)
-            for coord in tiles:
-                paint(coord, color, alpha=0.4)
-
-        # Draw static objects (not currently carried).
-        for name in OBJECT_NAMES:
-            if name not in self.active_objects or self.state.carrying == name:
-                continue
-            coord = self.state.objects.get(name)
-            color = OBJECT_COLORS.get(name, DEFAULT_OBJECT_COLOR)
-            paint(coord, color, alpha=0.8)
-
-        # Draw carried object as a halo at the agent position so its identity is preserved.
-        if self.state.carrying is not None:
-            coord = self.state.agent
-            color = OBJECT_COLORS.get(self.state.carrying, DEFAULT_OBJECT_COLOR)
-            paint(coord, color, alpha=0.7)
-
-        # Finally draw the agent itself (distinct color when holding something).
-        agent_color = AGENT_WITH_OBJECT_COLOR if self.state.carrying else AGENT_COLOR
-        paint(self.state.agent, agent_color, alpha=1.0)
-
-        target_pos = self._object_position(self.target_object)
-        if target_pos is not None:
-            grid[3, target_pos[1], target_pos[0]] = 1.0
-
-        target_rec_tiles = self.receptacles[self.target_receptacle]
-        for rx, ry in target_rec_tiles:
-            grid[4, ry, rx] = 1.0
-
+        frame = self._render_top_view()
+        height, width, _ = frame.shape
+        grid = np.zeros((self._channel_count(), height, width), dtype=np.float32)
+        grid[:3] = frame.transpose(2, 0, 1)
+        grid[3] = self._object_mask(self.target_object, height, width)
+        grid[4] = self._receptacle_mask(self.target_receptacle, height, width)
         return grid
 
     def _distance(self, a: Coord, b: Coord) -> int:
@@ -334,6 +312,97 @@ class SimpleGridImageEnv(Env):
             )
             if coord not in exclude:
                 return coord
+
+    def _tile_bounds(self, coord: Coord) -> Tuple[int, int, int, int]:
+        x, y = coord
+        x0 = self.margin_px + x * self.tile_px
+        y0 = self.margin_px + y * self.tile_px
+        x1 = x0 + self.tile_px
+        y1 = y0 + self.tile_px
+        return x0, y0, x1, y1
+
+    def _render_top_view(self) -> np.ndarray:
+        size = self.render_size
+        tile_px = self.tile_px
+        margin = self.margin_px
+        img = Image.new("RGB", (size, size), BACKGROUND_RGB)
+        draw = ImageDraw.Draw(img)
+
+        draw.rectangle(
+            [margin, margin, size - margin - 1, size - margin - 1],
+            fill=ROOM_RGB,
+        )
+
+        for rec_name, tiles in self.receptacles.items():
+            color = self._color_bytes(RECEPTACLE_COLORS.get(rec_name, DEFAULT_RECEPTACLE_COLOR))
+            for tile in tiles:
+                x0, y0, x1, y1 = self._tile_bounds(tile)
+                draw.rectangle([x0, y0, x1 - 1, y1 - 1], fill=color)
+
+        obj_size = int(tile_px * 0.55)
+        obj_offset = max(1, (tile_px - obj_size) // 2)
+        for name in self.active_objects:
+            if name == self.state.carrying:
+                continue
+            coord = self.state.objects.get(name)
+            if coord is None:
+                continue
+            color = self._color_bytes(OBJECT_COLORS.get(name, DEFAULT_OBJECT_COLOR))
+            x0, y0, _, _ = self._tile_bounds(coord)
+            x0 += obj_offset
+            y0 += obj_offset
+            x1 = x0 + obj_size
+            y1 = y0 + obj_size
+            draw.rectangle([x0, y0, x1, y1], fill=color, outline=OBJECT_OUTLINE_RGB, width=2)
+
+        ax, ay = self.state.agent
+        center_x = margin + ax * tile_px + tile_px // 2
+        center_y = margin + ay * tile_px + tile_px // 2
+        half = tile_px // 2
+        triangle = [
+            (center_x - half // 2, center_y - half // 2),
+            (center_x - half // 2, center_y + half // 2),
+            (center_x + half // 2, center_y),
+        ]
+        draw.polygon(triangle, fill=AGENT_TRIANGLE_RGB, outline=AGENT_TRIANGLE_OUTLINE)
+
+        if self.state.carrying is not None:
+            carry_color = self._color_bytes(OBJECT_COLORS.get(self.state.carrying, DEFAULT_OBJECT_COLOR))
+            size_c = max(2, tile_px // 3)
+            draw.rectangle(
+                [
+                    center_x - size_c // 2,
+                    center_y - size_c // 2,
+                    center_x + size_c // 2,
+                    center_y + size_c // 2,
+                ],
+                outline=carry_color,
+                width=3,
+            )
+
+        frame = np.asarray(img, dtype=np.float32) / 255.0
+        return frame
+
+    def _object_mask(self, obj_name: str, height: int, width: int) -> np.ndarray:
+        mask = np.zeros((height, width), dtype=np.float32)
+        coord = self._object_position(obj_name)
+        if coord is None:
+            return mask
+        x0, y0, x1, y1 = self._tile_bounds(coord)
+        mask[y0:y1, x0:x1] = 1.0
+        return mask
+
+    def _receptacle_mask(self, rec_name: str, height: int, width: int) -> np.ndarray:
+        mask = np.zeros((height, width), dtype=np.float32)
+        for coord in self.receptacles[rec_name]:
+            x0, y0, x1, y1 = self._tile_bounds(coord)
+            mask[y0:y1, x0:x1] = 1.0
+        return mask
+
+    def _color_bytes(self, color: np.ndarray) -> Tuple[int, int, int]:
+        arr = np.asarray(color, dtype=np.float32)
+        arr = np.clip(arr, 0.0, 1.0)
+        return tuple(int(round(val * 255)) for val in arr[:3])
 
     def set_active_objects(self, count: int) -> None:
         count = max(1, min(count, self.max_objects))
