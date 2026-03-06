@@ -1,14 +1,28 @@
 import argparse
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
-from collections import Counter
 from tqdm import tqdm
 
 from anticipatory_rl.agents.simple_grid_image_dqn import ConvQNetwork
-from anticipatory_rl.envs.simple_grid_image_env import SimpleGridImageEnv
+from anticipatory_rl.envs.simple_grid_image_env import (
+    OBJECT_DISTRIBUTION,
+    OBJECT_SOURCE_DISTRIBUTION,
+    SURFACE_DISTRIBUTION,
+    SimpleGridImageEnv,
+)
+
+
+@dataclass
+class SampledTask:
+    task_type: str  # "move" or "clear"
+    object_name: Optional[str]
+    receptacle_name: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,6 +48,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Scaling for distance shaping.",
+    )
+    parser.add_argument(
+        "--clear-task-prob",
+        type=float,
+        default=0.0,
+        help="Probability of requesting clear-receptacle tasks.",
     )
     parser.add_argument(
         "--max-steps",
@@ -81,6 +101,7 @@ def make_env(args: argparse.Namespace, seed: int = 0) -> SimpleGridImageEnv:
         success_reward=args.success_reward,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
+        clear_task_prob=args.clear_task_prob,
     )
     env.reset(seed=seed)
     return env
@@ -107,53 +128,151 @@ def valid_action_mask(env: SimpleGridImageEnv) -> np.ndarray:
         mask[SimpleGridImageEnv.MOVE_UP] = False
     if ay >= grid_max:
         mask[SimpleGridImageEnv.MOVE_DOWN] = False
-    carrying = env.state.carrying
-    if carrying is None:
-        mask[SimpleGridImageEnv.PLACE] = False
-        can_pick = any(
-            coord == env.state.agent and obj in env.active_objects
-            for obj, coord in env.state.objects.items()
-        )
-        mask[SimpleGridImageEnv.PICK] = can_pick
-    else:
-        mask[SimpleGridImageEnv.PICK] = False
+    on_receptacle = any(env.state.agent in tiles for tiles in env.receptacles.values())
+    mask[SimpleGridImageEnv.PLACE] = bool(env.state.carrying) and on_receptacle
+    can_pick = any(
+        coord == env.state.agent
+        and obj in env.active_objects
+        and obj not in env.state.carrying
+        for obj, coord in env.state.objects.items()
+    )
+    mask[SimpleGridImageEnv.PICK] = can_pick
     return mask
 
 
-def render_observation(obs: np.ndarray, task_label: str, scale: int) -> Image.Image:
+def render_observation(
+    obs: np.ndarray,
+    task_label: str,
+    scale: int,
+    header: Optional[str] = None,
+) -> Image.Image:
     rgb = (np.transpose(obs[:3], (1, 2, 0)) * 255.0).clip(0, 255).astype(np.uint8)
     img = Image.fromarray(rgb).resize(
         (rgb.shape[1] * scale, rgb.shape[0] * scale), resample=Image.NEAREST
     )
-    banner_height = 12
+    banner_lines: List[str] = []
+    if header:
+        banner_lines.append(header)
+    banner_lines.append(f"{task_label}  (yellow=target obj, red=goal)")
+    # Compute banner height (12 px per line with small padding)
+    banner_height = 12 * len(banner_lines)
     if img.width > 0:
         banner = Image.new("RGB", (img.width, banner_height), color=(30, 30, 30))
         combined = Image.new("RGB", (img.width, img.height + banner_height))
         combined.paste(banner, (0, 0))
         combined.paste(img, (0, banner_height))
         draw = ImageDraw.Draw(combined)
-        draw.text((2, 1), f"{task_label}  (yellow=target obj, red=goal)", fill=(255, 255, 255))
+        for idx, line in enumerate(banner_lines):
+            draw.text((2, 1 + idx * 12), line, fill=(255, 255, 255))
         return combined
     return img
+
+
+def format_task_label(task: SampledTask) -> str:
+    if task.task_type == "clear":
+        return f"CLEAR {task.receptacle_name}"
+    return f"{task.object_name} → {task.receptacle_name}"
+
+
+def weighted_choice(
+    distribution: Mapping[str, float],
+    candidates: Sequence[str],
+    rng: np.random.Generator,
+) -> str:
+    if not candidates:
+        raise ValueError("Cannot sample from an empty candidate list.")
+    weights = np.array([max(distribution.get(name, 0.0), 0.0) for name in candidates], dtype=np.float64)
+    total = float(weights.sum())
+    if total <= 0:
+        return str(rng.choice(candidates))
+    probs = weights / total
+    return str(rng.choice(candidates, p=probs))
+
+
+def _eligible_receptacles(receptacles: Sequence[str], last_sampled: Optional[str]) -> List[str]:
+    if last_sampled is None or len(receptacles) <= 1:
+        return list(receptacles)
+    filtered = [rec for rec in receptacles if rec != last_sampled]
+    return filtered or list(receptacles)
+
+
+def sample_task_sequence(
+    env: SimpleGridImageEnv,
+    num_tasks: int,
+    rng: np.random.Generator,
+) -> List[SampledTask]:
+    if num_tasks <= 0:
+        return []
+    tasks: List[SampledTask] = []
+    last_rec: Optional[str] = None
+    active_objects = list(env.active_objects)
+    receptacles = list(env.receptacle_names)
+    clear_prob = getattr(env, "clear_task_prob", 0.0)
+    for _ in range(num_tasks):
+        if clear_prob > 0.0 and rng.random() < clear_prob:
+            rec_choices = _eligible_receptacles(receptacles, last_rec)
+            rec = weighted_choice(SURFACE_DISTRIBUTION, rec_choices, rng)
+            tasks.append(SampledTask("clear", None, rec))
+            last_rec = rec
+            continue
+        obj = weighted_choice(OBJECT_DISTRIBUTION, active_objects, rng)
+        source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
+        rec_choices = _eligible_receptacles(receptacles, last_rec)
+        rec = weighted_choice(source_dist, rec_choices, rng)
+        tasks.append(SampledTask("move", obj, rec))
+        last_rec = rec
+    return tasks
+
+
+def apply_sampled_task(env: SimpleGridImageEnv, task: SampledTask) -> Tuple[np.ndarray, dict]:
+    env.task_type = task.task_type
+    env.target_object = task.object_name
+    env.target_receptacle = task.receptacle_name
+    if hasattr(env, "_last_target_receptacle"):
+        env._last_target_receptacle = task.receptacle_name  # noqa: SLF001
+    if hasattr(env, "_task_steps"):
+        env._task_steps = 0  # noqa: SLF001
+    if hasattr(env, "_pending_auto_success") and hasattr(env, "_task_already_satisfied"):
+        env._pending_auto_success = env._task_already_satisfied()  # noqa: SLF001
+    return env._obs(), env._info()
 
 
 def main():
     args = parse_args()
     env = make_env(args, seed=args.seed)
     policy = load_policy(env, args)
-    obs, info = env.reset()
-    frames = []
-    rng = np.random.default_rng(42)
+    obs, info = env.reset(seed=args.seed)
+    frames: List[Image.Image] = []
+    action_rng = np.random.default_rng(42)
+    task_rng = np.random.default_rng(args.seed + 1)
+    sampled_tasks = sample_task_sequence(env, args.tasks_per_sequence, task_rng)
+    if not sampled_tasks:
+        print("No tasks sampled; set --tasks-per-sequence > 0 to evaluate the policy.")
+        return
 
-    tasks_finished = 0
-    task_frame_ranges: list[tuple[int, int, int]] = []
-    current_task_start = 0
+    obs, info = apply_sampled_task(env, sampled_tasks[0])
     tasks_since_reset = 0
-    task_history: list[tuple[str, str]] = []
+    current_task_idx = 0
+    current_task_steps = 0
+    current_task_start = 0
+    task_frame_ranges: List[Tuple[int, int, int]] = []
+    task_history: List[SampledTask] = []
+    task_results: List[dict] = []
+    successes = 0
+
     progress = tqdm(total=args.max_steps, desc="Inference rollout")
     for step in range(args.max_steps):
-        task_label = f"{env.target_object} → {env.target_receptacle}"
-        frames.append(render_observation(obs, task_label, args.render_upscale))
+        current_task = sampled_tasks[current_task_idx]
+        label = format_task_label(current_task)
+        header = f"Task {current_task_idx + 1}/{len(sampled_tasks)}"
+        frames.append(
+            render_observation(
+                obs,
+                label,
+                args.render_upscale,
+                header=header,
+            )
+        )
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
             q_values = policy(obs_tensor).squeeze(0).numpy()
@@ -161,38 +280,65 @@ def main():
         masked_q = q_values.copy()
         masked_q[~mask] = -np.inf
         greedy_action = int(masked_q.argmax()) if mask.any() else env.action_space.sample()
-        if args.random_action_prob > 0.0 and rng.random() < args.random_action_prob:
+        if args.random_action_prob > 0.0 and action_rng.random() < args.random_action_prob:
             action = env.action_space.sample()
         else:
             action = greedy_action
-        prev_target_obj = env.target_object
-        prev_target_rec = env.target_receptacle
+
         obs, reward, success, horizon, info = env.step(action)
         progress.update(1)
-        if success:
-            tasks_finished += 1
+        current_task_steps += 1
+
+        if success or horizon:
+            outcome = "COMPLETED" if success else "FAILED"
+            header = f"{outcome} • Task {current_task_idx + 1}/{len(sampled_tasks)}"
+            frames.append(
+                render_observation(
+                    obs,
+                    label,
+                    args.render_upscale,
+                    header=header,
+                )
+            )
+            task_frame_ranges.append((current_task_idx + 1, current_task_start, len(frames) - 1))
+            task_history.append(current_task)
+            if success:
+                successes += 1
+            task_results.append(
+                {
+                    "task": current_task,
+                    "task_type": current_task.task_type,
+                    "success": bool(success),
+                    "steps": current_task_steps,
+                }
+            )
+            current_task_idx += 1
             tasks_since_reset += 1
-            success_label = (
-                f"COMPLETED {prev_target_obj} → {prev_target_rec} "
-                f"({tasks_finished}/{args.tasks_per_sequence})"
-            )
-            frames.append(render_observation(obs, success_label, args.render_upscale))
-            task_frame_ranges.append(
-                (tasks_finished, current_task_start, len(frames) - 1)
-            )
-            task_history.append((prev_target_obj, prev_target_rec))
+            current_task_steps = 0
             current_task_start = len(frames)
-            if tasks_finished >= args.tasks_per_sequence:
+
+            if current_task_idx >= len(sampled_tasks):
                 break
-            if tasks_since_reset >= args.tasks_per_reset:
+
+            if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
                 obs, info = env.reset()
                 tasks_since_reset = 0
-                current_task_start = len(frames)
-        elif horizon:
-            obs, info = env.reset()
-            tasks_since_reset = 0
-            current_task_start = len(frames)
+
+            obs, info = apply_sampled_task(env, sampled_tasks[current_task_idx])
+
     progress.close()
+
+    attempted = len(task_results)
+    if attempted < len(sampled_tasks):
+        print(
+            f"Step budget exhausted before attempting all sampled tasks "
+            f"({attempted}/{len(sampled_tasks)} attempted). Increase --max-steps if needed."
+        )
+    if attempted > 0:
+        success_rate = successes / attempted
+        print(f"Policy success rate over sampled tasks: {successes}/{attempted} ({success_rate:.1%})")
+    else:
+        print("No sampled tasks were attempted within the allotted step budget.")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for idx, frame in enumerate(frames):
@@ -200,24 +346,38 @@ def main():
     output_path = args.output_dir.resolve()
     print(
         f"Saved {len(frames)} frames to {output_path} "
-        f"(completed {tasks_finished}/{args.tasks_per_sequence} tasks)"
+        f"(attempted {attempted}/{len(sampled_tasks)} sampled tasks)"
     )
     for task_idx, start_idx, end_idx in task_frame_ranges:
         print(f"Task {task_idx}: frames {start_idx}–{end_idx}")
     if task_history:
-        pair_counts = Counter(task_history)
-        total = sum(pair_counts.values())
-        print("Estimated task distribution (top 5 object → receptacle pairs):")
-        for (obj, rec), count in pair_counts.most_common(5):
-            prob = count / total
-            print(f"  {obj} → {rec}: {count} ({prob:.2%})")
-        object_counts = Counter(obj for obj, _ in task_history)
-        next_obj = object_counts.most_common(1)[0][0]
-        rec_counts = Counter(rec for obj, rec in task_history if obj == next_obj)
-        next_rec = rec_counts.most_common(1)[0][0]
-        print(f"Anticipated next task: move {next_obj} to {next_rec}")
+        move_history = [task for task in task_history if task.task_type == "move"]
+        clear_history = [task for task in task_history if task.task_type == "clear"]
+        if move_history:
+            pair_counts = Counter((task.object_name, task.receptacle_name) for task in move_history)
+            total = sum(pair_counts.values())
+            print("Estimated MOVE task distribution (top 5 object → receptacle pairs):")
+            for (obj, rec), count in pair_counts.most_common(5):
+                prob = count / total
+                print(f"  {obj} → {rec}: {count} ({prob:.2%})")
+            object_counts = Counter(task.object_name for task in move_history if task.object_name)
+            if object_counts:
+                next_obj = object_counts.most_common(1)[0][0]
+                rec_counts = Counter(
+                    task.receptacle_name for task in move_history if task.object_name == next_obj
+                )
+                if rec_counts:
+                    next_rec = rec_counts.most_common(1)[0][0]
+                    print(f"Anticipated next MOVE task: move {next_obj} to {next_rec}")
+        if clear_history:
+            rec_counts = Counter(task.receptacle_name for task in clear_history)
+            total_clear = sum(rec_counts.values())
+            print("Estimated CLEAR task distribution:")
+            for rec, count in rec_counts.most_common():
+                prob = count / total_clear
+                print(f"  clear {rec}: {count} ({prob:.2%})")
     else:
-        print("No task successes recorded; distribution unavailable.")
+        print("No sampled task attempts recorded; distribution unavailable.")
 
 
 if __name__ == "__main__":

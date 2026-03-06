@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -68,15 +68,15 @@ OBJECT_OUTLINE_RGB = (10, 10, 10)
 class SimpleGridState:
     agent: Coord
     objects: Dict[str, Coord]
-    carrying: str | None
+    carrying: List[str] = field(default_factory=list)
 
 
 class SimpleGridImageEnv(Env):
     """
     Deterministic NxN grid:
     - Agent moves with four cardinal actions.
-    - A single object can be picked up when the agent stands on it and dropped elsewhere.
-    - Goal is to place the object on the fixed target coordinate.
+    - Objects sit on receptacle tiles; the agent can pick up multiple objects (one per PICK) while co-located with them.
+    - Placement is restricted to receptacle tiles and yields success when the target object reaches its target surface.
     """
 
     metadata = {"render.modes": []}
@@ -99,6 +99,7 @@ class SimpleGridImageEnv(Env):
         distance_reward_scale: float = 1.0,
         render_tile_px: int = 24,
         render_margin_px: Optional[int] = None,
+        clear_task_prob: float = 0.0,
     ) -> None:
         super().__init__()
         self.grid_size = grid_size
@@ -109,14 +110,16 @@ class SimpleGridImageEnv(Env):
         self.distance_reward_scale = distance_reward_scale
         self.object_names = list(OBJECT_NAMES)
         self.receptacle_names = list(RECEPTACLE_LIST)
-        self.target_object: str = self.object_names[0]
+        self.target_object: str | None = self.object_names[0]
         self.target_receptacle: str = self.receptacle_names[0]
+        self.task_type: str = "move"
         self._last_target_receptacle: str | None = None
         self.action_space = spaces.Discrete(6)
         self.max_objects = len(self.object_names)
         self.active_count = max(1, min(num_objects, self.max_objects))
         self.active_objects = self.object_names[: self.active_count]
         self.receptacles: Dict[str, List[Coord]] = {name: [] for name in self.receptacle_names}
+        self._receptacle_tiles: Set[Coord] = set()
         self.tile_px = max(4, int(render_tile_px))
         self.margin_px = (
             max(2, int(render_margin_px)) if render_margin_px is not None else self.tile_px
@@ -129,8 +132,10 @@ class SimpleGridImageEnv(Env):
             shape=(channels, self.render_size, self.render_size),
             dtype=np.float32,
         )
-        self.state = SimpleGridState(agent=(0, 0), objects={}, carrying=None)
+        self.state = SimpleGridState(agent=(0, 0), objects={})
         self._rng = np.random.default_rng()
+        self.clear_task_prob = float(np.clip(clear_task_prob, 0.0, 1.0))
+        self._pending_auto_success = False
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
         super().reset(seed=seed)
@@ -145,9 +150,9 @@ class SimpleGridImageEnv(Env):
             agent = self._sample_coord()
 
         objects: Dict[str, Coord] = {}
-        occupied = {agent}
+        occupied: Set[Coord] = {agent}
         for name in self.active_objects:
-            coord = self._sample_coord(exclude=occupied)
+            coord = self._sample_receptacle_coord(exclude=occupied)
             objects[name] = coord
             occupied.add(coord)
 
@@ -162,13 +167,22 @@ class SimpleGridImageEnv(Env):
                 raise ValueError(f"Object '{obj_name}' is not active.")
             objects[obj_name] = agent
 
-        self.state = SimpleGridState(agent=agent, objects=objects, carrying=None)
+        self.state = SimpleGridState(agent=agent, objects=objects)
         self._last_target_receptacle = None
         self._resample_task()
         self._task_steps = 0
         return self._obs(), self._info()
 
     def step(self, action: int):
+        if self._pending_auto_success:
+            self._pending_auto_success = False
+            reward = self.success_reward
+            success = True
+            horizon = False
+            self._resample_task()
+            self._task_steps = 0
+            return self._obs(), reward, success, horizon, self._info(success=success)
+
         self._task_steps += 1
         reward = -1.0
         success = False
@@ -187,10 +201,10 @@ class SimpleGridImageEnv(Env):
             reward += self._move_agent(1, 0)
         elif action == self.PICK:
             picked = self._handle_pick()
-            if picked == self.target_object:
-                reward += self.correct_pick_bonus
-            elif picked is None:
+            if picked is None:
                 reward -= 5.0
+            elif self.task_type == "move" and picked == self.target_object:
+                reward += self.correct_pick_bonus
         elif action == self.PLACE:
             if not self._handle_place():
                 reward -= 5.0
@@ -199,13 +213,21 @@ class SimpleGridImageEnv(Env):
             reward += self._progress_shaping(prev_obj_dist, prev_target_dist)
 
         target_tiles = self.receptacles[self.target_receptacle]
-        obj_pos = self._object_position(self.target_object)
-        if obj_pos in target_tiles:
-            reward = self.success_reward
-            success = True
-            self._resample_task()
-            self._task_steps = 0
-        elif self._task_steps >= self.max_task_steps:
+        if self.task_type == "move":
+            obj_pos = self._object_position(self.target_object)
+            if obj_pos in target_tiles:
+                reward = self.success_reward
+                success = True
+                self._resample_task()
+                self._task_steps = 0
+        else:
+            if not self._objects_on_receptacle(self.target_receptacle):
+                reward = self.success_reward
+                success = True
+                self._resample_task()
+                self._task_steps = 0
+
+        if not success and self._task_steps >= self.max_task_steps:
             horizon = True
             self._resample_task()
             self._task_steps = 0
@@ -218,24 +240,30 @@ class SimpleGridImageEnv(Env):
         ny = np.clip(ay + dy, 0, self.grid_size - 1)
         penalty = -5.0 if (nx == ax and ny == ay) else 0.0
         self.state.agent = (nx, ny)
-        if self.state.carrying is not None:
-            self.state.objects[self.state.carrying] = (nx, ny)
+        if self.state.carrying:
+            for name in self.state.carrying:
+                self.state.objects[name] = (nx, ny)
         return penalty
 
     def _handle_pick(self) -> Optional[str]:
-        if self.state.carrying is not None:
-            return None
         for name, coord in self.state.objects.items():
-            if coord == self.state.agent and name in self.active_objects:
-                self.state.carrying = name
+            if (
+                coord == self.state.agent
+                and name in self.active_objects
+                and name not in self.state.carrying
+            ):
+                self.state.carrying.append(name)
+                self.state.objects[name] = self.state.agent
                 return name
         return None
 
     def _handle_place(self) -> bool:
-        if self.state.carrying is None:
+        if not self.state.carrying:
             return False
-        self.state.objects[self.state.carrying] = self.state.agent
-        self.state.carrying = None
+        if not self._coord_on_receptacle(self.state.agent):
+            return False
+        obj_name = self.state.carrying.pop()
+        self.state.objects[obj_name] = self.state.agent
         return True
 
     def _validate_coord(self, coord: Coord) -> Coord:
@@ -251,14 +279,24 @@ class SimpleGridImageEnv(Env):
         return {
             "agent": self.state.agent,
             "objects": dict(self.state.objects),
-            "carrying": self.state.carrying,
+            "carrying": list(self.state.carrying),
             "target_object": self.target_object,
             "target_receptacle": self.target_receptacle,
+            "task_type": self.task_type,
             "success": bool(success),
         }
 
     # ------------------------------------------------------------------ Task helpers
     def _resample_task(self) -> None:
+        if (
+            self.clear_task_prob > 0.0
+            and self._rng.random() < self.clear_task_prob
+        ):
+            if self._resample_clear_task():
+                return
+        self._resample_move_task()
+
+    def _resample_move_task(self) -> None:
         rec_choices: List[str] = list(self.receptacle_names)
         if self._last_target_receptacle is not None and len(self.receptacle_names) > 1:
             rec_choices = [r for r in self.receptacle_names if r != self._last_target_receptacle]
@@ -267,20 +305,35 @@ class SimpleGridImageEnv(Env):
         obj = self._weighted_choice(OBJECT_DISTRIBUTION, self.active_objects)
         source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
         rec = self._weighted_choice(source_dist, rec_choices)
-        target_tiles = self.receptacles[rec]
-        attempts = 0
-        while self.state.objects.get(obj) in target_tiles and attempts < 10:
-            obj = self._weighted_choice(OBJECT_DISTRIBUTION, self.active_objects)
-            source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
-            rec = self._weighted_choice(source_dist, rec_choices)
-            target_tiles = self.receptacles[rec]
-            attempts += 1
+        self.task_type = "move"
         self.target_object = obj
         self.target_receptacle = rec
         self._last_target_receptacle = rec
+        self._update_pending_auto_success()
 
-    def _object_position(self, name: str) -> Coord:
-        if self.state.carrying == name:
+    def _resample_clear_task(self) -> bool:
+        rec_choices: List[str] = list(self.receptacle_names)
+        rec = None
+        for _ in range(30):
+            candidate = self._weighted_choice(SURFACE_DISTRIBUTION, rec_choices)
+            if self._objects_on_receptacle(candidate):
+                rec = candidate
+                break
+        if rec is None:
+            if not rec_choices:
+                return False
+            rec = self._weighted_choice(SURFACE_DISTRIBUTION, rec_choices)
+        self.task_type = "clear"
+        self.target_object = None
+        self.target_receptacle = rec
+        self._last_target_receptacle = rec
+        self._update_pending_auto_success()
+        return True
+
+    def _object_position(self, name: str | None) -> Coord | None:
+        if name is None:
+            return None
+        if name in self.state.carrying:
             return self.state.agent
         return self.state.objects.get(name, self.state.agent)
 
@@ -291,12 +344,15 @@ class SimpleGridImageEnv(Env):
         grid[:3] = frame.transpose(2, 0, 1)
         grid[3] = self._object_mask(self.target_object, height, width)
         grid[4] = self._receptacle_mask(self.target_receptacle, height, width)
+        grid[5].fill(1.0 if self.task_type == "clear" else 0.0)
         return grid
 
     def _distance(self, a: Coord, b: Coord) -> int:
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
     def _distance_to_target_object(self) -> int | None:
+        if self.target_object is None:
+            return None
         obj_pos = self._object_position(self.target_object)
         if obj_pos is None:
             return None
@@ -307,7 +363,9 @@ class SimpleGridImageEnv(Env):
         return min(self._distance(self.state.agent, tile) for tile in tiles)
 
     def _progress_shaping(self, prev_obj_dist: int | None, prev_target_dist: int | None) -> float:
-        if self.state.carrying == self.target_object:
+        if self.task_type == "clear":
+            return 0.0
+        if self.target_object in self.state.carrying:
             new_dist = self._distance_to_target_receptacle()
             if prev_target_dist is None or new_dist is None:
                 return 0.0
@@ -318,7 +376,7 @@ class SimpleGridImageEnv(Env):
         return self.distance_reward_scale * (prev_obj_dist - new_dist)
 
     def _channel_count(self) -> int:
-        return 5
+        return 6
 
     def _sample_coord(self, exclude: Set[Coord] | None = None) -> Coord:
         exclude = exclude or set()
@@ -330,19 +388,90 @@ class SimpleGridImageEnv(Env):
             if coord not in exclude:
                 return coord
 
+    def _sample_receptacle_coord(self, exclude: Set[Coord] | None = None) -> Coord:
+        tiles = list(self._receptacle_tiles)
+        if not tiles:
+            return self._sample_coord(exclude)
+        exclude = exclude or set()
+        max_attempts = max(10, len(tiles) * 2)
+        for _ in range(max_attempts):
+            coord = tiles[int(self._rng.integers(len(tiles)))]
+            if coord not in exclude:
+                return coord
+        return tiles[int(self._rng.integers(len(tiles)))]
+
+    def _coord_on_receptacle(self, coord: Coord) -> bool:
+        return coord in self._receptacle_tiles
+
+    def _objects_on_receptacle(self, receptacle_name: str) -> List[str]:
+        tiles = self.receptacles[receptacle_name]
+        return [
+            name
+            for name, coord in self.state.objects.items()
+            if name in self.active_objects
+            and name not in self.state.carrying
+            and coord in tiles
+        ]
+
+    def _task_already_satisfied(self) -> bool:
+        if self.task_type == "move":
+            if self.target_object is None:
+                return False
+            obj_pos = self._object_position(self.target_object)
+            if obj_pos is None:
+                return False
+            return obj_pos in self.receptacles[self.target_receptacle]
+        return len(self._objects_on_receptacle(self.target_receptacle)) == 0
+
+    def _update_pending_auto_success(self) -> None:
+        self._pending_auto_success = self._task_already_satisfied()
+
+    def _place_receptacle_tiles(
+        self,
+        width: int,
+        height: int,
+        anchor: Coord,
+        used_tiles: Set[Coord],
+    ) -> List[Coord] | None:
+        max_x = self.grid_size - width
+        max_y = self.grid_size - height
+        if max_x < 0 or max_y < 0:
+            return None
+        anchor_x = max(0, min(anchor[0], max_x))
+        anchor_y = max(0, min(anchor[1], max_y))
+        candidates: List[Tuple[int, int]] = [
+            (x0, y0) for x0 in range(max_x + 1) for y0 in range(max_y + 1)
+        ]
+        candidates.sort(key=lambda pos: abs(pos[0] - anchor_x) + abs(pos[1] - anchor_y))
+        for x0, y0 in candidates:
+            tiles = [(x0 + dx, y0 + dy) for dx in range(width) for dy in range(height)]
+            if all(tile not in used_tiles for tile in tiles):
+                return tiles
+        return None
+
     def _generate_receptacles(self) -> None:
         shapes = [(1, 1), (2, 1), (1, 2), (2, 2)]
         receptacles: Dict[str, List[Coord]] = {}
+        used_tiles: Set[Coord] = set()
         for name in self.receptacle_names:
-            width, height = shapes[int(self._rng.integers(len(shapes)))]
             anchor = self._anchor_for_receptacle(name)
-            max_x = max(0, self.grid_size - width)
-            max_y = max(0, self.grid_size - height)
-            x0 = int(np.clip(anchor[0], 0, max_x))
-            y0 = int(np.clip(anchor[1], 0, max_y))
-            tiles = [(x0 + dx, y0 + dy) for dx in range(width) for dy in range(height)]
-            receptacles[name] = tiles
+            placed = False
+            for _ in range(25):
+                width, height = shapes[int(self._rng.integers(len(shapes)))]
+                tiles = self._place_receptacle_tiles(width, height, anchor, used_tiles)
+                if tiles is not None:
+                    receptacles[name] = tiles
+                    used_tiles.update(tiles)
+                    placed = True
+                    break
+            if not placed:
+                tiles = self._place_receptacle_tiles(1, 1, anchor, used_tiles)
+                if tiles is None:
+                    raise RuntimeError("Unable to place non-overlapping receptacles on the grid.")
+                receptacles[name] = tiles
+                used_tiles.update(tiles)
         self.receptacles = receptacles
+        self._receptacle_tiles = set(used_tiles)
 
     def _anchor_for_receptacle(self, name: str) -> Coord:
         size = self.grid_size
@@ -397,7 +526,7 @@ class SimpleGridImageEnv(Env):
         obj_size = int(tile_px * 0.55)
         obj_offset = max(1, (tile_px - obj_size) // 2)
         for name in self.active_objects:
-            if name == self.state.carrying:
+            if name in self.state.carrying:
                 continue
             coord = self.state.objects.get(name)
             if coord is None:
@@ -421,8 +550,9 @@ class SimpleGridImageEnv(Env):
         ]
         draw.polygon(triangle, fill=AGENT_TRIANGLE_RGB, outline=AGENT_TRIANGLE_OUTLINE)
 
-        if self.state.carrying is not None:
-            carry_color = self._color_bytes(OBJECT_COLORS.get(self.state.carrying, DEFAULT_OBJECT_COLOR))
+        if self.state.carrying:
+            last_carried = self.state.carrying[-1]
+            carry_color = self._color_bytes(OBJECT_COLORS.get(last_carried, DEFAULT_OBJECT_COLOR))
             size_c = max(2, tile_px // 3)
             draw.rectangle(
                 [
@@ -438,8 +568,10 @@ class SimpleGridImageEnv(Env):
         frame = np.asarray(img, dtype=np.float32) / 255.0
         return frame
 
-    def _object_mask(self, obj_name: str, height: int, width: int) -> np.ndarray:
+    def _object_mask(self, obj_name: str | None, height: int, width: int) -> np.ndarray:
         mask = np.zeros((height, width), dtype=np.float32)
+        if obj_name is None:
+            return mask
         coord = self._object_position(obj_name)
         if coord is None:
             return mask
@@ -469,13 +601,13 @@ class SimpleGridImageEnv(Env):
         occupied.add(self.state.agent)
         for name in self.object_names:
             if name not in self.active_objects and name in self.state.objects:
-                if self.state.carrying == name:
-                    self.state.carrying = None
+                if name in self.state.carrying:
+                    self.state.carrying.remove(name)
                 occupied.discard(self.state.objects[name])
                 del self.state.objects[name]
         for name in self.active_objects:
             if name not in self.state.objects:
-                coord = self._sample_coord(exclude=occupied)
+                coord = self._sample_receptacle_coord(exclude=occupied)
                 self.state.objects[name] = coord
                 occupied.add(coord)
         self._resample_task()

@@ -158,6 +158,7 @@ def train(args: argparse.Namespace) -> None:
             num_objects=args.num_objects,
             distance_reward=True,
             distance_reward_scale=args.distance_reward_scale,
+            clear_task_prob=args.clear_task_prob,
         )
 
     env = VectorEnv(make_env, max(1, args.num_envs))
@@ -543,6 +544,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tasks-per-reset", type=int, default=1)
     parser.add_argument("--goal-buffer-size", type=int, default=5_000)
     parser.add_argument("--goal-buffer-fraction", type=float, default=0.25)
+    parser.add_argument(
+        "--clear-task-prob",
+        type=float,
+        default=0.0,
+        help="Probability of sampling a clear-receptacle task instead of a move task.",
+    )
     return parser
 
 

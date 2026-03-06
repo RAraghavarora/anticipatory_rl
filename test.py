@@ -1,159 +1,163 @@
+import argparse
+from pathlib import Path
+
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 from PIL import Image
-from pathlib import Path
-from anticipatory_rl.envs.simple_grid_env import SimpleGridEnv
-from anticipatory_rl.agents.simple_grid_dqn import QNetwork
 
-OUTPUT_DIR = Path("runs/dqn_frames")
-STATE_DICT = Path("runs/6_dqn/simple_grid_dqn.pt")
-HIDDEN_DIM = 192
-GRID_SIZE = 6
-NUM_OBJECTS = 2
-FORCE_FIXED_START = False
-AGENT_SPAWN = (1, 1)
-OBJECT_UNDER_AGENT = True
-# Keep evaluation environment identical to the training run.
-SUCCESS_REWARD = 10.0
-DISTANCE_REWARD_SCALE = 0.7
-# Low epsilon encourages recovery if the greedy policy lands on an out-of-distribution
-# state; masking handles obviously invalid moves.
-RANDOM_ACTION_PROB = 0.05
+from anticipatory_rl.agents.simple_grid_image_dqn import ConvQNetwork
+from anticipatory_rl.envs.simple_grid_image_env import SimpleGridImageEnv
 
 
-def make_env(seed=44):
-    env = SimpleGridEnv(
-        grid_size=GRID_SIZE,
-        num_objects=NUM_OBJECTS,
-        success_reward=SUCCESS_REWARD,
-        correct_pick_bonus=1.0,
-        distance_reward=True,
-        distance_reward_scale=DISTANCE_REWARD_SCALE,
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Render raw observations seen by the image DQN.")
+    parser.add_argument(
+        "--state-dict",
+        type=Path,
+        default=Path("runs/10_image_dqn/simple_grid_image_dqn.pt"),
+        help="Checkpoint path for ConvQNetwork weights.",
     )
-    env.reset(seed=seed)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("runs/image_dqn_frames_exact"),
+        help="Directory where frames will be written.",
+    )
+    parser.add_argument("--grid-size", type=int, default=10, help="Environment grid size.")
+    parser.add_argument("--num-objects", type=int, default=2, help="Active objects inside the env.")
+    parser.add_argument("--success-reward", type=float, default=10.0, help="Success reward.")
+    parser.add_argument(
+        "--distance-reward-scale",
+        type=float,
+        default=1.0,
+        help="Scaling applied to distance shaping.",
+    )
+    parser.add_argument(
+        "--clear-task-prob",
+        type=float,
+        default=0.0,
+        help="Probability of sampling clear tasks in the environment.",
+    )
+    parser.add_argument("--hidden-dim", type=int, default=256, help="MLP head size.")
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=600,
+        help="Maximum number of primitive steps to capture.",
+    )
+    parser.add_argument(
+        "--random-action-prob",
+        type=float,
+        default=0.05,
+        help="Epsilon used during inference rollouts.",
+    )
+    parser.add_argument("--seed", type=int, default=0, help="Environment reset seed.")
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=4,
+        help="Nearest-neighbor upscale factor when saving frames (1 = raw).",
+    )
+    return parser.parse_args()
+
+
+def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
+    env = SimpleGridImageEnv(
+        grid_size=args.grid_size,
+        num_objects=args.num_objects,
+        success_reward=args.success_reward,
+        distance_reward=True,
+        distance_reward_scale=args.distance_reward_scale,
+        clear_task_prob=args.clear_task_prob,
+    )
+    env.reset(seed=args.seed)
     return env
 
 
-def load_policy(env):
-    input_dim = env.observation_space.shape[0]
-    policy = QNetwork(input_dim=input_dim, hidden_dim=HIDDEN_DIM)
-    state_dict = torch.load(STATE_DICT, map_location="cpu")
+def load_policy(env: SimpleGridImageEnv, args: argparse.Namespace) -> ConvQNetwork:
+    obs_shape = env.observation_space.shape
+    policy = ConvQNetwork(obs_shape, hidden_dim=args.hidden_dim, num_actions=env.action_space.n)
+    state_dict = torch.load(args.state_dict, map_location="cpu")
     policy.load_state_dict(state_dict)
     policy.eval()
     return policy
 
 
-def render_frame(env, target_object_override=None, target_receptacle_override=None):
-    grid = env.grid_size
-    fig, ax = plt.subplots(figsize=(3, 3))
-    ax.set_xlim(-0.5, grid - 0.5)
-    ax.set_ylim(-0.5, grid - 0.5)
-    ax.set_xticks(range(grid))
-    ax.set_yticks(range(grid))
-    ax.grid(True, color="lightgray", linewidth=0.5)
-    ax.set_facecolor("white")
-    ax.invert_yaxis()
-
-    target_obj = target_object_override if target_object_override is not None else env.target_object
-    target_rec = target_receptacle_override if target_receptacle_override is not None else env.target_receptacle
-
-    for name, coord in env.receptacles.items():
-        color = "lightgreen" if name == target_rec else "lightgray"
-        rect = plt.Rectangle((coord[0]-0.5, coord[1]-0.5), 1, 1, color=color, alpha=0.35)
-        ax.add_patch(rect)
-        ax.text(coord[0], coord[1], name, ha="center", va="center", fontsize=6, color="darkgreen")
-
-    for obj, coord in env.state.objects.items():
-        color = "red" if obj == target_obj else "orange"
-        ax.scatter(coord[0], coord[1], s=300, c=color, marker="o", edgecolors="black")
-        ax.text(coord[0], coord[1], obj, color="white", ha="center", va="center", fontsize=6)
-
-    ax.scatter(env.state.agent[0], env.state.agent[1], c="blue", s=300, marker="*", edgecolors="black")
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    fig.tight_layout(pad=0.1)
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    image = np.asarray(renderer.buffer_rgba())[:, :, :3]
-    plt.close(fig)
-    return Image.fromarray(image)
-
-
-def reset_env(env: SimpleGridEnv, *, seed: int | None = None) -> tuple[np.ndarray, dict]:
-    if FORCE_FIXED_START:
-        options = {"agent_pos": AGENT_SPAWN}
-        if OBJECT_UNDER_AGENT:
-            options["object_under_agent"] = True
-        return env.reset(seed=seed, options=options)
-    return env.reset(seed=seed)
-
-
-def valid_action_mask(env: SimpleGridEnv) -> np.ndarray:
+def valid_action_mask(env: SimpleGridImageEnv) -> np.ndarray:
     mask = np.ones(env.action_space.n, dtype=bool)
     ax, ay = env.state.agent
     grid_max = env.grid_size - 1
     if ax <= 0:
-        mask[SimpleGridEnv.MOVE_LEFT] = False
+        mask[SimpleGridImageEnv.MOVE_LEFT] = False
     if ax >= grid_max:
-        mask[SimpleGridEnv.MOVE_RIGHT] = False
+        mask[SimpleGridImageEnv.MOVE_RIGHT] = False
     if ay <= 0:
-        mask[SimpleGridEnv.MOVE_UP] = False
+        mask[SimpleGridImageEnv.MOVE_UP] = False
     if ay >= grid_max:
-        mask[SimpleGridEnv.MOVE_DOWN] = False
+        mask[SimpleGridImageEnv.MOVE_DOWN] = False
 
-    carrying = env.state.carrying
-    if carrying is None:
-        mask[SimpleGridEnv.PLACE] = False
-        can_pick = any(
-            coord == env.state.agent and obj in env.active_objects
-            for obj, coord in env.state.objects.items()
-        )
-        mask[SimpleGridEnv.PICK] = can_pick
-    else:
-        mask[SimpleGridEnv.PICK] = False
-
+    on_receptacle = any(env.state.agent in tiles for tiles in env.receptacles.values())
+    mask[SimpleGridImageEnv.PLACE] = bool(env.state.carrying) and on_receptacle
+    can_pick = any(
+        coord == env.state.agent
+        and obj in env.active_objects
+        and obj not in env.state.carrying
+        for obj, coord in env.state.objects.items()
+    )
+    mask[SimpleGridImageEnv.PICK] = can_pick
     return mask
 
 
-env = make_env()
-policy = load_policy(env)
-obs, info = reset_env(env)
-frames = []
-max_steps = GRID_SIZE * GRID_SIZE * 5
+def render_raw_observation(obs: np.ndarray, scale: int) -> Image.Image:
+    rgb = (np.transpose(obs[:3], (1, 2, 0)) * 255.0).clip(0, 255).astype(np.uint8)
+    img = Image.fromarray(rgb)
+    if scale > 1:
+        w, h = img.size
+        img = img.resize((w * scale, h * scale), resample=Image.NEAREST)
+    return img
 
-rng = np.random.default_rng(0)
 
-for _ in range(max_steps):
-    frames.append(render_frame(env))
-    obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-    with torch.no_grad():
-        q_values = policy(obs_tensor).squeeze(0).numpy()
+def main() -> None:
+    args = parse_args()
+    env = make_env(args)
+    policy = load_policy(env, args)
+    obs, info = env.reset(seed=args.seed)
+    frames: list[Image.Image] = []
+    rng = np.random.default_rng(0)
+
+    for step in range(args.max_steps):
+        frames.append(render_raw_observation(obs, args.scale))
+        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            q_values = policy(obs_tensor).squeeze(0).numpy()
         mask = valid_action_mask(env)
         masked_q = q_values.copy()
         masked_q[~mask] = -np.inf
         greedy_action = int(masked_q.argmax()) if mask.any() else env.action_space.sample()
-        if RANDOM_ACTION_PROB > 0.0 and rng.random() < RANDOM_ACTION_PROB:
+        if args.random_action_prob > 0.0 and rng.random() < args.random_action_prob:
             action = env.action_space.sample()
         else:
             action = greedy_action
-    print(f"Action taken: {action}")
-    print(q_values, q_values.argmax())
-    # Save target values before step (since they get resampled after success)
-    old_target_object = env.target_object
-    old_target_receptacle = env.target_receptacle
-    obs, reward, success, horizon, info = env.step(action)
-    if success:
-        print("SUCCESS! Rendering final frame with original task colors")
-        frames.append(render_frame(env, target_object_override=old_target_object, target_receptacle_override=old_target_receptacle))
-        break
-    if horizon:
-        obs, info = reset_env(env)
 
-print(f"Number of frames: {len(frames)}")
+        prev_task_type = getattr(env, "task_type", "move")
+        prev_obj = env.target_object
+        prev_rec = env.target_receptacle
+        obs, reward, success, horizon, info = env.step(action)
+        if success:
+            frames.append(render_raw_observation(obs, args.scale))
+            if prev_task_type == "clear":
+                print(f"Cleared {prev_rec} at step {step}")
+            else:
+                print(f"Completed {prev_obj} → {prev_rec} at step {step}")
+            break
+        if horizon:
+            obs, info = env.reset()
 
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-for idx, frame in enumerate(frames):
-    frame_path = OUTPUT_DIR / f"frame_{idx:04d}.png"
-    frame.save(frame_path)
-print(f"Saved {len(frames)} frames to {OUTPUT_DIR}")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    for idx, frame in enumerate(frames):
+        frame.save(args.output_dir / f"frame_{idx:04d}.png")
+    print(f"Saved {len(frames)} frames to {args.output_dir.resolve()}")
+
+
+if __name__ == "__main__":
+    main()

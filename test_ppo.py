@@ -49,18 +49,24 @@ def render_frame(env: SimpleGridImageEnv, *, target_obj: str | None = None, targ
     ax.set_facecolor("white")
     ax.invert_yaxis()
 
+    task_type = getattr(env, "task_type", "move")
     task_obj = target_obj if target_obj is not None else env.target_object
     task_rec = target_rec if target_rec is not None else env.target_receptacle
 
-    for name, coord in env.receptacles.items():
+    for name, tiles in env.receptacles.items():
         color = "lightgreen" if name == task_rec else "lightgray"
-        rect = plt.Rectangle((coord[0] - 0.5, coord[1] - 0.5), 1, 1, color=color, alpha=0.35)
-        ax.add_patch(rect)
-        ax.text(coord[0], coord[1], name, ha="center", va="center", fontsize=6, color="darkgreen")
+        for coord in tiles:
+            rect = plt.Rectangle((coord[0] - 0.5, coord[1] - 0.5), 1, 1, color=color, alpha=0.25)
+            ax.add_patch(rect)
+        centroid_x = sum(tile[0] for tile in tiles) / len(tiles)
+        centroid_y = sum(tile[1] for tile in tiles) / len(tiles)
+        ax.text(centroid_x, centroid_y, name, ha="center", va="center", fontsize=6, color="darkgreen")
 
     for obj, coord in env.state.objects.items():
-        color = "red" if obj == task_obj else "orange"
-        ax.scatter(coord[0], coord[1], s=300, c=color, marker="o", edgecolors="black")
+        base_color = "orange"
+        if task_type == "move" and obj == task_obj:
+            base_color = "red"
+        ax.scatter(coord[0], coord[1], s=300, c=base_color, marker="o", edgecolors="black")
         ax.text(coord[0], coord[1], obj, color="white", ha="center", va="center", fontsize=6)
 
     ax.scatter(env.state.agent[0], env.state.agent[1], c="blue", s=300, marker="*", edgecolors="black")
@@ -90,6 +96,7 @@ def main() -> None:
         frames.append(render_frame(env))
         action, _ = model.predict(obs, deterministic=True)
         print(f"Step {step}: Action taken: {action}")
+        old_task_type = env.task_type
         old_target_obj = env.target_object
         old_target_rec = env.target_receptacle
         obs, reward, success, horizon, info = env.step(int(action))
@@ -103,7 +110,10 @@ def main() -> None:
                     target_rec=old_target_rec,
                 )
             )
-            print(f"Task {tasks_completed} succeeded at step {step}")
+            if old_task_type == "clear":
+                print(f"Task {tasks_completed}: cleared {old_target_rec} at step {step}")
+            else:
+                print(f"Task {tasks_completed}: moved {old_target_obj} to {old_target_rec} at step {step}")
             if tasks_completed >= TASKS_PER_EPISODE:
                 break
         if horizon:
