@@ -3,28 +3,54 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
+import yaml
 from gymnasium import Env, spaces
 from PIL import Image, ImageDraw
 
 Coord = Tuple[int, int]
 
 
-OBJECT_NAMES = ["obj_a", "obj_b", "obj_c", "obj_d"]
-RECEPTACLE_LIST = ["rec_a", "rec_b", "rec_c"]
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "config.yaml"
+
+
+def _load_config(path: Path) -> Dict[str, Dict[str, float]]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+CONFIG = _load_config(CONFIG_PATH)
+
+DEFAULT_OBJECT_NAMES = ["obj_a", "obj_b", "obj_c", "obj_d", "obj_e"]
+DEFAULT_RECEPTACLE_NAMES = ["rec_a", "rec_b", "rec_c", "rec_d", "rec_e"]
+
+OBJECT_DISTRIBUTION: Dict[str, float] = CONFIG.get("object_distribution", {})
+SURFACE_DISTRIBUTION: Dict[str, float] = CONFIG.get("surface_distribution", {})
+OBJECT_SOURCE_DISTRIBUTION: Dict[str, Dict[str, float]] = CONFIG.get(
+    "object_source_distribution", {}
+)
+
+OBJECT_NAMES = list(OBJECT_DISTRIBUTION.keys()) or DEFAULT_OBJECT_NAMES
+RECEPTACLE_LIST = list(SURFACE_DISTRIBUTION.keys()) or DEFAULT_RECEPTACLE_NAMES
 
 OBJECT_COLORS: Dict[str, np.ndarray] = {
-    "obj_a": np.array([0.2, 0.8, 0.2], dtype=np.float32),
-    "obj_b": np.array([0.0, 0.6, 0.9], dtype=np.float32),
-    "obj_c": np.array([0.85, 0.35, 0.95], dtype=np.float32),
-    "obj_d": np.array([0.95, 0.55, 0.2], dtype=np.float32),
+    "water_bottle": np.array([0.1, 0.6, 0.95], dtype=np.float32),
+    "tiffin_box": np.array([0.9, 0.3, 0.25], dtype=np.float32),
+    "apple": np.array([0.3, 0.8, 0.2], dtype=np.float32),
+    "soda_can": np.array([0.95, 0.7, 0.2], dtype=np.float32),
+    "drinking_glass": np.array([0.7, 0.4, 0.95], dtype=np.float32),
 }
 RECEPTACLE_COLORS: Dict[str, np.ndarray] = {
-    "rec_a": np.array([0.9, 0.3, 0.3], dtype=np.float32),
-    "rec_b": np.array([0.95, 0.7, 0.2], dtype=np.float32),
-    "rec_c": np.array([0.3, 0.8, 0.6], dtype=np.float32),
+    "kitchen_table": np.array([0.9, 0.35, 0.35], dtype=np.float32),
+    "kitchen_counter": np.array([0.95, 0.7, 0.2], dtype=np.float32),
+    "dining_table": np.array([0.3, 0.8, 0.6], dtype=np.float32),
+    "study_table": np.array([0.35, 0.35, 0.9], dtype=np.float32),
+    "shelf": np.array([0.8, 0.6, 0.2], dtype=np.float32),
 }
 DEFAULT_OBJECT_COLOR = np.array([0.7, 0.7, 0.7], dtype=np.float32)
 DEFAULT_RECEPTACLE_COLOR = np.array([0.8, 0.4, 0.4], dtype=np.float32)
@@ -81,28 +107,16 @@ class SimpleGridImageEnv(Env):
         self.correct_pick_bonus = correct_pick_bonus
         self.distance_reward = distance_reward
         self.distance_reward_scale = distance_reward_scale
-        self.target_object: str = OBJECT_NAMES[0]
-        self.target_receptacle: str = RECEPTACLE_LIST[0]
+        self.object_names = list(OBJECT_NAMES)
+        self.receptacle_names = list(RECEPTACLE_LIST)
+        self.target_object: str = self.object_names[0]
+        self.target_receptacle: str = self.receptacle_names[0]
         self._last_target_receptacle: str | None = None
         self.action_space = spaces.Discrete(6)
-        self.max_objects = len(OBJECT_NAMES)
+        self.max_objects = len(self.object_names)
         self.active_count = max(1, min(num_objects, self.max_objects))
-        self.active_objects = OBJECT_NAMES[: self.active_count]
-        self.receptacles = {
-            "rec_a": [(0, 0), (1, 0), (0, 1), (1, 1)],
-            "rec_b": [
-                (self.grid_size - 2, 0),
-                (self.grid_size - 1, 0),
-                (self.grid_size - 2, 1),
-                (self.grid_size - 1, 1),
-            ],
-            "rec_c": [
-                (0, self.grid_size - 2),
-                (1, self.grid_size - 2),
-                (0, self.grid_size - 1),
-                (1, self.grid_size - 1),
-            ],
-        }
+        self.active_objects = self.object_names[: self.active_count]
+        self.receptacles: Dict[str, List[Coord]] = {name: [] for name in self.receptacle_names}
         self.tile_px = max(4, int(render_tile_px))
         self.margin_px = (
             max(2, int(render_margin_px)) if render_margin_px is not None else self.tile_px
@@ -122,6 +136,7 @@ class SimpleGridImageEnv(Env):
         super().reset(seed=seed)
         self._rng = np.random.default_rng(seed)
         options = options or {}
+        self._generate_receptacles()
 
         agent_override = options.get("agent_pos")
         if agent_override is not None:
@@ -244,18 +259,20 @@ class SimpleGridImageEnv(Env):
 
     # ------------------------------------------------------------------ Task helpers
     def _resample_task(self) -> None:
-        obj = self._rng.choice(self.active_objects)
-        rec_choices = RECEPTACLE_LIST
-        if self._last_target_receptacle is not None and len(RECEPTACLE_LIST) > 1:
-            rec_choices = [r for r in RECEPTACLE_LIST if r != self._last_target_receptacle]
+        rec_choices: List[str] = list(self.receptacle_names)
+        if self._last_target_receptacle is not None and len(self.receptacle_names) > 1:
+            rec_choices = [r for r in self.receptacle_names if r != self._last_target_receptacle]
             if not rec_choices:
-                rec_choices = RECEPTACLE_LIST
-        rec = self._rng.choice(rec_choices)
+                rec_choices = list(self.receptacle_names)
+        obj = self._weighted_choice(OBJECT_DISTRIBUTION, self.active_objects)
+        source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
+        rec = self._weighted_choice(source_dist, rec_choices)
         target_tiles = self.receptacles[rec]
         attempts = 0
         while self.state.objects.get(obj) in target_tiles and attempts < 10:
-            obj = self._rng.choice(self.active_objects)
-            rec = self._rng.choice(rec_choices)
+            obj = self._weighted_choice(OBJECT_DISTRIBUTION, self.active_objects)
+            source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
+            rec = self._weighted_choice(source_dist, rec_choices)
             target_tiles = self.receptacles[rec]
             attempts += 1
         self.target_object = obj
@@ -312,6 +329,44 @@ class SimpleGridImageEnv(Env):
             )
             if coord not in exclude:
                 return coord
+
+    def _generate_receptacles(self) -> None:
+        shapes = [(1, 1), (2, 1), (1, 2), (2, 2)]
+        receptacles: Dict[str, List[Coord]] = {}
+        for name in self.receptacle_names:
+            width, height = shapes[int(self._rng.integers(len(shapes)))]
+            anchor = self._anchor_for_receptacle(name)
+            max_x = max(0, self.grid_size - width)
+            max_y = max(0, self.grid_size - height)
+            x0 = int(np.clip(anchor[0], 0, max_x))
+            y0 = int(np.clip(anchor[1], 0, max_y))
+            tiles = [(x0 + dx, y0 + dy) for dx in range(width) for dy in range(height)]
+            receptacles[name] = tiles
+        self.receptacles = receptacles
+
+    def _anchor_for_receptacle(self, name: str) -> Coord:
+        size = self.grid_size
+        if name == "kitchen_table":
+            return (0, 0)
+        if name == "kitchen_counter":
+            return (size - 2, 0)
+        if name == "dining_table":
+            return (size - 2, size - 2)
+        if name == "study_table":
+            return (0, size - 2)
+        if name == "shelf":
+            return (size // 2 - 1, size // 2 - 1)
+        return (0, 0)
+
+    def _weighted_choice(self, distribution: Dict[str, float], candidates: Sequence[str]) -> str:
+        if not candidates:
+            raise ValueError("No candidates available for sampling.")
+        weights = np.array([max(distribution.get(name, 0.0), 0.0) for name in candidates], dtype=np.float64)
+        total = float(weights.sum())
+        if total <= 0:
+            return str(self._rng.choice(candidates))
+        probs = weights / total
+        return str(self._rng.choice(candidates, p=probs))
 
     def _tile_bounds(self, coord: Coord) -> Tuple[int, int, int, int]:
         x, y = coord
@@ -409,10 +464,10 @@ class SimpleGridImageEnv(Env):
         if count == self.active_count:
             return
         self.active_count = count
-        self.active_objects = OBJECT_NAMES[:count]
+        self.active_objects = self.object_names[:count]
         occupied = set(self.state.objects.values())
         occupied.add(self.state.agent)
-        for name in OBJECT_NAMES:
+        for name in self.object_names:
             if name not in self.active_objects and name in self.state.objects:
                 if self.state.carrying == name:
                     self.state.carrying = None

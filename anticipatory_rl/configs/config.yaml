@@ -1,7 +1,7 @@
 task_distribution:
-  bring_single: 0.5
-  bring_pair: 0.25
-  clear_receptacle: 0.25
+  bring_single: 1.0
+  bring_pair: 0.0
+  clear_receptacle: 0.0
 
 object_distribution:
   water_bottle: 0.25
