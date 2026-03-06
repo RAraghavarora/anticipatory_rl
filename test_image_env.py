@@ -52,8 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clear-task-prob",
         type=float,
-        default=0.0,
-        help="Probability of requesting clear-receptacle tasks.",
+        default=None,
+        help="Override probability of requesting clear-receptacle tasks (default from configs/config.yaml).",
     )
     parser.add_argument(
         "--max-steps",
@@ -361,14 +361,6 @@ def main():
                 prob = count / total
                 print(f"  {obj} → {rec}: {count} ({prob:.2%})")
             object_counts = Counter(task.object_name for task in move_history if task.object_name)
-            if object_counts:
-                next_obj = object_counts.most_common(1)[0][0]
-                rec_counts = Counter(
-                    task.receptacle_name for task in move_history if task.object_name == next_obj
-                )
-                if rec_counts:
-                    next_rec = rec_counts.most_common(1)[0][0]
-                    print(f"Anticipated next MOVE task: move {next_obj} to {next_rec}")
         if clear_history:
             rec_counts = Counter(task.receptacle_name for task in clear_history)
             total_clear = sum(rec_counts.values())

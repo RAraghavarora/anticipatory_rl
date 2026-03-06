@@ -35,8 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clear-task-prob",
         type=float,
-        default=0.0,
-        help="Probability of sampling clear tasks in the environment.",
+        default=None,
+        help="Override probability of sampling clear tasks (default from configs/config.yaml).",
     )
     parser.add_argument("--hidden-dim", type=int, default=256, help="MLP head size.")
     parser.add_argument(

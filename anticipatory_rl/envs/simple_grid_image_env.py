@@ -34,9 +34,11 @@ SURFACE_DISTRIBUTION: Dict[str, float] = CONFIG.get("surface_distribution", {})
 OBJECT_SOURCE_DISTRIBUTION: Dict[str, Dict[str, float]] = CONFIG.get(
     "object_source_distribution", {}
 )
+TASK_DISTRIBUTION: Dict[str, float] = CONFIG.get("task_distribution", {})
 
 OBJECT_NAMES = list(OBJECT_DISTRIBUTION.keys()) or DEFAULT_OBJECT_NAMES
 RECEPTACLE_LIST = list(SURFACE_DISTRIBUTION.keys()) or DEFAULT_RECEPTACLE_NAMES
+DEFAULT_CLEAR_TASK_PROB = float(TASK_DISTRIBUTION.get("clear_receptacle", 0.0))
 
 OBJECT_COLORS: Dict[str, np.ndarray] = {
     "water_bottle": np.array([0.1, 0.6, 0.95], dtype=np.float32),
@@ -99,7 +101,7 @@ class SimpleGridImageEnv(Env):
         distance_reward_scale: float = 1.0,
         render_tile_px: int = 24,
         render_margin_px: Optional[int] = None,
-        clear_task_prob: float = 0.0,
+        clear_task_prob: Optional[float] = None,
     ) -> None:
         super().__init__()
         self.grid_size = grid_size
@@ -134,7 +136,9 @@ class SimpleGridImageEnv(Env):
         )
         self.state = SimpleGridState(agent=(0, 0), objects={})
         self._rng = np.random.default_rng()
-        self.clear_task_prob = float(np.clip(clear_task_prob, 0.0, 1.0))
+        default_prob = float(np.clip(DEFAULT_CLEAR_TASK_PROB, 0.0, 1.0))
+        prob = default_prob if clear_task_prob is None else clear_task_prob
+        self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
         self._pending_auto_success = False
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):

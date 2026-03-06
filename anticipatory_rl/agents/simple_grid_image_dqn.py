@@ -547,8 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--clear-task-prob",
         type=float,
-        default=0.0,
-        help="Probability of sampling a clear-receptacle task instead of a move task.",
+        default=None,
+        help="Override probability of sampling clear tasks (default pulled from configs/config.yaml).",
     )
     return parser
 
