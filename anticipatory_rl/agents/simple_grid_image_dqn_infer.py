@@ -22,6 +22,7 @@ from tqdm import tqdm
 from anticipatory_rl.agents.simple_grid_image_dqn import ConvQNetwork
 from anticipatory_rl.envs.simple_grid_image_env import (
     OBJECT_DISTRIBUTION,
+    OBJECT_NAMES,
     OBJECT_SOURCE_DISTRIBUTION,
     SURFACE_DISTRIBUTION,
     SimpleGridImageEnv,
@@ -41,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("runs/image_dqn_pixels"), help="Where to store saved pixel arrays.")
     parser.add_argument("--total-steps", type=int, default=5_000, help="Number of primitive steps to execute.")
     parser.add_argument("--grid-size", type=int, default=10)
-    parser.add_argument("--num-objects", type=int, default=4)
+    parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument("--success-reward", type=float, default=10.0)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--hidden-dim", type=int, default=256)

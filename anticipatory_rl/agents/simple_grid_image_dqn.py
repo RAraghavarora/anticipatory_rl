@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from anticipatory_rl.envs.simple_grid_image_env import SimpleGridImageEnv
+from anticipatory_rl.envs.simple_grid_image_env import OBJECT_NAMES, SimpleGridImageEnv
 
 
 class ConvQNetwork(nn.Module):
@@ -521,7 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
-    parser.add_argument("--num-objects", type=int, default=4)
+    parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument("--num-envs", type=int, default=1, help="Parallel env instances to sample each step.")
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--per-alpha", type=float, default=0.6)

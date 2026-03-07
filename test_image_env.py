@@ -12,6 +12,7 @@ from tqdm import tqdm
 from anticipatory_rl.agents.simple_grid_image_dqn import ConvQNetwork
 from anticipatory_rl.envs.simple_grid_image_env import (
     OBJECT_DISTRIBUTION,
+    OBJECT_NAMES,
     OBJECT_SOURCE_DISTRIBUTION,
     SURFACE_DISTRIBUTION,
     SimpleGridImageEnv,
@@ -41,7 +42,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--hidden-dim", type=int, default=256, help="Hidden size of the MLP head.")
     parser.add_argument("--grid-size", type=int, default=10, help="Grid size used by the env.")
-    parser.add_argument("--num-objects", type=int, default=2, help="Number of active objects.")
+    parser.add_argument(
+        "--num-objects",
+        type=int,
+        default=len(OBJECT_NAMES),
+        help="Number of active objects.",
+    )
     parser.add_argument("--success-reward", type=float, default=10.0, help="Success reward in env.")
     parser.add_argument(
         "--distance-reward-scale",
