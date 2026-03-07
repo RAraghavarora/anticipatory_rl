@@ -350,25 +350,7 @@ def main():
     )
     for task_idx, start_idx, end_idx in task_frame_ranges:
         print(f"Task {task_idx}: frames {start_idx}–{end_idx}")
-    if task_history:
-        move_history = [task for task in task_history if task.task_type == "move"]
-        clear_history = [task for task in task_history if task.task_type == "clear"]
-        if move_history:
-            pair_counts = Counter((task.object_name, task.receptacle_name) for task in move_history)
-            total = sum(pair_counts.values())
-            print("Estimated MOVE task distribution (top 5 object → receptacle pairs):")
-            for (obj, rec), count in pair_counts.most_common(5):
-                prob = count / total
-                print(f"  {obj} → {rec}: {count} ({prob:.2%})")
-            object_counts = Counter(task.object_name for task in move_history if task.object_name)
-        if clear_history:
-            rec_counts = Counter(task.receptacle_name for task in clear_history)
-            total_clear = sum(rec_counts.values())
-            print("Estimated CLEAR task distribution:")
-            for rec, count in rec_counts.most_common():
-                prob = count / total_clear
-                print(f"  clear {rec}: {count} ({prob:.2%})")
-    else:
+    if not task_history:
         print("No sampled task attempts recorded; distribution unavailable.")
 
 
