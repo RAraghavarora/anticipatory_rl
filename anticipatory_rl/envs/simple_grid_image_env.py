@@ -217,15 +217,16 @@ class SimpleGridImageEnv(Env):
             reward += self._progress_shaping(prev_obj_dist, prev_target_dist)
 
         target_tiles = self.receptacles[self.target_receptacle]
+        carrying_empty = len(self.state.carrying) == 0
         if self.task_type == "move":
             obj_pos = self._object_position(self.target_object)
-            if obj_pos in target_tiles:
+            if obj_pos in target_tiles and carrying_empty:
                 reward = self.success_reward
                 success = True
                 self._resample_task()
                 self._task_steps = 0
         else:
-            if not self._objects_on_receptacle(self.target_receptacle):
+            if not self._objects_on_receptacle(self.target_receptacle) and carrying_empty:
                 reward = self.success_reward
                 success = True
                 self._resample_task()
@@ -418,6 +419,8 @@ class SimpleGridImageEnv(Env):
         ]
 
     def _task_already_satisfied(self) -> bool:
+        if self.state.carrying:
+            return False
         if self.task_type == "move":
             if self.target_object is None:
                 return False
