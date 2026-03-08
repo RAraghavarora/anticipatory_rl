@@ -1,19 +1,20 @@
 task_distribution:
-  bring_single: 0.51
+  bring_single: 0.7
   bring_pair: 0.0
-  clear_receptacle: 0.49
+  clear_receptacle: 0.3
 
 object_distribution:
-  water_bottle: 0.20
-  tiffin_box: 0.15
-  apple: 0.15
+  water_bottle: 0.1
+  tiffin_box: 0.1
+  apple: 0.1
   soda_can: 0.1
   drinking_glass: 0.1
   banana: 0.1
-  book: 0.05
+  book: 0.1
   phone: 0.1
-  pen: 0.05
-
+  pen: 0.1
+  pencil: 0.1
+  
 surface_distribution:
   kitchen_table: 0.2
   kitchen_counter: 0.25
@@ -23,56 +24,62 @@ surface_distribution:
 
 object_source_distribution:
   water_bottle:
-    kitchen_table: 0.2
-    kitchen_counter: 0.4
-    dining_table: 0.3
-    study_table: 0.09
-    shelf: 0.01
+    kitchen_table: 0.14
+    kitchen_counter: 0.8
+    dining_table: 0.02 
+    study_table: 0.02
+    shelf: 0.02
   tiffin_box:
-    kitchen_table: 0.35
-    kitchen_counter: 0.4
-    dining_table: 0.15
-    study_table: 0.08
+    kitchen_table: 0.14
+    kitchen_counter: 0.8
+    dining_table: 0.02
+    study_table: 0.02
     shelf: 0.02
   apple:
-    kitchen_table: 0.1
-    kitchen_counter: 0.2
-    dining_table: 0.5
-    study_table: 0.15
-    shelf: 0.05
-  soda_can:
-    kitchen_table: 0.05
+    kitchen_table: 0.02
     kitchen_counter: 0.15
-    dining_table: 0.55
-    study_table: 0.2
-    shelf: 0.05
+    dining_table: 0.8
+    study_table: 0.02
+    shelf: 0.02
+  soda_can:
+    kitchen_table: 0.02
+    kitchen_counter: 0.15
+    dining_table: 0.8
+    study_table: 0.02
+    shelf: 0.02
   drinking_glass:
-    kitchen_table: 0.25
-    kitchen_counter: 0.25
-    dining_table: 0.15
-    study_table: 0.3
-    shelf: 0.05
+    kitchen_table: 0.8
+    kitchen_counter: 0.15
+    dining_table: 0.02
+    study_table: 0.02
+    shelf: 0.02
   banana:
-    kitchen_table: 0.1
-    kitchen_counter: 0.2
-    dining_table: 0.5
-    study_table: 0.15
-    shelf: 0.05
+    kitchen_table: 0.02
+    kitchen_counter: 0.15
+    dining_table: 0.8
+    study_table: 0.02
+    shelf: 0.02
   book:
-    kitchen_table: 0.05
-    kitchen_counter: 0.1
-    dining_table: 0.1
-    study_table: 0.6
+    kitchen_table: 0.02
+    kitchen_counter: 0.02
+    dining_table: 0.02
+    study_table: 0.8
     shelf: 0.15
   phone:
-    kitchen_table: 0.15
-    kitchen_counter: 0.15
-    dining_table: 0.15
-    study_table: 0.275
-    shelf: 0.275
+    kitchen_table: 0.02
+    kitchen_counter: 0.02
+    dining_table: 0.02
+    study_table: 0.8
+    shelf: 0.15
   pen:
-    kitchen_table: 0.05
-    kitchen_counter: 0.05
-    dining_table: 0.1
-    study_table: 0.7
-    shelf: 0.1
+    kitchen_table: 0.02
+    kitchen_counter: 0.02
+    dining_table: 0.02
+    study_table: 0.15
+    shelf: 0.8
+  pencil:
+    kitchen_table: 0.02
+    kitchen_counter: 0.02
+    dining_table: 0.02
+    study_table: 0.15
+    shelf: 0.8

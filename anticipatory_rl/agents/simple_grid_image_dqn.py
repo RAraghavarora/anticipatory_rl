@@ -198,6 +198,7 @@ def train(args: argparse.Namespace) -> None:
     num_envs = env.num_envs
     episode_transitions: List[List[Transition]] = [[] for _ in range(num_envs)]
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
+    steps_since_reset = np.zeros(num_envs, dtype=np.int64)
     rolling_success_history: List[float] = []
     rolling_return_history: List[float] = []
     rolling_history_x: List[int] = []
@@ -237,14 +238,25 @@ def train(args: argparse.Namespace) -> None:
         actions = np.where(random_mask, random_actions, greedy_actions).astype(np.int64)
 
         next_state, reward, success, horizon, info = env.step(actions)
-        done = success | horizon
+        task_done = success | horizon
+        episode_done_flags = np.zeros(num_envs, dtype=bool)
+        for idx in range(num_envs):
+            steps_since_reset[idx] += 1
+            finished_task = bool(task_done[idx])
+            if finished_task:
+                tasks_since_reset[idx] += 1
+                if args.tasks_per_reset > 0 and tasks_since_reset[idx] >= args.tasks_per_reset:
+                    episode_done_flags[idx] = True
+            if args.episode_step_limit > 0 and steps_since_reset[idx] >= args.episode_step_limit:
+                episode_done_flags[idx] = True
+
         for idx in range(num_envs):
             transition = Transition(
                 state[idx],
                 int(actions[idx]),
                 float(reward[idx]),
                 next_state[idx],
-                bool(done[idx]),
+                bool(episode_done_flags[idx]),
             )
             replay.push(transition)
             episode_transitions[idx].append(transition)
@@ -257,8 +269,7 @@ def train(args: argparse.Namespace) -> None:
         progress.update(num_envs)
 
         for idx in range(num_envs):
-            if done[idx]:
-                tasks_since_reset[idx] += 1
+            if task_done[idx]:
                 episode_return = float(task_return[idx])
                 returns.append(episode_return)
                 task_lengths.append(int(task_steps[idx]))
@@ -282,11 +293,15 @@ def train(args: argparse.Namespace) -> None:
                 task_return[idx] = 0.0
                 task_steps[idx] = 0
 
-                if tasks_since_reset[idx] >= args.tasks_per_reset:
-                    new_obs, _ = env.reset_env(idx)
-                    state[idx] = new_obs
-                    tasks_since_reset[idx] = 0
-                    episode_transitions[idx].clear()
+        for idx in range(num_envs):
+            if episode_done_flags[idx]:
+                new_obs, _ = env.reset_env(idx)
+                state[idx] = new_obs
+                tasks_since_reset[idx] = 0
+                steps_since_reset[idx] = 0
+                task_return[idx] = 0.0
+                task_steps[idx] = 0
+                episode_transitions[idx].clear()
 
         avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
         avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
@@ -541,7 +556,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=Path("runs") / "simple_grid_image_dqn.pt")
     parser.add_argument("--success-reward", type=float, default=10.0)
-    parser.add_argument("--tasks-per-reset", type=int, default=1)
+    parser.add_argument(
+        "--tasks-per-reset",
+        type=int,
+        default=1,
+        help="Number of completed tasks that make up one RL episode (done=True only after this many).",
+    )
+    parser.add_argument(
+        "--episode-step-limit",
+        type=int,
+        default=20_000,
+        help="Maximum environment steps allowed between resets; overrides tasks-per-reset if exceeded (<=0 disables).",
+    )
     parser.add_argument("--goal-buffer-size", type=int, default=5_000)
     parser.add_argument("--goal-buffer-fraction", type=float, default=0.25)
     parser.add_argument(
