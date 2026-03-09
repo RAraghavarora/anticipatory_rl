@@ -289,6 +289,7 @@ class SimpleGridImageEnv(Env):
             "target_receptacle": self.target_receptacle,
             "task_type": self.task_type,
             "success": bool(success),
+            "on_receptacle": self._coord_on_receptacle(self.state.agent),
         }
 
     # ------------------------------------------------------------------ Task helpers

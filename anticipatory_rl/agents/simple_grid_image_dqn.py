@@ -175,7 +175,8 @@ def train(args: argparse.Namespace) -> None:
         maxlen=args.goal_buffer_size if args.goal_buffer_size > 0 else None
     )
 
-    state, _ = env.reset(seed=args.seed)
+    state, infos = env.reset(seed=args.seed)
+    infos = list(infos)
     obs_shape = state.shape[1:]
     action_dim = env.action_space.n
     q_net = ConvQNetwork(obs_shape, hidden_dim=args.hidden_dim, num_actions=action_dim).to(device)
@@ -196,6 +197,17 @@ def train(args: argparse.Namespace) -> None:
     episode_returns: List[float] = []
     task_length_history: List[int] = []
     num_envs = env.num_envs
+    place_action = SimpleGridImageEnv.PLACE
+    safe_actions = np.array(
+        [
+            SimpleGridImageEnv.MOVE_UP,
+            SimpleGridImageEnv.MOVE_DOWN,
+            SimpleGridImageEnv.MOVE_LEFT,
+            SimpleGridImageEnv.MOVE_RIGHT,
+            SimpleGridImageEnv.PICK,
+        ],
+        dtype=np.int64,
+    )
     episode_transitions: List[List[Transition]] = [[] for _ in range(num_envs)]
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
     steps_since_reset = np.zeros(num_envs, dtype=np.int64)
@@ -224,11 +236,23 @@ def train(args: argparse.Namespace) -> None:
             eps = max(base_eps, args.epsilon_restart_value)
         else:
             eps = base_eps
+        invalid_place_mask = np.zeros(num_envs, dtype=bool)
+        for idx in range(num_envs):
+            if idx < len(infos):
+                on_receptacle = bool(infos[idx].get("on_receptacle", False))
+            else:
+                on_receptacle = False
+            invalid_place_mask[idx] = not on_receptacle
+
         with torch.no_grad():
             inp = torch.tensor(state, dtype=torch.float32, device=device)
             q_vals = q_net(inp)
-            greedy_actions = torch.argmax(q_vals, dim=1).cpu().numpy()
-            greedy_value = float(torch.max(q_vals).item())
+            masked_q_vals = q_vals.clone()
+            if invalid_place_mask.any():
+                mask_tensor = torch.from_numpy(invalid_place_mask).to(device=device)
+                masked_q_vals[mask_tensor, place_action] = float("-inf")
+            greedy_actions = torch.argmax(masked_q_vals, dim=1).cpu().numpy()
+            greedy_value = float(torch.max(masked_q_vals).item())
         greedy_value_history.append(greedy_value)
 
         random_mask = np.random.rand(num_envs) < eps
@@ -236,8 +260,14 @@ def train(args: argparse.Namespace) -> None:
             [env.action_space.sample() for _ in range(num_envs)]
         )
         actions = np.where(random_mask, random_actions, greedy_actions).astype(np.int64)
+        invalid_random = invalid_place_mask & (actions == place_action)
+        if np.any(invalid_random):
+            actions[invalid_random] = np.random.choice(
+                safe_actions, size=int(invalid_random.sum())
+            )
 
         next_state, reward, success, horizon, info = env.step(actions)
+        next_infos = list(info)
         task_done = success | horizon
         episode_done_flags = np.zeros(num_envs, dtype=bool)
         for idx in range(num_envs):
@@ -295,13 +325,16 @@ def train(args: argparse.Namespace) -> None:
 
         for idx in range(num_envs):
             if episode_done_flags[idx]:
-                new_obs, _ = env.reset_env(idx)
+                new_obs, new_info = env.reset_env(idx)
                 state[idx] = new_obs
                 tasks_since_reset[idx] = 0
                 steps_since_reset[idx] = 0
                 task_return[idx] = 0.0
                 task_steps[idx] = 0
                 episode_transitions[idx].clear()
+                next_infos[idx] = new_info
+
+        infos = next_infos
 
         avg_ret = f"{np.mean(returns):.1f}" if returns else "n/a"
         avg_len = float(np.mean(task_lengths)) if task_lengths else 0.0
