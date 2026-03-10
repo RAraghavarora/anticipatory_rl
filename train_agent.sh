@@ -4,7 +4,7 @@
 # SBATCH Slurm Configuration
 #================================================
 #SBATCH --job-name=train_3box_agent      # Name of the job
-#SBATCH --account=bewg-delta-gpu
+#SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1                     # Total number of nodes to request
 #SBATCH --tasks=1                     # Total number of tasks (processes) to run
