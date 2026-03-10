@@ -21,5 +21,17 @@
 echo "Job started on $(hostname) at $(date)"
 
 source /u/rarora1/ant_env/bin/activate
-python -m anticipatory_rl.agents.three_box_dqn --step-cost 1.0 --render-tile-px 4 --total-steps 500_000
+# python -m anticipatory_rl.agents.three_box_dqn --step-cost 1.0 --render-tile-px 4 --total-steps 500_000
+python -m anticipatory_rl.agents.simple_grid_image_dqn \
+  --grid-size 5 \
+  --num-objects 3 \
+  --total-steps 300000 \
+  --replay-size 50000 \
+  --batch-size 64 \
+  --lr 3e-4 \
+  --tasks-per-reset 20 \
+  --episode-step-limit 4000 \
+  --num-envs 4 \
+  --output runs/simple_grid_image_dqn_5x5_3r3o.pt
+  --config-file configs/simple_grid_image_dqn_5x5_3r3o.yaml
 echo "Job finished at $(date)"

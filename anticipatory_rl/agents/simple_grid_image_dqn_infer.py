@@ -21,10 +21,7 @@ from tqdm import tqdm
 
 from anticipatory_rl.agents.simple_grid_image_dqn import ConvQNetwork
 from anticipatory_rl.envs.simple_grid_image_env import (
-    OBJECT_DISTRIBUTION,
     OBJECT_NAMES,
-    OBJECT_SOURCE_DISTRIBUTION,
-    SURFACE_DISTRIBUTION,
     SimpleGridImageEnv,
 )
 
@@ -47,6 +44,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--config-path",
+        type=Path,
+        default=None,
+        help="Optional path to task/object/receptacle distribution YAML.",
+    )
     parser.add_argument("--clear-task-prob", type=float, default=None, help="Override clear-task probability (defaults to config).")
     parser.add_argument("--tasks-per-reset", type=int, default=1_000, help="Force env reset after this many tasks (match training).")
     parser.add_argument(
@@ -72,6 +75,7 @@ def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
         clear_task_prob=args.clear_task_prob,
+        config_path=args.config_path,
     )
 
 
@@ -108,16 +112,19 @@ def sample_task_sequence(
     last_rec: Optional[str] = None
     active_objects = list(env.active_objects)
     receptacles = list(env.receptacle_names)
+    object_distribution = getattr(env, "object_distribution", {})
+    surface_distribution = getattr(env, "surface_distribution", {})
+    object_source_distribution = getattr(env, "object_source_distribution", {})
     clear_prob = getattr(env, "clear_task_prob", 0.0)
     for _ in range(num_tasks):
         if clear_prob > 0.0 and rng.random() < clear_prob:
             rec_choices = _eligible_receptacles(receptacles, last_rec)
-            rec = weighted_choice(SURFACE_DISTRIBUTION, rec_choices, rng)
+            rec = weighted_choice(surface_distribution, rec_choices, rng)
             tasks.append(SampledTask("clear", None, rec))
             last_rec = rec
             continue
-        obj = weighted_choice(OBJECT_DISTRIBUTION, active_objects, rng)
-        source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
+        obj = weighted_choice(object_distribution, active_objects, rng)
+        source_dist = object_source_distribution.get(obj, surface_distribution)
         rec_choices = _eligible_receptacles(receptacles, last_rec)
         rec = weighted_choice(source_dist, rec_choices, rng)
         tasks.append(SampledTask("move", obj, rec))

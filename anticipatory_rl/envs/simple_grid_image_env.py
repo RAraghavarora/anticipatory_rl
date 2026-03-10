@@ -102,16 +102,30 @@ class SimpleGridImageEnv(Env):
         render_tile_px: int = 24,
         render_margin_px: Optional[int] = None,
         clear_task_prob: Optional[float] = None,
+        config_path: str | Path | None = None,
     ) -> None:
         super().__init__()
+        loaded_config = CONFIG
+        if config_path is not None:
+            loaded_config = _load_config(Path(config_path))
+        self.object_distribution: Dict[str, float] = loaded_config.get(
+            "object_distribution", {}
+        )
+        self.surface_distribution: Dict[str, float] = loaded_config.get(
+            "surface_distribution", {}
+        )
+        self.object_source_distribution: Dict[str, Dict[str, float]] = loaded_config.get(
+            "object_source_distribution", {}
+        )
+        task_distribution: Dict[str, float] = loaded_config.get("task_distribution", {})
         self.grid_size = grid_size
         self.max_task_steps = max_task_steps
         self.success_reward = success_reward
         self.correct_pick_bonus = correct_pick_bonus
         self.distance_reward = distance_reward
         self.distance_reward_scale = distance_reward_scale
-        self.object_names = list(OBJECT_NAMES)
-        self.receptacle_names = list(RECEPTACLE_LIST)
+        self.object_names = list(self.object_distribution.keys()) or list(DEFAULT_OBJECT_NAMES)
+        self.receptacle_names = list(self.surface_distribution.keys()) or list(DEFAULT_RECEPTACLE_NAMES)
         self.target_object: str | None = self.object_names[0]
         self.target_receptacle: str = self.receptacle_names[0]
         self.task_type: str = "move"
@@ -136,7 +150,7 @@ class SimpleGridImageEnv(Env):
         )
         self.state = SimpleGridState(agent=(0, 0), objects={})
         self._rng = np.random.default_rng()
-        default_prob = float(np.clip(DEFAULT_CLEAR_TASK_PROB, 0.0, 1.0))
+        default_prob = float(np.clip(task_distribution.get("clear_receptacle", 0.0), 0.0, 1.0))
         prob = default_prob if clear_task_prob is None else clear_task_prob
         self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
         self._pending_auto_success = False
@@ -320,8 +334,8 @@ class SimpleGridImageEnv(Env):
             rec_choices = [r for r in self.receptacle_names if r != self._last_target_receptacle]
             if not rec_choices:
                 rec_choices = list(self.receptacle_names)
-        obj = self._weighted_choice(OBJECT_DISTRIBUTION, self.active_objects)
-        source_dist = OBJECT_SOURCE_DISTRIBUTION.get(obj, SURFACE_DISTRIBUTION)
+        obj = self._weighted_choice(self.object_distribution, self.active_objects)
+        source_dist = self.object_source_distribution.get(obj, self.surface_distribution)
         rec = self._weighted_choice(source_dist, rec_choices)
         self.task_type = "move"
         self.target_object = obj
@@ -333,14 +347,14 @@ class SimpleGridImageEnv(Env):
         rec_choices: List[str] = list(self.receptacle_names)
         rec = None
         for _ in range(30):
-            candidate = self._weighted_choice(SURFACE_DISTRIBUTION, rec_choices)
+            candidate = self._weighted_choice(self.surface_distribution, rec_choices)
             if self._objects_on_receptacle(candidate):
                 rec = candidate
                 break
         if rec is None:
             if not rec_choices:
                 return False
-            rec = self._weighted_choice(SURFACE_DISTRIBUTION, rec_choices)
+            rec = self._weighted_choice(self.surface_distribution, rec_choices)
         self.task_type = "clear"
         self.target_object = None
         self.target_receptacle = rec

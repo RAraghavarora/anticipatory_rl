@@ -159,6 +159,7 @@ def train(args: argparse.Namespace) -> None:
             distance_reward=True,
             distance_reward_scale=args.distance_reward_scale,
             clear_task_prob=args.clear_task_prob,
+            config_path=args.config_path,
         )
 
     env = VectorEnv(make_env, max(1, args.num_envs))
@@ -600,6 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=Path("runs") / "simple_grid_image_dqn.pt")
+    parser.add_argument(
+        "--config-path",
+        type=Path,
+        default=None,
+        help="Optional path to task/object/receptacle distribution YAML.",
+    )
     parser.add_argument("--success-reward", type=float, default=10.0)
     parser.add_argument(
         "--tasks-per-reset",
