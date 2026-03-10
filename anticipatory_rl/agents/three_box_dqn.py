@@ -132,6 +132,103 @@ def _epsilon(step: int, args: argparse.Namespace) -> float:
     return args.epsilon_start + frac * (args.epsilon_final - args.epsilon_start)
 
 
+def _eval_action(q: torch.Tensor, args: argparse.Namespace) -> int:
+    if args.eval_temperature <= 0:
+        return int(q.argmax(dim=0).item())
+    probs = torch.softmax(q / args.eval_temperature, dim=0)
+    return int(torch.multinomial(probs, num_samples=1).item())
+
+
+def _build_env(args: argparse.Namespace) -> ThreeBoxEnv:
+    return ThreeBoxEnv(
+        success_reward=args.success_reward,
+        step_cost=args.step_cost,
+        max_episode_steps=args.max_episode_steps,
+        prob_a=args.prob_a,
+        render_tile_px=args.render_tile_px,
+    )
+
+
+def _load_checkpoint(
+    checkpoint_path: Path,
+    args: argparse.Namespace,
+) -> ConvQNetwork:
+    device = _device()
+    env = _build_env(args)
+    obs_shape = env.observation_space.shape
+    n_actions = int(env.action_space.n)
+    q_net = ConvQNetwork(obs_shape, args.hidden_dim, n_actions).to(device)
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    q_net.load_state_dict(state_dict)
+    q_net.eval()
+    return q_net
+
+
+def rollout_policy(
+    q_net: ConvQNetwork,
+    args: argparse.Namespace,
+    num_episodes: int = 500,
+) -> Tuple[Metrics, Dict[str, object]]:
+    """Run evaluation rollouts and collect both traces and summary stats."""
+
+    device = _device()
+    q_net.eval()
+    env = _build_env(args)
+
+    metrics = Metrics()
+    recent_drops: Deque[str] = deque(maxlen=200)
+    drop_count = 0
+    drop_counts: Dict[str, int] = {"A": 0, "B": 0, "C": 0}
+    successes = 0
+
+    for ep in range(num_episodes):
+        state, info = env.reset(seed=args.seed + 100_000 + ep)
+        ep_return = 0.0
+        done = False
+        while not done:
+            with torch.no_grad():
+                q = q_net(
+                    torch.tensor(state, dtype=torch.float32, device=device)
+                    .unsqueeze(0)
+                ).squeeze(0)
+                action = _eval_action(q, args)
+            state, reward, terminated, truncated, info = env.step(action)
+            ep_return += reward
+            done = terminated or truncated
+
+            dl = info.get("drop_location")
+            if dl is not None:
+                drop_counts[dl] = drop_counts.get(dl, 0) + 1
+                recent_drops.append(dl)
+                drop_count += 1
+                pct = sum(1 for d in recent_drops if d == "B") / len(recent_drops)
+                metrics.rolling_drop_a.append(pct)
+                metrics.rolling_drop_x.append(drop_count)
+
+        metrics.episode_returns.append(ep_return)
+        if terminated:
+            successes += 1
+            t2 = 0 if info.get("task2_auto", False) else info.get("task2_steps", 0)
+            metrics.task2_step_log.append(int(t2))
+
+    total_drops = sum(drop_counts.values())
+    stats = {
+        "mean_return": float(np.mean(metrics.episode_returns)),
+        "std_return": float(np.std(metrics.episode_returns)),
+        "success_rate": successes / max(1, num_episodes),
+        "drop_A_pct": drop_counts["A"] / max(1, total_drops),
+        "drop_B_pct": drop_counts["B"] / max(1, total_drops),
+        "drop_counts": drop_counts,
+        "mean_task2_steps": (
+            float(np.mean(metrics.task2_step_log))
+            if metrics.task2_step_log
+            else float("nan")
+        ),
+        "num_episodes": num_episodes,
+    }
+    return metrics, stats
+
+
 def train_agent(
     args: argparse.Namespace,
     myopic: bool,
@@ -140,13 +237,7 @@ def train_agent(
     """Train a single DQN agent and return the network + training metrics."""
 
     device = _device()
-    env = ThreeBoxEnv(
-        success_reward=args.success_reward,
-        step_cost=args.step_cost,
-        max_episode_steps=args.max_episode_steps,
-        prob_a=args.prob_a,
-        render_tile_px=args.render_tile_px,
-    )
+    env = _build_env(args)
 
     obs_shape = env.observation_space.shape
     n_actions = int(env.action_space.n)
@@ -190,9 +281,15 @@ def train_agent(
         # even though the environment continues to Task 2.
         bellman_done = done or (myopic and info.get("task1_done", False))
 
-        replay.push(
-            Transition(state, action, float(reward), next_state, bellman_done)
-        )
+        # For the myopic agent, only store Task 1 transitions.
+        # Storing Task 2 transitions would let Task 2 gradients
+        # contaminate the shared network weights, leaking information
+        # about the Task 2 distribution into Task 1 Q-values.
+        in_task2 = myopic and info.get("task_phase") == 2 and not info.get("task1_done", False)
+        if not in_task2:
+            replay.push(
+                Transition(state, action, float(reward), next_state, bellman_done)
+            )
         ep_return += reward
 
         # ---- track drop location ----
@@ -200,7 +297,7 @@ def train_agent(
         if dl is not None:
             recent_drops.append(dl)
             drop_count += 1
-            pct = sum(1 for d in recent_drops if d == "A") / len(recent_drops)
+            pct = sum(1 for d in recent_drops if d == "B") / len(recent_drops)
             metrics.rolling_drop_a.append(pct)
             metrics.rolling_drop_x.append(drop_count)
 
@@ -282,66 +379,10 @@ def evaluate(
     args: argparse.Namespace,
     num_episodes: int = 500,
 ) -> Dict[str, object]:
-    """Run the greedy policy and collect performance statistics."""
+    """Run the softmax evaluation policy and collect statistics."""
 
-    device = _device()
-    q_net.eval()
-    env = ThreeBoxEnv(
-        success_reward=args.success_reward,
-        step_cost=args.step_cost,
-        max_episode_steps=args.max_episode_steps,
-        prob_a=args.prob_a,
-        render_tile_px=args.render_tile_px,
-    )
-
-    returns: List[float] = []
-    drop_counts: Dict[str, int] = {"A": 0, "B": 0, "C": 0}
-    task2_steps_list: List[int] = []
-    successes = 0
-
-    for ep in range(num_episodes):
-        state, info = env.reset(seed=args.seed + 100_000 + ep)
-        ep_return = 0.0
-        done = False
-        while not done:
-            with torch.no_grad():
-                q = q_net(
-                    torch.tensor(state, dtype=torch.float32, device=device)
-                    .unsqueeze(0)
-                )
-                action = int(q.argmax(dim=1).item())
-            state, reward, terminated, truncated, info = env.step(action)
-            ep_return += reward
-            done = terminated or truncated
-            dl = info.get("drop_location")
-            if dl is not None:
-                drop_counts[dl] = drop_counts.get(dl, 0) + 1
-
-        returns.append(ep_return)
-        if terminated:
-            successes += 1
-            t2 = (
-                0
-                if info.get("task2_auto", False)
-                else info.get("task2_steps", 0)
-            )
-            task2_steps_list.append(int(t2))
-
-    total_drops = sum(drop_counts.values())
-    return {
-        "mean_return": float(np.mean(returns)),
-        "std_return": float(np.std(returns)),
-        "success_rate": successes / max(1, num_episodes),
-        "drop_A_pct": drop_counts["A"] / max(1, total_drops),
-        "drop_B_pct": drop_counts["B"] / max(1, total_drops),
-        "drop_counts": drop_counts,
-        "mean_task2_steps": (
-            float(np.mean(task2_steps_list))
-            if task2_steps_list
-            else float("nan")
-        ),
-        "num_episodes": num_episodes,
-    }
+    _, stats = rollout_policy(q_net, args, num_episodes)
+    return stats
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Plotting ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -401,9 +442,9 @@ def plot_comparison(
     ax.axhline(y=50, color="grey", ls="--", lw=0.8, label="Random (50%)")
     ax.axhline(y=100, color="green", ls=":", lw=0.8, label="Optimal (100%)")
     ax.set_xlabel("Task 1 completions")
-    ax.set_ylabel("Rolling % drops on A (window=200)")
+    ax.set_ylabel("Rolling % drops on B (window=200)")
     ax.set_title(
-        f"Anticipation Metric: Task 1 drop location  (P(Task2=A)={prob_a})"
+        f"Anticipation Metric: Task 1 drop location  (P(Task2=B)={1 - prob_a})"
     )
     ax.set_ylim(-5, 110)
     ax.legend(loc="lower right")
@@ -426,11 +467,11 @@ def plot_comparison(
 
     axes[1].bar(
         labels,
-        [anti_eval["drop_A_pct"] * 100, myopic_eval["drop_A_pct"] * 100],
+        [anti_eval["drop_B_pct"] * 100, myopic_eval["drop_B_pct"] * 100],
         color=bar_colors,
     )
     axes[1].axhline(y=50, color="grey", ls="--", lw=0.8)
-    axes[1].set_title("% Drops on A (eval)")
+    axes[1].set_title("% Drops on B (eval)")
     axes[1].set_ylabel("%")
     axes[1].set_ylim(0, 110)
 
@@ -497,9 +538,9 @@ def print_eval_summary(
     delta = anti["mean_return"] - myopic["mean_return"]
     print(f"  Return advantage (anticipatory - myopic):  {delta:+.2f}")
 
-    if anti["drop_A_pct"] > 0.70:
-        verdict = "ANTICIPATORY — agent learned to prefer A"
-    elif anti["drop_A_pct"] > 0.55:
+    if anti["drop_B_pct"] > 0.70:
+        verdict = "ANTICIPATORY — agent learned to prefer B"
+    elif anti["drop_B_pct"] > 0.55:
         verdict = "PARTIAL — some anticipation detected"
     else:
         verdict = "NOT LEARNED — increase --total-steps or tune hyperparams"
@@ -529,11 +570,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-grad-norm", type=float, default=1.0)
     p.add_argument("--success-reward", type=float, default=10.0)
     p.add_argument("--step-cost", type=float, default=0.05)
-    p.add_argument("--prob-a", type=float, default=0.8)
+    p.add_argument("--prob-a", type=float, default=0.2)
     p.add_argument("--max-episode-steps", type=int, default=200)
     p.add_argument("--eval-episodes", type=int, default=500)
+    p.add_argument("--eval-temperature", type=float, default=1.0)
     p.add_argument("--render-tile-px", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--inference-only", action="store_true")
+    p.add_argument(
+        "--anticipatory-checkpoint",
+        type=Path,
+        default=Path("runs") / "three_box" / "anticipatory.pt",
+    )
+    p.add_argument(
+        "--myopic-checkpoint",
+        type=Path,
+        default=Path("runs") / "three_box" / "myopic.pt",
+    )
     p.add_argument(
         "--output-dir",
         type=Path,
@@ -549,6 +602,30 @@ def main() -> None:
     args = build_parser().parse_args()
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
+
+    if args.inference_only:
+        print(">>> Loading saved checkpoints for inference")
+        anti_net = _load_checkpoint(args.anticipatory_checkpoint, args)
+        myopic_net = _load_checkpoint(args.myopic_checkpoint, args)
+
+        print(">>> Running rollout comparison …")
+        anti_metrics, anti_eval = rollout_policy(
+            anti_net, args, args.eval_episodes
+        )
+        myopic_metrics, myopic_eval = rollout_policy(
+            myopic_net, args, args.eval_episodes
+        )
+
+        print_eval_summary(anti_eval, myopic_eval, args.prob_a)
+        plot_comparison(
+            anti_metrics,
+            myopic_metrics,
+            anti_eval,
+            myopic_eval,
+            out,
+            args.prob_a,
+        )
+        return
 
     # ---- Train anticipatory agent ----
     random.seed(args.seed)

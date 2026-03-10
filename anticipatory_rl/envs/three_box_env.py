@@ -82,7 +82,7 @@ class ThreeBoxEnv(Env):
         success_reward: float = 10.0,
         step_cost: float = 0.05,
         max_episode_steps: int = 200,
-        prob_a: float = 0.8,
+        prob_a: float = 0.2,
         render_tile_px: int = 12,
         render_margin_px: int | None = None,
     ) -> None:
