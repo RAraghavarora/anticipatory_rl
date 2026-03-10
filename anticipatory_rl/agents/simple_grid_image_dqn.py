@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 from collections import deque
 from dataclasses import dataclass
@@ -55,6 +56,113 @@ class Transition:
     reward: float
     next_state: np.ndarray
     done: bool
+
+
+@dataclass(frozen=True)
+class RuntimeResources:
+    allocated_cpus: int
+    allocated_gpus: int
+    visible_cuda_devices: Tuple[str, ...]
+    torch_threads: int
+    torch_interop_threads: int
+    num_envs: int
+
+
+def _parse_int_env(var_name: str) -> int | None:
+    value = os.environ.get(var_name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    for token in (stripped, stripped.split("(")[0], stripped.split(",")[0]):
+        try:
+            parsed = int(token)
+        except ValueError:
+            continue
+        if parsed > 0:
+            return parsed
+    return None
+
+
+def _parse_visible_cuda_devices() -> Tuple[str, ...]:
+    value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if value is None:
+        return ()
+    stripped = value.strip()
+    if not stripped or stripped in {"-1", "NoDevFiles"}:
+        return ()
+    return tuple(device.strip() for device in stripped.split(",") if device.strip())
+
+
+def _select_device() -> torch.device:
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _resolve_runtime_resources(args: argparse.Namespace, device: torch.device) -> RuntimeResources:
+    allocated_cpus = (
+        _parse_int_env("SLURM_CPUS_PER_TASK")
+        or _parse_int_env("SLURM_CPUS_ON_NODE")
+        or os.cpu_count()
+        or 1
+    )
+    visible_cuda_devices = _parse_visible_cuda_devices()
+    allocated_gpus = (
+        len(visible_cuda_devices)
+        or _parse_int_env("SLURM_GPUS_PER_NODE")
+        or _parse_int_env("SLURM_GPUS")
+        or (1 if device.type == "cuda" else 0)
+    )
+
+    if args.num_envs is not None and args.num_envs > 0:
+        num_envs = args.num_envs
+    else:
+        num_envs = max(1, allocated_cpus)
+
+    if args.torch_threads is not None and args.torch_threads > 0:
+        torch_threads = args.torch_threads
+    else:
+        if device.type == "cuda":
+            torch_threads = max(1, allocated_cpus // max(1, num_envs))
+        else:
+            torch_threads = max(1, allocated_cpus // max(1, min(num_envs, allocated_cpus)))
+
+    if args.torch_interop_threads is not None and args.torch_interop_threads > 0:
+        torch_interop_threads = args.torch_interop_threads
+    else:
+        torch_interop_threads = 1 if device.type == "cuda" else min(4, max(1, torch_threads))
+
+    torch_threads = min(torch_threads, allocated_cpus)
+    torch_interop_threads = min(torch_interop_threads, allocated_cpus)
+    return RuntimeResources(
+        allocated_cpus=allocated_cpus,
+        allocated_gpus=max(0, allocated_gpus),
+        visible_cuda_devices=visible_cuda_devices,
+        torch_threads=max(1, torch_threads),
+        torch_interop_threads=max(1, torch_interop_threads),
+        num_envs=max(1, num_envs),
+    )
+
+
+def _apply_runtime_resources(resources: RuntimeResources) -> None:
+    torch.set_num_threads(resources.torch_threads)
+    torch.set_num_interop_threads(resources.torch_interop_threads)
+
+
+def _log_runtime_resources(resources: RuntimeResources, device: torch.device) -> None:
+    visible_cuda = ",".join(resources.visible_cuda_devices) if resources.visible_cuda_devices else "auto"
+    print(
+        "Runtime resources: "
+        f"device={device}, "
+        f"allocated_cpus={resources.allocated_cpus}, "
+        f"allocated_gpus={resources.allocated_gpus}, "
+        f"cuda_visible_devices={visible_cuda}, "
+        f"num_envs={resources.num_envs}, "
+        f"torch_threads={resources.torch_threads}, "
+        f"torch_interop_threads={resources.torch_interop_threads}"
+    )
 
 
 class PrioritizedReplayBuffer:
@@ -145,12 +253,7 @@ class VectorEnv:
             env.set_active_objects(count)
 
 
-def train(args: argparse.Namespace) -> None:
-    if torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+def train(args: argparse.Namespace, device: torch.device) -> None:
     def make_env():
         return SimpleGridImageEnv(
             grid_size=args.grid_size,
@@ -583,7 +686,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
-    parser.add_argument("--num-envs", type=int, default=1, help="Parallel env instances to sample each step.")
+    parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=None,
+        help="Parallel env instances to sample each step (default: auto from launcher CPUs).",
+    )
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--per-alpha", type=float, default=0.6)
     parser.add_argument("--per-beta-start", type=float, default=0.4)
@@ -599,6 +707,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-update", type=int, default=1_000)
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=None,
+        help="Torch intra-op CPU threads (default: auto from launcher CPUs).",
+    )
+    parser.add_argument(
+        "--torch-interop-threads",
+        type=int,
+        default=None,
+        help="Torch inter-op CPU threads (default: auto from launcher CPUs).",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=Path("runs") / "simple_grid_image_dqn.pt")
     parser.add_argument(
@@ -633,10 +753,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    device = _select_device()
+    resources = _resolve_runtime_resources(args, device)
+    args.num_envs = resources.num_envs
+    args.torch_threads = resources.torch_threads
+    args.torch_interop_threads = resources.torch_interop_threads
+    _apply_runtime_resources(resources)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    train(args)
+    _log_runtime_resources(resources, device)
+    train(args, device)
 
 
 if __name__ == "__main__":
