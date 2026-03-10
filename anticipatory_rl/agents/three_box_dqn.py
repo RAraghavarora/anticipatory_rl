@@ -145,6 +145,7 @@ def train_agent(
         step_cost=args.step_cost,
         max_episode_steps=args.max_episode_steps,
         prob_a=args.prob_a,
+        render_tile_px=args.render_tile_px,
     )
 
     obs_shape = env.observation_space.shape
@@ -290,6 +291,7 @@ def evaluate(
         step_cost=args.step_cost,
         max_episode_steps=args.max_episode_steps,
         prob_a=args.prob_a,
+        render_tile_px=args.render_tile_px,
     )
 
     returns: List[float] = []
@@ -530,6 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prob-a", type=float, default=0.8)
     p.add_argument("--max-episode-steps", type=int, default=200)
     p.add_argument("--eval-episodes", type=int, default=500)
+    p.add_argument("--render-tile-px", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--output-dir",
