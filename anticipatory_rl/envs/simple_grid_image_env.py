@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -70,14 +70,14 @@ OBJECT_OUTLINE_RGB = (10, 10, 10)
 class SimpleGridState:
     agent: Coord
     objects: Dict[str, Coord]
-    carrying: List[str] = field(default_factory=list)
+    carrying: str | None = None
 
 
 class SimpleGridImageEnv(Env):
     """
     Deterministic NxN grid:
     - Agent moves with four cardinal actions.
-    - Objects sit on receptacle tiles; the agent can pick up multiple objects (one per PICK) while co-located with them.
+    - Objects sit on receptacle tiles; the agent can carry at most one object at a time.
     - Placement is restricted to receptacle tiles and yields success when the target object reaches its target surface.
     """
 
@@ -217,7 +217,7 @@ class SimpleGridImageEnv(Env):
             reward += self._progress_shaping(prev_obj_dist, prev_target_dist)
 
         target_tiles = self.receptacles[self.target_receptacle]
-        carrying_empty = len(self.state.carrying) == 0
+        carrying_empty = self.state.carrying is None
         if self.task_type == "move":
             obj_pos = self._object_position(self.target_object)
             if obj_pos in target_tiles and carrying_empty:
@@ -245,29 +245,30 @@ class SimpleGridImageEnv(Env):
         ny = np.clip(ay + dy, 0, self.grid_size - 1)
         penalty = -5.0 if (nx == ax and ny == ay) else 0.0
         self.state.agent = (nx, ny)
-        if self.state.carrying:
-            for name in self.state.carrying:
-                self.state.objects[name] = (nx, ny)
+        if self.state.carrying is not None:
+            self.state.objects[self.state.carrying] = (nx, ny)
         return penalty
 
     def _handle_pick(self) -> Optional[str]:
+        if self.state.carrying is not None:
+            return None
         for name, coord in self.state.objects.items():
             if (
                 coord == self.state.agent
                 and name in self.active_objects
-                and name not in self.state.carrying
             ):
-                self.state.carrying.append(name)
+                self.state.carrying = name
                 self.state.objects[name] = self.state.agent
                 return name
         return None
 
     def _handle_place(self) -> bool:
-        if not self.state.carrying:
+        if self.state.carrying is None:
             return False
         if not self._coord_on_receptacle(self.state.agent):
             return False
-        obj_name = self.state.carrying.pop()
+        obj_name = self.state.carrying
+        self.state.carrying = None
         self.state.objects[obj_name] = self.state.agent
         return True
 
@@ -281,15 +282,26 @@ class SimpleGridImageEnv(Env):
         return self._encode_grid()
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
+        can_pick = any(
+            coord == self.state.agent
+            and name in self.active_objects
+            for name, coord in self.state.objects.items()
+        ) and self.state.carrying is None
+        can_place = (
+            self.state.carrying is not None
+            and self._coord_on_receptacle(self.state.agent)
+        )
         return {
             "agent": self.state.agent,
             "objects": dict(self.state.objects),
-            "carrying": list(self.state.carrying),
+            "carrying": self.state.carrying,
             "target_object": self.target_object,
             "target_receptacle": self.target_receptacle,
             "task_type": self.task_type,
             "success": bool(success),
             "on_receptacle": self._coord_on_receptacle(self.state.agent),
+            "can_pick": can_pick,
+            "can_place": can_place,
         }
 
     # ------------------------------------------------------------------ Task helpers
@@ -339,7 +351,7 @@ class SimpleGridImageEnv(Env):
     def _object_position(self, name: str | None) -> Coord | None:
         if name is None:
             return None
-        if name in self.state.carrying:
+        if name == self.state.carrying:
             return self.state.agent
         return self.state.objects.get(name, self.state.agent)
 
@@ -371,7 +383,7 @@ class SimpleGridImageEnv(Env):
     def _progress_shaping(self, prev_obj_dist: int | None, prev_target_dist: int | None) -> float:
         if self.task_type == "clear":
             return 0.0
-        if self.target_object in self.state.carrying:
+        if self.target_object == self.state.carrying:
             new_dist = self._distance_to_target_receptacle()
             if prev_target_dist is None or new_dist is None:
                 return 0.0
@@ -415,12 +427,12 @@ class SimpleGridImageEnv(Env):
             name
             for name, coord in self.state.objects.items()
             if name in self.active_objects
-            and name not in self.state.carrying
+            and name != self.state.carrying
             and coord in tiles
         ]
 
     def _task_already_satisfied(self) -> bool:
-        if self.state.carrying:
+        if self.state.carrying is not None:
             return False
         if self.task_type == "move":
             if self.target_object is None:
@@ -534,7 +546,7 @@ class SimpleGridImageEnv(Env):
         obj_size = int(tile_px * 0.55)
         obj_offset = max(1, (tile_px - obj_size) // 2)
         for name in self.active_objects:
-            if name in self.state.carrying:
+            if name == self.state.carrying:
                 continue
             coord = self.state.objects.get(name)
             if coord is None:
@@ -558,8 +570,8 @@ class SimpleGridImageEnv(Env):
         ]
         draw.polygon(triangle, fill=AGENT_TRIANGLE_RGB, outline=AGENT_TRIANGLE_OUTLINE)
 
-        if self.state.carrying:
-            last_carried = self.state.carrying[-1]
+        if self.state.carrying is not None:
+            last_carried = self.state.carrying
             carry_color = self._color_bytes(OBJECT_COLORS.get(last_carried, DEFAULT_OBJECT_COLOR))
             size_c = max(2, tile_px // 3)
             draw.rectangle(
@@ -609,8 +621,8 @@ class SimpleGridImageEnv(Env):
         occupied.add(self.state.agent)
         for name in self.object_names:
             if name not in self.active_objects and name in self.state.objects:
-                if name in self.state.carrying:
-                    self.state.carrying.remove(name)
+                if name == self.state.carrying:
+                    self.state.carrying = None
                 occupied.discard(self.state.objects[name])
                 del self.state.objects[name]
         for name in self.active_objects:

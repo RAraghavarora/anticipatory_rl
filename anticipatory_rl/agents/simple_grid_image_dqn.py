@@ -197,14 +197,14 @@ def train(args: argparse.Namespace) -> None:
     episode_returns: List[float] = []
     task_length_history: List[int] = []
     num_envs = env.num_envs
+    pick_action = SimpleGridImageEnv.PICK
     place_action = SimpleGridImageEnv.PLACE
-    safe_actions = np.array(
+    fallback_actions = np.array(
         [
             SimpleGridImageEnv.MOVE_UP,
             SimpleGridImageEnv.MOVE_DOWN,
             SimpleGridImageEnv.MOVE_LEFT,
             SimpleGridImageEnv.MOVE_RIGHT,
-            SimpleGridImageEnv.PICK,
         ],
         dtype=np.int64,
     )
@@ -236,18 +236,25 @@ def train(args: argparse.Namespace) -> None:
             eps = max(base_eps, args.epsilon_restart_value)
         else:
             eps = base_eps
+        invalid_pick_mask = np.zeros(num_envs, dtype=bool)
         invalid_place_mask = np.zeros(num_envs, dtype=bool)
         for idx in range(num_envs):
             if idx < len(infos):
-                on_receptacle = bool(infos[idx].get("on_receptacle", False))
+                can_pick = bool(infos[idx].get("can_pick", False))
+                can_place = bool(infos[idx].get("can_place", False))
             else:
-                on_receptacle = False
-            invalid_place_mask[idx] = not on_receptacle
+                can_pick = False
+                can_place = False
+            invalid_pick_mask[idx] = not can_pick
+            invalid_place_mask[idx] = not can_place
 
         with torch.no_grad():
             inp = torch.tensor(state, dtype=torch.float32, device=device)
             q_vals = q_net(inp)
             masked_q_vals = q_vals.clone()
+            if invalid_pick_mask.any():
+                mask_tensor = torch.from_numpy(invalid_pick_mask).to(device=device)
+                masked_q_vals[mask_tensor, pick_action] = float("-inf")
             if invalid_place_mask.any():
                 mask_tensor = torch.from_numpy(invalid_place_mask).to(device=device)
                 masked_q_vals[mask_tensor, place_action] = float("-inf")
@@ -260,10 +267,15 @@ def train(args: argparse.Namespace) -> None:
             [env.action_space.sample() for _ in range(num_envs)]
         )
         actions = np.where(random_mask, random_actions, greedy_actions).astype(np.int64)
+        invalid_random_pick = invalid_pick_mask & (actions == pick_action)
+        if np.any(invalid_random_pick):
+            actions[invalid_random_pick] = np.random.choice(
+                fallback_actions, size=int(invalid_random_pick.sum())
+            )
         invalid_random = invalid_place_mask & (actions == place_action)
         if np.any(invalid_random):
             actions[invalid_random] = np.random.choice(
-                safe_actions, size=int(invalid_random.sum())
+                fallback_actions, size=int(invalid_random.sum())
             )
 
         next_state, reward, success, horizon, info = env.step(actions)
