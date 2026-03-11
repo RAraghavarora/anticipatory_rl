@@ -682,7 +682,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 target = rewards + args.gamma * (1.0 - dones) * next_q
 
             td_errors = target - q_values
-            loss = (weights_t * td_errors.pow(2)).mean()
+            loss = (weights_t * nn.functional.smooth_l1_loss(q_values, target.detach(), reduction="none")).mean()
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
