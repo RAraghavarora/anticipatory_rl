@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, List, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -56,6 +57,9 @@ class Transition:
     reward: float
     next_state: np.ndarray
     done: bool
+    can_pick_next: bool = False
+    can_place_next: bool = False
+    task_boundary: bool = False
 
 
 def _encode_obs_storage(obs: np.ndarray) -> np.ndarray:
@@ -334,6 +338,64 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     last_restart_step = -10**9
     goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
 
+    # --- Diagnostic accumulators ---
+    action_counts = np.zeros(6, dtype=np.int64)
+    invalid_pick_attempts = 0
+    invalid_place_attempts = 0
+
+    move_tasks_total = 0
+    move_tasks_success = 0
+    clear_tasks_total = 0
+    clear_tasks_success = 0
+    rolling_move_success: Deque[int] = deque(maxlen=100)
+    rolling_clear_success: Deque[int] = deque(maxlen=100)
+    rolling_move_success_history: List[float] = []
+    rolling_clear_success_history: List[float] = []
+    rolling_task_type_x: List[int] = []
+
+    fail_horizon = 0
+    fail_episode_step_limit = 0
+
+    correct_picks = 0
+    wrong_picks = 0
+    place_on_target = 0
+    place_off_target = 0
+
+    success_reward_total = 0.0
+    non_success_reward_total = 0.0
+    success_step_count = 0
+    non_success_step_count = 0
+
+    steps_carrying_nothing = 0
+    steps_carrying_target = 0
+    steps_carrying_wrong = 0
+
+    initial_obj_dists: List[float] = []
+    task_start_obj_dist: List[Optional[float]] = [None] * num_envs
+
+    post_task_dist_to_next_obj: List[int] = []
+
+    invalid_argmax_frac_history: List[float] = []
+    q_per_action_history: List[List[float]] = []
+    boundary_td_mean_history: List[float] = []
+    normal_td_mean_history: List[float] = []
+    q_diag_update_count = 0
+
+    ACTION_NAMES = ["up", "down", "left", "right", "pick", "place"]
+
+    def _obj_dist_from_info(info_dict: Dict[str, Any]) -> Optional[float]:
+        target_obj = info_dict.get("target_object")
+        agent_pos = info_dict.get("agent")
+        objects = info_dict.get("objects", {})
+        if target_obj and agent_pos and target_obj in objects:
+            op = objects[target_obj]
+            return float(abs(agent_pos[0] - op[0]) + abs(agent_pos[1] - op[1]))
+        return None
+
+    for idx in range(num_envs):
+        if idx < len(infos):
+            task_start_obj_dist[idx] = _obj_dist_from_info(infos[idx])
+
     progress = tqdm(total=args.total_steps, desc="SimpleGrid Image DQN")
     task_return = np.zeros(num_envs, dtype=np.float32)
     task_steps = np.zeros(num_envs, dtype=np.int64)
@@ -392,9 +454,54 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 fallback_actions, size=int(invalid_random.sum())
             )
 
+        for idx in range(num_envs):
+            action_counts[actions[idx]] += 1
+            info_i = infos[idx] if idx < len(infos) else {}
+            carrying = info_i.get("carrying")
+            target_obj = info_i.get("target_object")
+            if carrying is None:
+                steps_carrying_nothing += 1
+            elif carrying == target_obj:
+                steps_carrying_target += 1
+            else:
+                steps_carrying_wrong += 1
+
         next_state, reward, success, horizon, info = env.step(actions)
         next_infos = list(info)
         task_done = success | horizon
+
+        for idx in range(num_envs):
+            act = int(actions[idx])
+            pre_info = infos[idx] if idx < len(infos) else {}
+            post_info = next_infos[idx] if idx < len(next_infos) else {}
+            pre_carrying = pre_info.get("carrying")
+            post_carrying = post_info.get("carrying")
+            target_obj = pre_info.get("target_object")
+
+            if act == pick_action:
+                if pre_carrying is None and post_carrying is not None:
+                    if post_carrying == target_obj:
+                        correct_picks += 1
+                    else:
+                        wrong_picks += 1
+                else:
+                    invalid_pick_attempts += 1
+            elif act == place_action:
+                if pre_carrying is not None and post_carrying is None:
+                    if success[idx]:
+                        place_on_target += 1
+                    else:
+                        place_off_target += 1
+                else:
+                    invalid_place_attempts += 1
+
+            if success[idx]:
+                success_reward_total += float(reward[idx])
+                success_step_count += 1
+            else:
+                non_success_reward_total += float(reward[idx])
+                non_success_step_count += 1
+
         episode_done_flags = np.zeros(num_envs, dtype=bool)
         for idx in range(num_envs):
             steps_since_reset[idx] += 1
@@ -407,12 +514,16 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 episode_done_flags[idx] = True
 
         for idx in range(num_envs):
+            post_info = next_infos[idx] if idx < len(next_infos) else {}
             transition = Transition(
                 _encode_obs_storage(state[idx]),
                 int(actions[idx]),
                 float(reward[idx]),
                 _encode_obs_storage(next_state[idx]),
                 bool(episode_done_flags[idx]),
+                can_pick_next=bool(post_info.get("can_pick", False)),
+                can_place_next=bool(post_info.get("can_place", False)),
+                task_boundary=bool(task_done[idx]),
             )
             replay.push(transition)
             episode_transitions[idx].append(transition)
@@ -432,17 +543,56 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 episode_returns.append(episode_return)
                 task_length_history.append(int(task_steps[idx]))
                 total_tasks += 1
-                if success[idx]:
+
+                pre_info = infos[idx] if idx < len(infos) else {}
+                post_info = next_infos[idx] if idx < len(next_infos) else {}
+                task_type = pre_info.get("task_type", "move")
+                was_success = bool(success[idx])
+
+                if task_type == "move":
+                    move_tasks_total += 1
+                    if was_success:
+                        move_tasks_success += 1
+                    rolling_move_success.append(1 if was_success else 0)
+                else:
+                    clear_tasks_total += 1
+                    if was_success:
+                        clear_tasks_success += 1
+                    rolling_clear_success.append(1 if was_success else 0)
+
+                rolling_task_type_x.append(total_tasks)
+                rolling_move_success_history.append(
+                    float(np.mean(rolling_move_success)) if rolling_move_success else 0.0
+                )
+                rolling_clear_success_history.append(
+                    float(np.mean(rolling_clear_success)) if rolling_clear_success else 0.0
+                )
+
+                if not was_success:
+                    if bool(horizon[idx]):
+                        fail_horizon += 1
+                    elif bool(episode_done_flags[idx]):
+                        fail_episode_step_limit += 1
+
+                if task_start_obj_dist[idx] is not None:
+                    initial_obj_dists.append(task_start_obj_dist[idx])
+
+                new_dist = _obj_dist_from_info(post_info)
+                if new_dist is not None and post_info.get("task_type") == "move":
+                    post_task_dist_to_next_obj.append(int(new_dist))
+                task_start_obj_dist[idx] = new_dist
+
+                if was_success:
                     tasks_completed += 1
                 recent_returns.append(episode_return)
-                recent_successes.append(1 if success[idx] else 0)
+                recent_successes.append(1 if was_success else 0)
                 window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
                 rolling_success_history.append(window_success)
                 rolling_return_history.append(
                     float(np.mean(recent_returns)) if recent_returns else 0.0
                 )
                 rolling_history_x.append(total_tasks)
-                if success[idx] and args.goal_buffer_size > 0 and episode_transitions[idx]:
+                if was_success and args.goal_buffer_size > 0 and episode_transitions[idx]:
                     for trans in episode_transitions[idx]:
                         goal_buffer.append(trans)
                 episode_transitions[idx].clear()
@@ -459,6 +609,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 task_steps[idx] = 0
                 episode_transitions[idx].clear()
                 next_infos[idx] = new_info
+                task_start_obj_dist[idx] = _obj_dist_from_info(new_info)
 
         infos = next_infos
 
@@ -544,6 +695,38 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
             td_error_history.append(td_errors.abs().mean().detach().cpu().item())
             target_value_history.append(target.abs().mean().detach().cpu().item())
 
+            can_pick_flags = torch.tensor(
+                [t.can_pick_next for t in batch], dtype=torch.bool, device=device
+            )
+            can_place_flags = torch.tensor(
+                [t.can_place_next for t in batch], dtype=torch.bool, device=device
+            )
+            next_greedy = torch.argmax(q_net(next_states), dim=1)
+            pick_invalid = (~can_pick_flags) & (next_greedy == pick_action)
+            place_invalid = (~can_place_flags) & (next_greedy == place_action)
+            invalid_frac = float((pick_invalid | place_invalid).float().mean().item())
+            invalid_argmax_frac_history.append(invalid_frac)
+
+            boundary_flags = torch.tensor(
+                [t.task_boundary for t in batch], dtype=torch.bool, device=device
+            )
+            td_abs = td_errors.abs().squeeze()
+            if boundary_flags.any():
+                boundary_td_mean_history.append(
+                    float(td_abs[boundary_flags].mean().item())
+                )
+            if (~boundary_flags).any():
+                normal_td_mean_history.append(
+                    float(td_abs[~boundary_flags].mean().item())
+                )
+
+            q_diag_update_count += 1
+            if q_diag_update_count % 100 == 0:
+                with torch.no_grad():
+                    all_q = q_net(states)
+                    mean_q = all_q.mean(dim=0).cpu().tolist()
+                q_per_action_history.append(mean_q)
+
         if args.tau < 1.0:
             with torch.no_grad():
                 tau = args.tau
@@ -570,6 +753,92 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         rolling_return_history,
         args.output,
     )
+    _plot_action_diagnostics(
+        action_counts,
+        invalid_pick_attempts,
+        invalid_place_attempts,
+        correct_picks,
+        wrong_picks,
+        place_on_target,
+        place_off_target,
+        ACTION_NAMES,
+        args.output,
+    )
+    _plot_task_type_stats(
+        rolling_move_success_history,
+        rolling_clear_success_history,
+        rolling_task_type_x,
+        fail_horizon,
+        fail_episode_step_limit,
+        tasks_completed,
+        total_tasks,
+        args.output,
+    )
+    _plot_reward_decomposition(
+        success_reward_total,
+        non_success_reward_total,
+        success_step_count,
+        non_success_step_count,
+        args.output,
+    )
+    _plot_carry_state(
+        steps_carrying_nothing,
+        steps_carrying_target,
+        steps_carrying_wrong,
+        args.output,
+    )
+    _plot_q_diagnostics(
+        q_per_action_history,
+        invalid_argmax_frac_history,
+        boundary_td_mean_history,
+        normal_td_mean_history,
+        ACTION_NAMES,
+        args.output,
+    )
+    _plot_distance_progress(initial_obj_dists, args.output)
+    _plot_anticipation(post_task_dist_to_next_obj, args.output)
+
+    total_act = int(action_counts.sum())
+    act_pcts = {
+        name: float(action_counts[i]) / max(1, total_act) * 100
+        for i, name in enumerate(ACTION_NAMES)
+    }
+    total_carry = steps_carrying_nothing + steps_carrying_target + steps_carrying_wrong
+    diag: Dict[str, Any] = {
+        "action_distribution_pct": act_pcts,
+        "invalid_pick_attempts": invalid_pick_attempts,
+        "invalid_place_attempts": invalid_place_attempts,
+        "correct_picks": correct_picks,
+        "wrong_picks": wrong_picks,
+        "place_on_target": place_on_target,
+        "place_off_target": place_off_target,
+        "move_tasks_total": move_tasks_total,
+        "move_tasks_success": move_tasks_success,
+        "move_success_rate": move_tasks_success / max(1, move_tasks_total),
+        "clear_tasks_total": clear_tasks_total,
+        "clear_tasks_success": clear_tasks_success,
+        "clear_success_rate": clear_tasks_success / max(1, clear_tasks_total),
+        "fail_horizon": fail_horizon,
+        "fail_episode_step_limit": fail_episode_step_limit,
+        "success_reward_total": success_reward_total,
+        "non_success_reward_total": non_success_reward_total,
+        "success_step_count": success_step_count,
+        "non_success_step_count": non_success_step_count,
+        "carry_nothing_frac": steps_carrying_nothing / max(1, total_carry),
+        "carry_target_frac": steps_carrying_target / max(1, total_carry),
+        "carry_wrong_frac": steps_carrying_wrong / max(1, total_carry),
+        "invalid_argmax_frac_final": (
+            float(np.mean(invalid_argmax_frac_history[-100:]))
+            if invalid_argmax_frac_history else None
+        ),
+        "q_per_action_final": (
+            q_per_action_history[-1] if q_per_action_history else None
+        ),
+        "total_tasks": total_tasks,
+        "tasks_completed": tasks_completed,
+        "overall_success_rate": tasks_completed / max(1, total_tasks),
+    }
+    _write_diagnostics_json(diag, args.output)
 
 
 def _plot_metrics(
@@ -682,6 +951,274 @@ def _moving_average(series: List[float], window: int) -> np.ndarray | None:
         return None
     kernel = np.ones(window, dtype=np.float32) / window
     return np.convolve(series, kernel, mode="valid")
+
+
+def _plot_action_diagnostics(
+    action_counts: np.ndarray,
+    invalid_pick: int,
+    invalid_place: int,
+    correct_picks: int,
+    wrong_picks: int,
+    place_on_target: int,
+    place_off_target: int,
+    action_names: List[str],
+    weight_path: Path,
+) -> None:
+    plot_path = weight_path.with_name(weight_path.stem + "_action_diag.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    total = action_counts.sum()
+    pcts = action_counts / max(1, total) * 100
+    axes[0].bar(action_names, pcts, color="#1f77b4")
+    axes[0].set_ylabel("% of actions")
+    axes[0].set_title("Action distribution")
+    for i, v in enumerate(pcts):
+        axes[0].text(i, v + 0.5, f"{v:.1f}%", ha="center", fontsize=8)
+
+    inv_labels = ["invalid pick", "invalid place"]
+    inv_vals = [invalid_pick, invalid_place]
+    axes[1].bar(inv_labels, inv_vals, color=["#d62728", "#ff7f0e"])
+    axes[1].set_ylabel("Count")
+    axes[1].set_title("Invalid action attempts")
+
+    pick_labels = ["correct pick", "wrong pick", "place on target", "place off target"]
+    pick_vals = [correct_picks, wrong_picks, place_on_target, place_off_target]
+    colors = ["#2ca02c", "#d62728", "#1f77b4", "#ff7f0e"]
+    axes[2].bar(pick_labels, pick_vals, color=colors)
+    axes[2].set_ylabel("Count")
+    axes[2].set_title("Pick / place quality")
+    axes[2].tick_params(axis="x", rotation=25)
+
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved action diagnostics to {plot_path}")
+
+
+def _plot_task_type_stats(
+    rolling_move_history: List[float],
+    rolling_clear_history: List[float],
+    rolling_x: List[int],
+    fail_horizon: int,
+    fail_episode_step_limit: int,
+    tasks_completed: int,
+    total_tasks: int,
+    weight_path: Path,
+) -> None:
+    plot_path = weight_path.with_name(weight_path.stem + "_task_type.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    if rolling_x:
+        if rolling_move_history:
+            axes[0].plot(rolling_x, rolling_move_history, linewidth=0.8, label="move")
+        if rolling_clear_history:
+            axes[0].plot(rolling_x, rolling_clear_history, linewidth=0.8, label="clear")
+        axes[0].set_ylim(0.0, 1.05)
+        axes[0].set_ylabel("Rolling success rate")
+        axes[0].set_xlabel("Completed task")
+        axes[0].set_title("Success rate by task type (window=100)")
+        axes[0].legend()
+    else:
+        axes[0].set_visible(False)
+
+    fail_other = max(0, total_tasks - tasks_completed - fail_horizon - fail_episode_step_limit)
+    labels, sizes, colors = [], [], []
+    for lbl, val, col in [
+        ("success", tasks_completed, "#2ca02c"),
+        ("task horizon", fail_horizon, "#ff7f0e"),
+        ("episode step limit", fail_episode_step_limit, "#d62728"),
+        ("other failure", fail_other, "#9467bd"),
+    ]:
+        if val > 0:
+            labels.append(lbl)
+            sizes.append(val)
+            colors.append(col)
+    if sizes:
+        axes[1].pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90)
+        axes[1].set_title("Task outcome breakdown")
+    else:
+        axes[1].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved task type stats to {plot_path}")
+
+
+def _plot_reward_decomposition(
+    success_reward_total: float,
+    non_success_reward_total: float,
+    success_step_count: int,
+    non_success_step_count: int,
+    weight_path: Path,
+) -> None:
+    plot_path = weight_path.with_name(weight_path.stem + "_reward_decomp.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    labels = [
+        f"Success steps\n(n={success_step_count})",
+        f"Non-success steps\n(n={non_success_step_count})",
+    ]
+    vals = [success_reward_total, non_success_reward_total]
+    colors = ["#2ca02c", "#d62728"]
+    bars = ax.bar(labels, vals, color=colors)
+    ax.set_ylabel("Cumulative reward")
+    ax.set_title("Reward decomposition")
+    for bar, v in zip(bars, vals):
+        ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.0f}", ha="center", va="bottom", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved reward decomposition to {plot_path}")
+
+
+def _plot_carry_state(
+    nothing: int,
+    target: int,
+    wrong: int,
+    weight_path: Path,
+) -> None:
+    plot_path = weight_path.with_name(weight_path.stem + "_carry_state.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    labels, sizes, colors = [], [], []
+    for lbl, val, col in [
+        ("nothing", nothing, "#1f77b4"),
+        ("target obj", target, "#2ca02c"),
+        ("wrong obj", wrong, "#d62728"),
+    ]:
+        if val > 0:
+            labels.append(lbl)
+            sizes.append(val)
+            colors.append(col)
+    if sizes:
+        ax.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90)
+        ax.set_title("Carry-state occupancy")
+    else:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved carry state plot to {plot_path}")
+
+
+def _plot_q_diagnostics(
+    q_per_action_history: List[List[float]],
+    invalid_argmax_frac_history: List[float],
+    boundary_td_mean_history: List[float],
+    normal_td_mean_history: List[float],
+    action_names: List[str],
+    weight_path: Path,
+) -> None:
+    plot_path = weight_path.with_name(weight_path.stem + "_q_diag.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 12))
+
+    if q_per_action_history:
+        arr = np.array(q_per_action_history)
+        for i, name in enumerate(action_names):
+            axes[0].plot(arr[:, i], linewidth=0.8, label=name)
+        axes[0].set_title("Mean Q by action (sampled every 100 updates)")
+        axes[0].set_xlabel("Sample index")
+        axes[0].set_ylabel("Mean Q")
+        axes[0].legend(fontsize=8, ncol=3)
+    else:
+        axes[0].set_visible(False)
+
+    if invalid_argmax_frac_history:
+        ma = _moving_average(invalid_argmax_frac_history, 100)
+        axes[1].plot(invalid_argmax_frac_history, linewidth=0.3, alpha=0.2, color="#d62728")
+        if ma is not None:
+            ma_x = np.arange(99, 99 + len(ma))
+            axes[1].plot(ma_x, ma, linewidth=1.2, color="#d62728")
+        axes[1].set_title("Fraction of replay argmax on invalid action")
+        axes[1].set_xlabel("Update step")
+        axes[1].set_ylabel("Fraction")
+        axes[1].set_ylim(-0.02, 1.02)
+    else:
+        axes[1].set_visible(False)
+
+    has_boundary = len(boundary_td_mean_history) > 0
+    has_normal = len(normal_td_mean_history) > 0
+    if has_boundary or has_normal:
+        if has_boundary:
+            axes[2].plot(boundary_td_mean_history, linewidth=0.5, label="boundary", color="#ff7f0e")
+        if has_normal:
+            axes[2].plot(normal_td_mean_history, linewidth=0.5, label="normal", color="#1f77b4")
+        axes[2].set_title("Mean |TD error|: boundary vs normal transitions")
+        axes[2].set_xlabel("Update step")
+        axes[2].set_ylabel("|TD|")
+        axes[2].legend()
+    else:
+        axes[2].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved Q diagnostics to {plot_path}")
+
+
+def _plot_distance_progress(
+    initial_obj_dists: List[float],
+    weight_path: Path,
+    window: int = 100,
+) -> None:
+    if not initial_obj_dists:
+        return
+    plot_path = weight_path.with_name(weight_path.stem + "_distance.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ma = _moving_average(initial_obj_dists, window)
+    ax.plot(initial_obj_dists, linewidth=0.3, alpha=0.15, color="#1f77b4")
+    if ma is not None:
+        ma_x = np.arange(window - 1, window - 1 + len(ma))
+        ax.plot(ma_x, ma, linewidth=1.2, color="#1f77b4")
+    ax.set_title(f"Initial distance to target object (MA window={window})")
+    ax.set_xlabel("Task index")
+    ax.set_ylabel("Manhattan distance")
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved distance progress to {plot_path}")
+
+
+def _plot_anticipation(
+    post_task_dist: List[int],
+    weight_path: Path,
+    window: int = 100,
+) -> None:
+    if not post_task_dist:
+        return
+    plot_path = weight_path.with_name(weight_path.stem + "_anticipation.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    floats = [float(d) for d in post_task_dist]
+    ma = _moving_average(floats, window)
+    ax.plot(floats, linewidth=0.3, alpha=0.15, color="#ff7f0e")
+    if ma is not None:
+        ma_x = np.arange(window - 1, window - 1 + len(ma))
+        ax.plot(ma_x, ma, linewidth=1.2, color="#ff7f0e")
+    ax.set_title(f"Post-task distance to next target object (MA window={window})")
+    ax.set_xlabel("Task transition index")
+    ax.set_ylabel("Manhattan distance")
+    fig.tight_layout()
+    fig.savefig(plot_path)
+    plt.close(fig)
+    print(f"Saved anticipation plot to {plot_path}")
+
+
+def _write_diagnostics_json(
+    diag: Dict[str, Any],
+    weight_path: Path,
+) -> None:
+    json_path = weight_path.with_name(weight_path.stem + "_diagnostics.json")
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with json_path.open("w", encoding="utf-8") as fh:
+        json.dump(diag, fh, indent=2, default=str)
+    print(f"Saved diagnostics JSON to {json_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
