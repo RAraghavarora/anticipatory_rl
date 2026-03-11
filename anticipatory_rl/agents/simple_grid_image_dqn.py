@@ -58,6 +58,16 @@ class Transition:
     done: bool
 
 
+def _encode_obs_storage(obs: np.ndarray) -> np.ndarray:
+    clipped = np.clip(obs, 0.0, 1.0)
+    return np.rint(clipped * 255.0).astype(np.uint8, copy=False)
+
+
+def _decode_obs_batch(obs_batch: List[np.ndarray], device: torch.device) -> torch.Tensor:
+    arr = np.asarray(obs_batch, dtype=np.uint8)
+    return torch.tensor(arr, dtype=torch.float32, device=device).div_(255.0)
+
+
 @dataclass(frozen=True)
 class RuntimeResources:
     allocated_cpus: int
@@ -398,10 +408,10 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
 
         for idx in range(num_envs):
             transition = Transition(
-                state[idx],
+                _encode_obs_storage(state[idx]),
                 int(actions[idx]),
                 float(reward[idx]),
-                next_state[idx],
+                _encode_obs_storage(next_state[idx]),
                 bool(episode_done_flags[idx]),
             )
             replay.push(transition)
@@ -507,12 +517,10 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 else np.ones(len(batch), dtype=np.float32)
             )
 
-            states = torch.tensor(np.stack([t.state for t in batch]), dtype=torch.float32, device=device)
+            states = _decode_obs_batch([t.state for t in batch], device)
             actions = torch.tensor([t.action for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
             rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-            next_states = torch.tensor(
-                np.stack([t.next_state for t in batch]), dtype=torch.float32, device=device
-            )
+            next_states = _decode_obs_batch([t.next_state for t in batch], device)
             dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
             weights_t = torch.tensor(weights_arr, dtype=torch.float32, device=device).unsqueeze(1)
 
