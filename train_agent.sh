@@ -32,5 +32,5 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --tasks-per-reset 20 \
   --episode-step-limit 4000 \
   --output runs/simple_grid_image_dqn_5x5_3r3o.pt \
-  --config-path configs/simple_grid_image_dqn_5x5_3r3o.yaml
+  --config-path anticipatory_rl/configs/config_5x5_3r3o.yaml
 echo "Job finished at $(date)"

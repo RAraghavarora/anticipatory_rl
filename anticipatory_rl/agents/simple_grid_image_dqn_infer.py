@@ -190,7 +190,10 @@ def run(args: argparse.Namespace) -> None:
         return task
 
     current_task = dequeue_task()
-    obs, _ = apply_sampled_task(env, current_task)
+    obs, info = apply_sampled_task(env, current_task)
+
+    pick_action = SimpleGridImageEnv.PICK
+    place_action = SimpleGridImageEnv.PLACE
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stats = {
@@ -212,9 +215,15 @@ def run(args: argparse.Namespace) -> None:
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
             q_values = q_net(obs_tensor)
+            can_pick = info.get("can_pick", True)
+            can_place = info.get("can_place", True)
+            if not can_pick:
+                q_values[0, pick_action] = float("-inf")
+            if not can_place:
+                q_values[0, place_action] = float("-inf")
             action = int(torch.argmax(q_values, dim=1).item())
 
-        obs, reward, success, horizon, _ = env.step(action)
+        obs, reward, success, horizon, info = env.step(action)
         progress.update(1)
         stats["total_steps"] += 1
         task_step_counter += 1
@@ -242,10 +251,10 @@ def run(args: argparse.Namespace) -> None:
             task_frame_ranges.append((record, current_task_start, step))
             current_task_start = step + 1
             if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
-                obs, _ = env.reset()
+                obs, info = env.reset()
                 tasks_since_reset = 0
             current_task = dequeue_task()
-            obs, _ = apply_sampled_task(env, current_task)
+            obs, info = apply_sampled_task(env, current_task)
 
     progress.close()
     success_rate = stats["successes"] / max(1, stats["tasks_attempted"])
