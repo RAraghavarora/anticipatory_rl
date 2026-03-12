@@ -677,7 +677,16 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
 
             q_values = q_net(states).gather(1, actions)
             with torch.no_grad():
-                next_actions = torch.argmax(q_net(next_states), dim=1, keepdim=True)
+                next_q_all = q_net(next_states)
+                batch_can_pick = torch.tensor(
+                    [t.can_pick_next for t in batch], dtype=torch.bool, device=device
+                )
+                batch_can_place = torch.tensor(
+                    [t.can_place_next for t in batch], dtype=torch.bool, device=device
+                )
+                next_q_all[~batch_can_pick, pick_action] = float("-inf")
+                next_q_all[~batch_can_place, place_action] = float("-inf")
+                next_actions = torch.argmax(next_q_all, dim=1, keepdim=True)
                 next_q = target_net(next_states).gather(1, next_actions)
                 target = rewards + args.gamma * (1.0 - dones) * next_q
 
