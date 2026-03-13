@@ -1,0 +1,33 @@
+task_distribution:
+  bring_single: 0.7
+  bring_pair: 0.0
+  clear_receptacle: 0.3
+
+object_distribution:
+  water_bottle: 0.25
+  apple: 0.25
+  book: 0.25
+  tiffin_box: 0.25
+
+surface_distribution:
+  kitchen_counter: 0.34
+  dining_table: 0.33
+  study_table: 0.33
+
+object_source_distribution:
+  water_bottle:
+    kitchen_counter: 0.85
+    dining_table: 0.10
+    study_table: 0.05
+  apple:
+    kitchen_counter: 0.10
+    dining_table: 0.85
+    study_table: 0.05
+  book:
+    kitchen_counter: 0.05
+    dining_table: 0.10
+    study_table: 0.85
+  tiffin_box:
+    kitchen_counter: 0.20
+    dining_table: 0.70
+    study_table: 0.10

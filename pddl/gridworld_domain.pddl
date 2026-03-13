@@ -69,6 +69,9 @@
     :parameters (?a - agent ?obj - cargo ?base - cargo ?loc - location ?rec - receptacle)
     :precondition (and (holding ?a ?obj)
                        (agent-at ?a ?loc)
+                       ;; Disallow placing onto an occupied tile: if ?base is on ?loc,
+                       ;; then ?loc is not clear, so this action becomes inapplicable.
+                       (clear ?loc)
                        (on ?base ?loc)
                        (clear ?base)
                        (in ?base ?rec))

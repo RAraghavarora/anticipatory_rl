@@ -316,6 +316,7 @@ class SimpleGridImageEnv(Env):
             "on_receptacle": self._coord_on_receptacle(self.state.agent),
             "can_pick": can_pick,
             "can_place": can_place,
+            "next_auto_satisfied": self._pending_auto_success,
         }
 
     # ------------------------------------------------------------------ Task helpers

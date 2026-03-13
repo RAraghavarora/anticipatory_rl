@@ -11,9 +11,12 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import json
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
@@ -155,6 +158,169 @@ def _describe_record(record: dict) -> str:
     return f"MOVE {obj} -> {rec}"
 
 
+def compute_anticipation_metrics(
+    task_records: List[dict],
+    episode_len: int,
+) -> dict:
+    """Aggregate per-task records into anticipation evaluation metrics.
+
+    Key quantities:
+    - baseline_auto_rate: fraction of position-0 tasks already satisfied at
+      assignment (pure luck, no agent contribution).
+    - auto_rate_by_pos: same fraction for every episode position 0..episode_len-1.
+    - anticipation_delta: mean(auto_rate[pos>0]) - baseline; positive values
+      mean the agent leaves the world in a state that satisfies future tasks
+      more often than chance.
+    - active_success_rate: success rate only for tasks that were NOT
+      pre-satisfied (measures real solving ability separately from luck).
+    """
+    by_pos: Dict[int, List[dict]] = {}
+    for rec in task_records:
+        pos = rec.get("episode_position")
+        if pos is None:
+            continue
+        by_pos.setdefault(pos, []).append(rec)
+
+    positions = sorted(by_pos.keys())
+    auto_rate_by_pos: Dict[int, float] = {}
+    success_rate_by_pos: Dict[int, float] = {}
+    avg_steps_by_pos: Dict[int, float] = {}
+    n_by_pos: Dict[int, int] = {}
+    for pos in positions:
+        recs = by_pos[pos]
+        auto_rate_by_pos[pos] = float(np.mean([r["auto_satisfied"] for r in recs]))
+        success_rate_by_pos[pos] = float(np.mean([1.0 if r["success"] else 0.0 for r in recs]))
+        avg_steps_by_pos[pos] = float(np.mean([r["steps"] for r in recs]))
+        n_by_pos[pos] = len(recs)
+
+    baseline = auto_rate_by_pos.get(0, 0.0)
+    delta_by_pos = {pos: auto_rate_by_pos[pos] - baseline for pos in positions}
+    later = [pos for pos in positions if pos > 0]
+    anticipation_delta = float(np.mean([delta_by_pos[p] for p in later])) if later else 0.0
+
+    auto_recs = [r for r in task_records if r.get("auto_satisfied", False)]
+    active_recs = [r for r in task_records if not r.get("auto_satisfied", False)]
+
+    def _safe_mean(vals: List[float]) -> float:
+        return float(np.mean(vals)) if vals else 0.0
+
+    active_solved_steps = [r["steps"] for r in active_recs if r["success"]]
+
+    return {
+        "episode_len": episode_len,
+        "baseline_auto_rate": baseline,
+        "mean_auto_rate": _safe_mean(list(auto_rate_by_pos.values())),
+        "anticipation_delta": anticipation_delta,
+        "auto_rate_by_pos": {str(k): v for k, v in auto_rate_by_pos.items()},
+        "success_rate_by_pos": {str(k): v for k, v in success_rate_by_pos.items()},
+        "avg_steps_by_pos": {str(k): v for k, v in avg_steps_by_pos.items()},
+        "delta_by_pos": {str(k): v for k, v in delta_by_pos.items()},
+        "n_by_pos": {str(k): v for k, v in n_by_pos.items()},
+        "n_tasks_total": len(task_records),
+        "n_auto_tasks": len(auto_recs),
+        "n_active_tasks": len(active_recs),
+        "auto_success_rate": _safe_mean([1.0 if r["success"] else 0.0 for r in auto_recs]),
+        "active_success_rate": _safe_mean([1.0 if r["success"] else 0.0 for r in active_recs]),
+        "active_avg_steps_when_solved": _safe_mean(active_solved_steps),
+    }
+
+
+def _plot_anticipation_eval(metrics: dict, output_dir: Path) -> None:
+    """Four-panel anticipation evaluation figure saved to output_dir."""
+    auto_by_pos = {int(k): v for k, v in metrics["auto_rate_by_pos"].items()}
+    delta_by_pos = {int(k): v for k, v in metrics["delta_by_pos"].items()}
+    steps_by_pos = {int(k): v for k, v in metrics["avg_steps_by_pos"].items()}
+    succ_by_pos = {int(k): v for k, v in metrics["success_rate_by_pos"].items()}
+    n_by_pos = {int(k): v for k, v in metrics["n_by_pos"].items()}
+
+    positions = sorted(auto_by_pos.keys())
+    if not positions:
+        return
+
+    baseline = metrics["baseline_auto_rate"]
+    antic_delta = metrics["anticipation_delta"]
+
+    fig, axes = plt.subplots(4, 1, figsize=(max(10, len(positions) * 0.6), 16))
+
+    # ── Panel 1: auto-success rate by position ──────────────────────────────
+    ax = axes[0]
+    ax.bar(positions, [auto_by_pos[p] for p in positions], alpha=0.75, color="#1f77b4",
+           label="Auto-success rate")
+    ax.axhline(baseline, color="#d62728", linestyle="--", linewidth=1.5,
+               label=f"Luck baseline (pos 0) = {baseline:.1%}")
+    ax.set_xlabel("Episode position")
+    ax.set_ylabel("Auto-success rate")
+    ax.set_title("Auto-success rate by episode position")
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=9)
+    ax.set_xticks(positions)
+    for p in positions:
+        ax.text(p, auto_by_pos[p] + 0.02, f"{auto_by_pos[p]:.0%}", ha="center", va="bottom",
+                fontsize=7)
+
+    # ── Panel 2: anticipation delta (Δ auto-rate over baseline) ────────────
+    ax = axes[1]
+    later = [p for p in positions if p > 0]
+    colors = ["#2ca02c" if delta_by_pos[p] >= 0 else "#d62728" for p in later]
+    ax.bar(later, [delta_by_pos[p] for p in later], color=colors, alpha=0.85)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xlabel("Episode position")
+    ax.set_ylabel("Δ auto-rate")
+    ax.set_title(f"Anticipation delta (auto-rate − baseline) | mean Δ = {antic_delta:+.1%}")
+    ax.set_xticks(later)
+
+    # ── Panel 3: task success rate by position ──────────────────────────────
+    ax = axes[2]
+    ax.bar(positions, [succ_by_pos[p] for p in positions], alpha=0.75, color="#ff7f0e")
+    ax.set_xlabel("Episode position")
+    ax.set_ylabel("Success rate")
+    ax.set_title("Task success rate by episode position")
+    ax.set_ylim(0, 1.05)
+    ax.set_xticks(positions)
+
+    # ── Panel 4: avg steps to complete by position ──────────────────────────
+    ax = axes[3]
+    ax.bar(positions, [steps_by_pos[p] for p in positions], alpha=0.75, color="#9467bd")
+    ax.set_xlabel("Episode position")
+    ax.set_ylabel("Avg steps")
+    ax.set_title("Avg steps to complete by episode position")
+    ax.set_xticks(positions)
+
+    fig.tight_layout()
+    plot_path = output_dir / "anticipation_eval.png"
+    fig.savefig(plot_path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved anticipation eval plot to {plot_path}")
+
+
+def _print_anticipation_report(metrics: dict) -> None:
+    """Print a human-readable anticipation evaluation summary to stdout."""
+    sep = "=" * 54
+    print()
+    print(sep)
+    print("         ANTICIPATION EVALUATION REPORT")
+    print(sep)
+    print(f"  Luck baseline  (pos-0 auto-rate) : {metrics['baseline_auto_rate']:.1%}")
+    print(f"  Mean auto-rate (all positions)   : {metrics['mean_auto_rate']:.1%}")
+    print(f"  Anticipation Δ (mean, pos > 0)   : {metrics['anticipation_delta']:+.1%}")
+    print()
+    print(f"  Auto tasks   : n={metrics['n_auto_tasks']:<5d} success={metrics['auto_success_rate']:.1%}")
+    print(f"  Active tasks : n={metrics['n_active_tasks']:<5d} success={metrics['active_success_rate']:.1%}"
+          f"  avg_steps={metrics['active_avg_steps_when_solved']:.1f}")
+    print()
+    print("  By episode position:")
+    auto_by_pos = {int(k): v for k, v in metrics["auto_rate_by_pos"].items()}
+    delta_by_pos = {int(k): v for k, v in metrics["delta_by_pos"].items()}
+    steps_by_pos = {int(k): v for k, v in metrics["avg_steps_by_pos"].items()}
+    n_by_pos = {int(k): v for k, v in metrics["n_by_pos"].items()}
+    for pos in sorted(auto_by_pos.keys()):
+        tag = "(baseline)" if pos == 0 else f"Δ={delta_by_pos[pos]:+.1%}"
+        print(f"    pos {pos:2d}: auto={auto_by_pos[pos]:.1%}  {tag:<14}"
+              f"  avg_steps={steps_by_pos[pos]:5.1f}  n={n_by_pos[pos]}")
+    print(sep)
+    print()
+
+
 def save_observation(output_dir: Path, step: int, obs: np.ndarray, save_format: str) -> None:
     if save_format == "png":
         rgb = (np.transpose(obs[:3], (1, 2, 0)) * 255.0).clip(0, 255).astype(np.uint8)
@@ -191,6 +357,8 @@ def run(args: argparse.Namespace) -> None:
 
     current_task = dequeue_task()
     obs, info = apply_sampled_task(env, current_task)
+    # Capture whether the initial task was already satisfied at assignment time
+    current_task_auto_satisfied: bool = bool(getattr(env, "_pending_auto_success", False))
 
     pick_action = SimpleGridImageEnv.PICK
     place_action = SimpleGridImageEnv.PLACE
@@ -243,6 +411,12 @@ def run(args: argparse.Namespace) -> None:
                 "success": bool(success),
                 "steps": task_step_counter,
                 "return": task_return,
+                # Anticipation tracking fields
+                "auto_satisfied": current_task_auto_satisfied,
+                # tasks_since_reset is the position within the current episode
+                # (0 = first task after reset, 1 = second, ...).  We read it
+                # before incrementing so it reflects the completed task.
+                "episode_position": tasks_since_reset,
             }
             task_records.append(record)
             task_step_counter = 0
@@ -255,6 +429,7 @@ def run(args: argparse.Namespace) -> None:
                 tasks_since_reset = 0
             current_task = dequeue_task()
             obs, info = apply_sampled_task(env, current_task)
+            current_task_auto_satisfied = bool(getattr(env, "_pending_auto_success", False))
 
     progress.close()
     success_rate = stats["successes"] / max(1, stats["tasks_attempted"])
@@ -262,8 +437,19 @@ def run(args: argparse.Namespace) -> None:
     task_steps = [rec["steps"] for rec in task_records]
     stats["avg_task_steps"] = float(np.mean(task_steps)) if task_steps else 0.0
     stats["median_task_steps"] = float(np.median(task_steps)) if task_steps else 0.0
+
+    # ── Anticipation evaluation ─────────────────────────────────────────────
+    antic_metrics: Optional[dict] = None
+    if args.tasks_per_reset > 0 and task_records:
+        antic_metrics = compute_anticipation_metrics(task_records, args.tasks_per_reset)
+        _print_anticipation_report(antic_metrics)
+        _plot_anticipation_eval(antic_metrics, args.output_dir)
+        with (args.output_dir / "anticipation_metrics.json").open("w", encoding="utf-8") as fh:
+            json.dump(antic_metrics, fh, indent=2)
+
     report = {
         "stats": stats,
+        "anticipation": antic_metrics,
         "tasks": task_records,
     }
     with (args.output_dir / "rollout_stats.json").open("w", encoding="utf-8") as fh:
@@ -275,6 +461,11 @@ def run(args: argparse.Namespace) -> None:
     )
     if task_steps:
         summary += f" | median steps {stats['median_task_steps']:.1f}"
+    if antic_metrics is not None:
+        summary += (
+            f" | antic Δ {antic_metrics['anticipation_delta']:+.1%}"
+            f" (baseline {antic_metrics['baseline_auto_rate']:.1%})"
+        )
     print(summary)
     if task_step_counter > 0:
         print(

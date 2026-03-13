@@ -329,6 +329,21 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     episode_transitions: List[List[Transition]] = [[] for _ in range(num_envs)]
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
     steps_since_reset = np.zeros(num_envs, dtype=np.int64)
+
+    # Anticipation tracking (per-position auto-success rates)
+    _episode_len = args.tasks_per_reset if args.tasks_per_reset > 0 else 0
+    current_task_auto_satisfied = np.array(
+        [info.get("next_auto_satisfied", False) for info in infos], dtype=bool
+    )
+    auto_counts_by_pos = np.zeros(max(1, _episode_len), dtype=np.int64)
+    total_counts_by_pos = np.zeros(max(1, _episode_len), dtype=np.int64)
+    recent_auto_by_pos: Dict[int, Deque[int]] = {
+        p: deque(maxlen=200) for p in range(_episode_len)
+    }
+    antic_delta_history: List[float] = []
+    antic_history_x: List[int] = []
+    _ANTIC_LOG_EVERY = 500
+
     rolling_success_history: List[float] = []
     rolling_return_history: List[float] = []
     rolling_history_x: List[int] = []
@@ -592,6 +607,36 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                     float(np.mean(recent_returns)) if recent_returns else 0.0
                 )
                 rolling_history_x.append(total_tasks)
+
+                # Anticipation: record this task's auto-satisfied status by position
+                if _episode_len > 0:
+                    ep_pos = int(tasks_since_reset[idx]) - 1
+                    if 0 <= ep_pos < _episode_len:
+                        auto_sat = bool(current_task_auto_satisfied[idx])
+                        auto_counts_by_pos[ep_pos] += int(auto_sat)
+                        total_counts_by_pos[ep_pos] += 1
+                        recent_auto_by_pos[ep_pos].append(int(auto_sat))
+                    # The env already resampled the next task; capture its flag
+                    current_task_auto_satisfied[idx] = bool(
+                        next_infos[idx].get("next_auto_satisfied", False)
+                    )
+                    # Periodically log the rolling anticipation delta
+                    if (
+                        total_tasks % _ANTIC_LOG_EVERY == 0
+                        and recent_auto_by_pos.get(0)
+                    ):
+                        baseline = float(np.mean(list(recent_auto_by_pos[0])))
+                        later_means = [
+                            float(np.mean(list(recent_auto_by_pos[p])))
+                            for p in range(1, _episode_len)
+                            if recent_auto_by_pos[p]
+                        ]
+                        if later_means:
+                            antic_delta_history.append(
+                                float(np.mean(later_means)) - baseline
+                            )
+                            antic_history_x.append(total_tasks)
+
                 if was_success and args.goal_buffer_size > 0 and episode_transitions[idx]:
                     for trans in episode_transitions[idx]:
                         goal_buffer.append(trans)
@@ -610,6 +655,10 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 episode_transitions[idx].clear()
                 next_infos[idx] = new_info
                 task_start_obj_dist[idx] = _obj_dist_from_info(new_info)
+                if _episode_len > 0:
+                    current_task_auto_satisfied[idx] = bool(
+                        new_info.get("next_auto_satisfied", False)
+                    )
 
         infos = next_infos
 
@@ -806,6 +855,14 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     )
     _plot_distance_progress(initial_obj_dists, args.output)
     _plot_anticipation(post_task_dist_to_next_obj, args.output)
+    _plot_auto_rate_by_pos(
+        auto_counts_by_pos,
+        total_counts_by_pos,
+        antic_delta_history,
+        antic_history_x,
+        _episode_len,
+        args.output,
+    )
 
     total_act = int(action_counts.sum())
     act_pcts = {
@@ -846,8 +903,73 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         "total_tasks": total_tasks,
         "tasks_completed": tasks_completed,
         "overall_success_rate": tasks_completed / max(1, total_tasks),
+        "auto_rate_by_pos": {
+            str(p): float(auto_counts_by_pos[p]) / max(1.0, float(total_counts_by_pos[p]))
+            for p in range(_episode_len)
+        } if _episode_len > 0 else None,
+        "baseline_auto_rate": (
+            float(auto_counts_by_pos[0]) / max(1.0, float(total_counts_by_pos[0]))
+            if _episode_len > 0 else None
+        ),
+        "anticipation_delta_final": float(antic_delta_history[-1]) if antic_delta_history else None,
     }
     _write_diagnostics_json(diag, args.output)
+
+
+def _plot_auto_rate_by_pos(
+    auto_counts: np.ndarray,
+    total_counts: np.ndarray,
+    delta_history: List[float],
+    delta_x: List[int],
+    episode_len: int,
+    output: Path,
+) -> None:
+    """Plot per-position auto-success rates and rolling anticipation delta."""
+    if episode_len == 0:
+        return
+    stem = output.stem
+    out_dir = output.parent
+    rates = [
+        int(auto_counts[p]) / max(1, int(total_counts[p]))
+        for p in range(episode_len)
+    ]
+    baseline = rates[0] if rates else 0.0
+    positions = list(range(episode_len))
+
+    n_panels = 2 if delta_history else 1
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 4))
+    if n_panels == 1:
+        axes = [axes]
+
+    ax0 = axes[0]
+    ax0.bar(positions, rates, color="steelblue", alpha=0.8, label="Auto-satisfied rate")
+    ax0.axhline(baseline, color="crimson", linestyle="--",
+                label=f"Baseline (pos 0): {baseline:.3f}")
+    if len(rates) > 1:
+        later_mean = float(np.mean(rates[1:]))
+        delta = later_mean - baseline
+        ax0.axhline(later_mean, color="green", linestyle="--",
+                    label=f"Later mean: {later_mean:.3f}")
+        ax0.set_title(f"Auto-success by Episode Position\n(Δ over baseline: {delta:+.3f})")
+    else:
+        ax0.set_title("Auto-success by Episode Position")
+    ax0.set_xlabel("Episode Position (0 = first task after reset)")
+    ax0.set_ylabel("Auto-satisfied Rate")
+    ax0.legend(fontsize=8)
+
+    if delta_history:
+        ax1 = axes[1]
+        ax1.plot(delta_x, delta_history, color="green", linewidth=1.5)
+        ax1.axhline(0, color="gray", linestyle="--", linewidth=0.8)
+        ax1.set_title("Rolling Anticipation Δ over Training")
+        ax1.set_xlabel("Total Tasks")
+        ax1.set_ylabel("Δ Auto-success Rate (later – baseline)")
+
+    fig.tight_layout()
+    save_path = out_dir / f"{stem}_auto_rate_by_pos.png"
+    fig.savefig(save_path, dpi=120)
+    plt.close(fig)
+    print(f"[diag] Saved auto_rate_by_pos plot → {save_path}")
 
 
 def _plot_metrics(
