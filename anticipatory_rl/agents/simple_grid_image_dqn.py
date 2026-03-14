@@ -275,6 +275,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
             num_objects=args.num_objects,
             distance_reward=True,
             distance_reward_scale=args.distance_reward_scale,
+            clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
             clear_task_prob=args.clear_task_prob,
             config_path=args.config_path,
         )
@@ -1423,6 +1424,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Override probability of sampling clear tasks (default pulled from configs/config.yaml).",
+    )
+    parser.add_argument(
+        "--clear-receptacle-shaping-scale",
+        type=float,
+        default=2.0,
+        help="Per-object reward for clear_receptacle when objects leave the target surface (default 2.0).",
     )
     return parser
 

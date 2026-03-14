@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to task/object/receptacle distribution YAML.",
     )
     parser.add_argument("--clear-task-prob", type=float, default=None, help="Override clear-task probability (defaults to config).")
+    parser.add_argument("--clear-receptacle-shaping-scale", type=float, default=2.0, help="Per-object reward for clear when objects leave target surface.")
     parser.add_argument("--tasks-per-reset", type=int, default=1_000, help="Force env reset after this many tasks (match training).")
     parser.add_argument(
         "--tasks-per-sequence",
@@ -77,6 +78,7 @@ def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
         success_reward=args.success_reward,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
+        clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
         clear_task_prob=args.clear_task_prob,
         config_path=args.config_path,
     )

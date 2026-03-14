@@ -99,6 +99,7 @@ class SimpleGridImageEnv(Env):
         correct_pick_bonus: float = 1.0,
         distance_reward: bool = False,
         distance_reward_scale: float = 1.0,
+        clear_receptacle_shaping_scale: float = 2.0,
         render_tile_px: int = 24,
         render_margin_px: Optional[int] = None,
         clear_task_prob: Optional[float] = None,
@@ -124,6 +125,7 @@ class SimpleGridImageEnv(Env):
         self.correct_pick_bonus = correct_pick_bonus
         self.distance_reward = distance_reward
         self.distance_reward_scale = distance_reward_scale
+        self.clear_receptacle_shaping_scale = clear_receptacle_shaping_scale
         self.object_names = list(self.object_distribution.keys()) or list(DEFAULT_OBJECT_NAMES)
         self.receptacle_names = list(self.surface_distribution.keys()) or list(DEFAULT_RECEPTACLE_NAMES)
         self.target_object: str | None = self.object_names[0]
@@ -206,6 +208,11 @@ class SimpleGridImageEnv(Env):
         success = False
         horizon = False
 
+        n_clear_before = (
+            len(self._objects_on_receptacle(self.target_receptacle))
+            if self.task_type == "clear"
+            else 0
+        )
         prev_obj_dist = self._distance_to_target_object()
         prev_target_dist = self._distance_to_target_receptacle()
 
@@ -245,6 +252,10 @@ class SimpleGridImageEnv(Env):
                 success = True
                 self._resample_task()
                 self._task_steps = 0
+
+        if self.task_type == "clear" and not success:
+            n_clear_after = len(self._objects_on_receptacle(self.target_receptacle))
+            reward += self.clear_receptacle_shaping_scale * (n_clear_before - n_clear_after)
 
         if not success and self._task_steps >= self.max_task_steps:
             horizon = True
