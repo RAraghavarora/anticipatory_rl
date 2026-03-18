@@ -4,14 +4,14 @@ task_distribution:
   clear_receptacle: 0.3
 
 object_distribution:
-  water_bottle: 0.3333333333
-  apple: 0.3333333333
-  book: 0.3333333334
+  water_bottle: 0.4
+  apple: 0.3
+  book: 0.3
 
 surface_distribution:
-  kitchen_counter: 0.34
-  dining_table: 0.33
-  study_table: 0.33
+  kitchen_counter: 0.4
+  dining_table: 0.3
+  study_table: 0.3
 
 object_source_distribution:
   water_bottle:
