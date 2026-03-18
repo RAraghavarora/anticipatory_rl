@@ -3,7 +3,7 @@
 #================================================
 # SBATCH Slurm Configuration
 #================================================
-#SBATCH --job-name=train_3box_agent      # Name of the job
+#SBATCH --job-name=clear_rec      # Name of the job
 #SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1                     # Total number of nodes to request
@@ -12,8 +12,8 @@
 #SBATCH --cpus-per-task=16             # Cores per task
 #SBATCH --mem=20g                     # Main memory requested
 #SBATCH --time=48:00:00               # Duration of job
-#SBATCH --output=train_3box_job_%j.out     # Standard output log file
-#SBATCH --error=train_3box_job_%j.err      # Standard error log file
+#SBATCH --output=clear_rec%j.out     # Standard output log file
+#SBATCH --error=clear_rec%j.err      # Standard error log file
 
 #================================================
 # Environment and Job Execution
@@ -29,7 +29,7 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --replay-size 50000 \
   --batch-size 64 \
   --lr 3e-4 \
-  --tasks-per-reset 20 \
+  --tasks-per-reset 2 \
   --episode-step-limit 4000 \
   --output runs/simple_grid_image_dqn_5x5_3r4o.pt \
   --config-path anticipatory_rl/configs/config_5x5_3r4o.yaml \
