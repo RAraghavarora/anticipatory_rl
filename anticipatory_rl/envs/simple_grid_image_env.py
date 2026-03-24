@@ -356,17 +356,16 @@ class SimpleGridImageEnv(Env):
         self._update_pending_auto_success()
 
     def _resample_clear_task(self) -> bool:
+        # Sample clear target from surface weights even if already empty: proactive
+        # layouts get immediate reward (auto-success), matching anticipatory training.
         rec_choices: List[str] = list(self.receptacle_names)
-        rec = None
-        for _ in range(30):
-            candidate = self._weighted_choice(self.surface_distribution, rec_choices)
-            if self._objects_on_receptacle(candidate):
-                rec = candidate
-                break
-        if rec is None:
-            if not rec_choices:
-                return False
-            rec = self._weighted_choice(self.surface_distribution, rec_choices)
+        if not rec_choices:
+            return False
+        if self._last_target_receptacle is not None and len(self.receptacle_names) > 1:
+            filtered = [r for r in rec_choices if r != self._last_target_receptacle]
+            if filtered:
+                rec_choices = filtered
+        rec = self._weighted_choice(self.surface_distribution, rec_choices)
         self.task_type = "clear"
         self.target_object = None
         self.target_receptacle = rec
