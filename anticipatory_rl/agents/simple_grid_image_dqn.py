@@ -234,6 +234,11 @@ class VectorEnv:
         self.grid_size = self.envs[0].grid_size
         self.action_space = self.envs[0].action_space
 
+    def set_clear_task_prob(self, prob: float) -> None:
+        for env in self.envs:
+            if hasattr(env, 'set_clear_task_prob'):
+                env.set_clear_task_prob(prob)
+
     def reset(self, seed: int | None = None):
         obs_list = []
         infos = []
@@ -281,7 +286,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         )
 
     env = VectorEnv(make_env, max(1, args.num_envs))
-    grid_dir = Path("runs") / f"{env.grid_size}_image_dqn"
+    grid_dir = Path("runs") / f"{env.grid_size}_{args.tasks_per_reset}_image_dqn"
     grid_dir.mkdir(parents=True, exist_ok=True)
     args.output = grid_dir / args.output.name
 
@@ -422,7 +427,29 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         frac = min(1.0, step / max(1, args.epsilon_decay))
         return args.epsilon_start + frac * (args.epsilon_final - args.epsilon_start)
 
+    flipped = False
     while global_step < args.total_steps:
+        # Flip clear_rec and bring_single after 300k steps
+        if not flipped and global_step >= 300_000:
+            # Get current task_distribution from one env
+            task_dist = None
+            if hasattr(env.envs[0], 'object_distribution'):
+                # Try to get the config if available
+                if hasattr(env.envs[0], 'object_distribution'):
+                    # Try to get the config if available
+                    pass
+            # Try to flip the probabilities
+            # We assume the config is loaded from file, but we can flip the runtime probabilities
+            # For clear_task_prob, flip with bring_single
+            # Get current clear_task_prob and estimate bring_single prob
+            # For this code, we only flip clear_task_prob and print a message
+            # Get the current clear_task_prob from the first env
+            clear_prob = env.envs[0].clear_task_prob
+            # Estimate bring_single prob as 1 - clear_prob (if only two tasks)
+            bring_single_prob = 1.0 - clear_prob
+            env.set_clear_task_prob(bring_single_prob)
+            flipped = True
+            print(f"[INFO] Flipped clear_task_prob to {bring_single_prob} at step {global_step}")
         base_eps = current_epsilon(global_step)
         if global_step < epsilon_restart_until:
             eps = max(base_eps, args.epsilon_restart_value)
