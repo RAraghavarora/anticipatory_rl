@@ -7,6 +7,7 @@ import json
 import os
 import random
 from collections import deque
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -16,6 +17,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from anticipatory_rl.envs.simple_grid_image_env import OBJECT_NAMES, SimpleGridImageEnv
@@ -271,6 +273,54 @@ class VectorEnv:
             env.set_active_objects(count)
 
 
+def _estimate_preparedness(
+    source_env: SimpleGridImageEnv,
+    q_net: nn.Module,
+    device: torch.device,
+    samples: int,
+    max_steps: Optional[int] = None,
+) -> Dict[str, float]:
+    if samples <= 0:
+        return {}
+    base_env = copy.deepcopy(source_env)
+    eval_horizon = max_steps or base_env.max_task_steps
+    rewards: List[float] = []
+    steps: List[int] = []
+    successes = 0
+    was_training = q_net.training
+    q_net.eval()
+    for _ in range(samples):
+        eval_env = copy.deepcopy(base_env)
+        eval_env._rng = np.random.default_rng()  # randomize future-task sampling
+        eval_env._resample_task()
+        obs = eval_env._obs()
+        total_reward = 0.0
+        for step in range(eval_horizon):
+            obs_tensor = torch.from_numpy(obs).unsqueeze(0).to(device=device, dtype=torch.float32)
+            with torch.no_grad():
+                q_vals = q_net(obs_tensor)
+            action = int(torch.argmax(q_vals, dim=1).item())
+            obs, reward, success, horizon, _ = eval_env.step(action)
+            total_reward += reward
+            if success or horizon:
+                successes += int(success)
+                steps.append(step + 1)
+                break
+        else:
+            steps.append(eval_horizon)
+        rewards.append(total_reward)
+    if was_training:
+        q_net.train()
+    avg_reward = float(np.mean(rewards)) if rewards else 0.0
+    avg_steps = float(np.mean(steps)) if steps else 0.0
+    success_rate = float(successes) / max(1, samples)
+    return {
+        "preparedness/avg_reward": avg_reward,
+        "preparedness/avg_steps": avg_steps,
+        "preparedness/success_rate": success_rate,
+    }
+
+
 def train(args: argparse.Namespace, device: torch.device) -> None:
     def make_env():
         return SimpleGridImageEnv(
@@ -288,6 +338,9 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     grid_dir = Path("runs") / f"{env.grid_size}_{args.tasks_per_reset}_image_dqn"
     grid_dir.mkdir(parents=True, exist_ok=True)
     args.output = grid_dir / args.output.name
+    tb_dir = args.tb_log_dir or (grid_dir / "tb" / args.output.stem)
+    tb_dir.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(log_dir=str(tb_dir))
 
     replay = PrioritizedReplayBuffer(
         args.replay_size,
@@ -357,6 +410,11 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     epsilon_restart_until = -1
     last_restart_step = -10**9
     goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
+    log_interval = max(1, args.log_interval)
+    preparedness_interval = (
+        max(1, args.preparedness_interval) if args.preparedness_interval > 0 else None
+    )
+    next_preparedness_eval = preparedness_interval
 
     # --- Diagnostic accumulators ---
     action_counts = np.zeros(6, dtype=np.int64)
@@ -565,6 +623,26 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         task_steps += 1
         global_step += num_envs
         progress.update(num_envs)
+        if global_step % log_interval == 0:
+            writer.add_scalar("train/epsilon", eps, global_step)
+            writer.add_scalar("env/clear_task_prob", env.envs[0].clear_task_prob, global_step)
+            writer.add_scalar("train/replay_size", len(replay), global_step)
+            avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
+            writer.add_scalar("train/recent_return", avg_return, global_step)
+            window_success = float(np.mean(recent_successes)) if recent_successes else 0.0
+            writer.add_scalar("train/recent_success", window_success, global_step)
+            if rolling_move_success:
+                writer.add_scalar(
+                    "tasks/move_success_rate",
+                    float(np.mean(rolling_move_success)),
+                    global_step,
+                )
+            if rolling_clear_success:
+                writer.add_scalar(
+                    "tasks/clear_success_rate",
+                    float(np.mean(rolling_clear_success)),
+                    global_step,
+                )
 
         for idx in range(num_envs):
             if task_done[idx]:
@@ -623,6 +701,22 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                     float(np.mean(recent_returns)) if recent_returns else 0.0
                 )
                 rolling_history_x.append(total_tasks)
+
+                while (
+                    preparedness_interval is not None
+                    and next_preparedness_eval is not None
+                    and total_tasks >= next_preparedness_eval
+                ):
+                    prep_metrics = _estimate_preparedness(
+                        env.envs[idx],
+                        q_net,
+                        device,
+                        args.preparedness_samples,
+                        args.preparedness_max_steps,
+                    )
+                    for metric_name, metric_value in prep_metrics.items():
+                        writer.add_scalar(metric_name, metric_value, global_step)
+                    next_preparedness_eval += preparedness_interval
 
                 # Anticipation: record this task's auto-satisfied status by position
                 if _episode_len > 0:
@@ -930,6 +1024,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         "anticipation_delta_final": float(antic_delta_history[-1]) if antic_delta_history else None,
     }
     _write_diagnostics_json(diag, args.output)
+    writer.close()
 
 
 def _plot_auto_rate_by_pos(
@@ -1399,6 +1494,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-update", type=int, default=1_000)
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
+    parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=1_000,
+        help="Environment steps between TensorBoard scalar logs.",
+    )
+    parser.add_argument(
+        "--tb-log-dir",
+        type=Path,
+        default=None,
+        help="Optional TensorBoard log directory (defaults to runs/<grid>_image_dqn/tb/<run_name>).",
+    )
+    parser.add_argument(
+        "--preparedness-samples",
+        type=int,
+        default=5,
+        help="Number of Monte Carlo rollouts when estimating preparedness.",
+    )
+    parser.add_argument(
+        "--preparedness-interval",
+        type=int,
+        default=1_000,
+        help="Completed tasks between preparedness evaluations (<=0 disables).",
+    )
+    parser.add_argument(
+        "--preparedness-max-steps",
+        type=int,
+        default=None,
+        help="Max steps per preparedness rollout (default: env max_task_steps).",
+    )
     parser.add_argument(
         "--torch-threads",
         type=int,
