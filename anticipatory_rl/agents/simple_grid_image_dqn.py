@@ -341,6 +341,9 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     tb_dir = args.tb_log_dir or (grid_dir / "tb" / args.output.stem)
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(tb_dir))
+    env_reset_tasks = (
+        args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
+    )
 
     replay = PrioritizedReplayBuffer(
         args.replay_size,
@@ -386,6 +389,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     )
     episode_transitions: List[List[Transition]] = [[] for _ in range(num_envs)]
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
+    env_tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
     steps_since_reset = np.zeros(num_envs, dtype=np.int64)
 
     # Anticipation tracking (per-position auto-success rates)
@@ -592,12 +596,23 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 non_success_step_count += 1
 
         episode_done_flags = np.zeros(num_envs, dtype=bool)
+        env_reset_flags = np.zeros(num_envs, dtype=bool)
         for idx in range(num_envs):
             steps_since_reset[idx] += 1
             finished_task = bool(task_done[idx])
             if finished_task:
                 tasks_since_reset[idx] += 1
+                env_tasks_since_reset[idx] += 1
                 if args.tasks_per_reset > 0 and tasks_since_reset[idx] >= args.tasks_per_reset:
+                    episode_done_flags[idx] = True
+                    tasks_since_reset[idx] = 0
+                if (
+                    env_reset_tasks is not None
+                    and env_reset_tasks > 0
+                    and env_tasks_since_reset[idx] >= env_reset_tasks
+                ):
+                    env_reset_flags[idx] = True
+                    env_tasks_since_reset[idx] = 0
                     episode_done_flags[idx] = True
             if args.episode_step_limit > 0 and steps_since_reset[idx] >= args.episode_step_limit:
                 episode_done_flags[idx] = True
@@ -755,19 +770,25 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 task_steps[idx] = 0
 
         for idx in range(num_envs):
-            if episode_done_flags[idx]:
+            if env_reset_flags[idx]:
                 new_obs, new_info = env.reset_env(idx)
                 state[idx] = new_obs
+                next_infos[idx] = new_info
+                task_start_obj_dist[idx] = _obj_dist_from_info(new_info)
+                env_tasks_since_reset[idx] = 0
+            if episode_done_flags[idx]:
                 tasks_since_reset[idx] = 0
                 steps_since_reset[idx] = 0
                 task_return[idx] = 0.0
                 task_steps[idx] = 0
                 episode_transitions[idx].clear()
-                next_infos[idx] = new_info
-                task_start_obj_dist[idx] = _obj_dist_from_info(new_info)
+                if not env_reset_flags[idx]:
+                    task_start_obj_dist[idx] = _obj_dist_from_info(
+                        next_infos[idx] if idx < len(next_infos) else {}
+                    )
                 if _episode_len > 0:
                     current_task_auto_satisfied[idx] = bool(
-                        new_info.get("next_auto_satisfied", False)
+                        next_infos[idx].get("next_auto_satisfied", False)
                     )
 
         infos = next_infos
@@ -1550,6 +1571,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of completed tasks that make up one RL episode (done=True only after this many).",
+    )
+    parser.add_argument(
+        "--env-reset-tasks",
+        type=int,
+        default=None,
+        help="Physical environment reset interval in tasks (default: same as tasks-per-reset).",
     )
     parser.add_argument(
         "--episode-step-limit",

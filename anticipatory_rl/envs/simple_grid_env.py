@@ -1,334 +1,359 @@
-"""Minimal 3x3 gridworld with a single object and target."""
+"""Relational-graph observation variant of :class:`SimpleGridImageEnv`."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
-from gymnasium import Env, spaces
+from gymnasium import spaces
+
+from .simple_grid_image_env import (
+    OBJECT_NAMES,
+    RECEPTACLE_LIST,
+    SimpleGridImageEnv,
+)
+
 
 Coord = Tuple[int, int]
 
+NODE_TYPES: Tuple[str, ...] = ("agent", "object", "receptacle")
+EDGE_TYPES: Tuple[str, ...] = (
+    "agent_object",
+    "object_agent",
+    "object_receptacle",
+    "receptacle_object",
+    "agent_receptacle",
+    "receptacle_agent",
+    "object_object",
+)
+EDGE_TYPE_TO_IDX = {name: idx for idx, name in enumerate(EDGE_TYPES)}
 
-OBJECT_NAMES = ["obj_a", "obj_b", "obj_c", "obj_d"]
-RECEPTACLE_LIST = ["rec_a", "rec_b", "rec_c"]
 
+class SimpleGridEnv(SimpleGridImageEnv):
+    """State-sharing grid environment that emits relational graph observations.
 
-@dataclass
-class SimpleGridState:
-    agent: Coord
-    objects: Dict[str, Coord]
-    carrying: str | None
-
-
-class SimpleGridEnv(Env):
+    The core dynamics (task sampling, transitions, rewards, config handling, etc.)
+    come directly from :class:`SimpleGridImageEnv`. This subclass changes only the
+    observation head so that downstream agents can consume a structured graph with
+    per-entity features and typed edges describing spatial relationships.
     """
-    Deterministic NxN grid:
-    - Agent moves with four cardinal actions.
-    - A single object can be picked up when the agent stands on it and dropped elsewhere.
-    - Goal is to place the object on the fixed target coordinate.
-    """
-
-    metadata = {"render.modes": []}
-
-    MOVE_UP = 0
-    MOVE_DOWN = 1
-    MOVE_LEFT = 2
-    MOVE_RIGHT = 3
-    PICK = 4
-    PLACE = 5
 
     def __init__(
         self,
-        grid_size: int = 6,
-        max_task_steps: int = 200,
-        success_reward: float = 50.0,
-        num_objects: int = len(OBJECT_NAMES),
-        correct_pick_bonus: float = 0.0,
-        distance_reward: bool = False,
-        distance_reward_scale: float = 1.0,
+        *,
+        max_edges: int | None = None,
+        **kwargs,
     ) -> None:
-        super().__init__()
-        self.grid_size = grid_size
-        self.max_task_steps = max_task_steps
-        self.success_reward = success_reward
-        self.correct_pick_bonus = correct_pick_bonus
-        self.distance_reward = distance_reward
-        self.distance_reward_scale = distance_reward_scale
-        self.target_object: str = OBJECT_NAMES[0]
-        self.target_receptacle: str = RECEPTACLE_LIST[0]
-        self._last_target_receptacle: str | None = None
-        self.action_space = spaces.Discrete(6)
-        self.max_objects = len(OBJECT_NAMES)
-        self.active_count = max(1, min(num_objects, self.max_objects))
-        self.active_objects = OBJECT_NAMES[: self.active_count]
-        self.receptacles = {
-            "rec_a": [(0, 0), (1, 0), (0, 1), (1, 1)],
-            "rec_b": [
-                (self.grid_size - 2, 0),
-                (self.grid_size - 1, 0),
-                (self.grid_size - 2, 1),
-                (self.grid_size - 1, 1),
-            ],
-            "rec_c": [
-                (0, self.grid_size - 2),
-                (1, self.grid_size - 2),
-                (0, self.grid_size - 1),
-                (1, self.grid_size - 1),
-            ],
+        super().__init__(**kwargs)
+        self.node_feature_dim = 10
+        self.edge_feature_dim = len(EDGE_TYPES) + 6
+        self.global_feat_dim = 6
+        self.max_object_nodes = len(self.object_names)
+        self.max_receptacle_nodes = len(self.receptacle_names)
+        self.max_nodes = 1 + self.max_object_nodes + self.max_receptacle_nodes
+        self.max_edges = max_edges or self._default_max_edges()
+        self._agent_idx = 0
+        self._object_offset = 1
+        self._receptacle_offset = 1 + self.max_object_nodes
+        self.observation_space = spaces.Dict(
+            nodes=spaces.Dict(
+                features=spaces.Box(
+                    low=-1.0,
+                    high=1.0,
+                    shape=(self.max_nodes, self.node_feature_dim),
+                    dtype=np.float32,
+                ),
+                types=spaces.Box(
+                    low=0,
+                    high=len(NODE_TYPES),
+                    shape=(self.max_nodes,),
+                    dtype=np.int64,
+                ),
+                mask=spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(self.max_nodes,),
+                    dtype=np.float32,
+                ),
+            ),
+            edges=spaces.Dict(
+                index=spaces.Box(
+                    low=0,
+                    high=self.max_nodes,
+                    shape=(2, self.max_edges),
+                    dtype=np.int64,
+                ),
+                features=spaces.Box(
+                    low=-1.0,
+                    high=1.0,
+                    shape=(self.max_edges, self.edge_feature_dim),
+                    dtype=np.float32,
+                ),
+                mask=spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(self.max_edges,),
+                    dtype=np.float32,
+                ),
+            ),
+            global_context=spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(self.global_feat_dim,),
+                dtype=np.float32,
+            ),
+        )
+
+    # ------------------------------------------------------------------ core observation API
+    def _obs(self) -> Dict[str, object]:
+        nodes, coords, node_mask = self._encode_nodes()
+        edges = self._encode_edges(coords, node_mask)
+        globals_vec = self._encode_globals()
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "global_context": globals_vec,
         }
-        obs_dim = self._feature_length()
-        self.observation_space = spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(obs_dim,),
+
+    # ------------------------------------------------------------------ node encoding
+    def _encode_nodes(self) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
+        grid_norm = max(1.0, float(self.grid_size - 1))
+        node_features = np.zeros((self.max_nodes, self.node_feature_dim), dtype=np.float32)
+        node_types = np.zeros((self.max_nodes,), dtype=np.int64)
+        node_mask = np.zeros((self.max_nodes,), dtype=np.float32)
+        raw_coords = np.full((self.max_nodes, 2), -1.0, dtype=np.float32)
+
+        def assign_common(idx: int, coord: Coord | Tuple[float, float], node_type: int) -> None:
+            node_types[idx] = node_type
+            node_mask[idx] = 1.0
+            raw_coords[idx] = np.asarray(coord, dtype=np.float32)
+            node_features[idx, :2] = raw_coords[idx] / grid_norm
+            node_features[idx, 2 + node_type] = 1.0
+
+        # Agent node
+        agent_idx = self._agent_idx
+        assign_common(agent_idx, self.state.agent, NODE_TYPES.index("agent"))
+        carrying_idx = (
+            self.object_names.index(self.state.carrying)
+            if self.state.carrying in self.object_names
+            else -1
+        )
+        node_features[agent_idx, 5] = 1.0 if self.state.carrying is not None else 0.0
+        node_features[agent_idx, 6] = 1.0 if self._coord_on_receptacle(self.state.agent) else 0.0
+        node_features[agent_idx, 7] = 1.0 if self.state.carrying == self.target_object else 0.0
+        node_features[agent_idx, 8] = (
+            float(carrying_idx) / max(1.0, self.max_object_nodes - 1)
+            if carrying_idx >= 0
+            else -1.0
+        )
+        node_features[agent_idx, 9] = (
+            float(self.object_names.index(self.target_object)) / max(1.0, self.max_object_nodes - 1)
+        )
+
+        # Object nodes
+        for i, name in enumerate(self.object_names):
+            idx = self._object_offset + i
+            node_types[idx] = NODE_TYPES.index("object")
+            if name not in self.active_objects:
+                continue
+            coord = self._object_position(name)
+            assign_common(idx, coord, NODE_TYPES.index("object"))
+            is_target = 1.0 if name == self.target_object else 0.0
+            is_carried = 1.0 if self.state.carrying == name else 0.0
+            tile_coord = (
+                (int(coord[0]), int(coord[1])) if coord is not None else None
+            )
+            on_target_surface = (
+                1.0
+                if tile_coord is not None and tile_coord in self.receptacles[self.target_receptacle]
+                else 0.0
+            )
+            node_features[idx, 5] = 1.0
+            node_features[idx, 6] = is_target
+            node_features[idx, 7] = is_carried
+            node_features[idx, 8] = on_target_surface
+            node_features[idx, 9] = float(i) / max(1.0, self.max_object_nodes - 1)
+
+        # Receptacle nodes
+        for j, name in enumerate(self.receptacle_names):
+            idx = self._receptacle_offset + j
+            node_types[idx] = NODE_TYPES.index("receptacle")
+            centroid = self._receptacle_centroid(name)
+            assign_common(idx, centroid, NODE_TYPES.index("receptacle"))
+            occupancy = len(self._objects_on_receptacle(name))
+            node_features[idx, 5] = occupancy / max(1.0, float(self.max_object_nodes))
+            node_features[idx, 6] = 1.0 if name == self.target_receptacle else 0.0
+            node_features[idx, 7] = len(self.receptacles[name]) / max(1.0, float(self.grid_size**2))
+            node_features[idx, 8] = (
+                1.0 if self.state.agent in self.receptacles[name] else 0.0
+            )
+            node_features[idx, 9] = float(j) / max(1.0, self.max_receptacle_nodes - 1)
+
+        nodes = {
+            "features": node_features,
+            "types": node_types,
+            "mask": node_mask,
+        }
+        return nodes, raw_coords, node_mask
+
+    # ------------------------------------------------------------------ edge encoding
+    def _encode_edges(
+        self,
+        coords: np.ndarray,
+        node_mask: np.ndarray,
+    ) -> Dict[str, np.ndarray]:
+        edge_index = np.zeros((2, self.max_edges), dtype=np.int64)
+        edge_attr = np.zeros((self.max_edges, self.edge_feature_dim), dtype=np.float32)
+        edge_mask = np.zeros((self.max_edges,), dtype=np.float32)
+        cursor = 0
+        grid_norm = max(1.0, float(self.grid_size - 1))
+
+        def coord_for(idx: int) -> np.ndarray | None:
+            if node_mask[idx] == 0.0:
+                return None
+            return coords[idx]
+
+        def discrete_tile(idx: int) -> Tuple[int, int] | None:
+            arr = coord_for(idx)
+            if arr is None:
+                return None
+            return (int(round(float(arr[0]))), int(round(float(arr[1]))))
+
+        def add_edge(
+            src: int,
+            dst: int,
+            edge_type: str,
+            contact_flag: bool,
+            target_flag: bool,
+        ) -> None:
+            nonlocal cursor
+            if cursor >= self.max_edges:
+                raise RuntimeError("Graph edge budget exceeded; increase max_edges.")
+            src_coord = coord_for(src)
+            dst_coord = coord_for(dst)
+            if src_coord is None or dst_coord is None:
+                return
+            rel = dst_coord - src_coord
+            rel_norm = rel / grid_norm
+            manhattan = (np.abs(rel[0]) + np.abs(rel[1])) / (2.0 * grid_norm)
+            euclid = float(np.linalg.norm(rel, ord=2)) / (np.sqrt(2.0) * grid_norm)
+            feat = np.zeros((self.edge_feature_dim,), dtype=np.float32)
+            type_idx = EDGE_TYPE_TO_IDX[edge_type]
+            feat[type_idx] = 1.0
+            offset = len(EDGE_TYPES)
+            feat[offset] = rel_norm[0]
+            feat[offset + 1] = rel_norm[1]
+            feat[offset + 2] = manhattan
+            feat[offset + 3] = euclid
+            feat[offset + 4] = 1.0 if contact_flag else 0.0
+            feat[offset + 5] = 1.0 if target_flag else 0.0
+            edge_index[:, cursor] = (src, dst)
+            edge_attr[cursor] = feat
+            edge_mask[cursor] = 1.0
+            cursor += 1
+
+        agent_idx = self._agent_idx
+        object_indices = {
+            name: self._object_offset + i for i, name in enumerate(self.object_names)
+        }
+        receptacle_indices = {
+            name: self._receptacle_offset + j
+            for j, name in enumerate(self.receptacle_names)
+        }
+
+        # Agent <-> objects
+        for name in self.active_objects:
+            idx = object_indices[name]
+            obj_tile = discrete_tile(idx)
+            agent_contact = obj_tile is not None and self.state.agent == obj_tile
+            is_target_obj = name == self.target_object
+            add_edge(agent_idx, idx, "agent_object", agent_contact, is_target_obj)
+            add_edge(idx, agent_idx, "object_agent", agent_contact, is_target_obj)
+
+        # Agent <-> receptacles
+        for rec_name in self.receptacle_names:
+            rec_idx = receptacle_indices[rec_name]
+            agent_on_rec = self.state.agent in self.receptacles[rec_name]
+            is_target_rec = rec_name == self.target_receptacle
+            add_edge(agent_idx, rec_idx, "agent_receptacle", agent_on_rec, is_target_rec)
+            add_edge(rec_idx, agent_idx, "receptacle_agent", agent_on_rec, is_target_rec)
+
+        # Object <-> receptacles
+        for obj_name in self.active_objects:
+            obj_idx = object_indices[obj_name]
+            obj_tile = discrete_tile(obj_idx)
+            for rec_name in self.receptacle_names:
+                rec_idx = receptacle_indices[rec_name]
+                on_surface = obj_tile is not None and obj_tile in self.receptacles[rec_name]
+                target_pair = (obj_name == self.target_object) or (
+                    rec_name == self.target_receptacle
+                )
+                add_edge(obj_idx, rec_idx, "object_receptacle", on_surface, target_pair)
+                add_edge(rec_idx, obj_idx, "receptacle_object", on_surface, target_pair)
+
+        # Object <-> object proximity (complete directed graph over active objects)
+        for i, src_name in enumerate(self.active_objects):
+            src_idx = object_indices[src_name]
+            src_tile = discrete_tile(src_idx)
+            for j, dst_name in enumerate(self.active_objects):
+                if i == j:
+                    continue
+                dst_idx = object_indices[dst_name]
+                dst_tile = discrete_tile(dst_idx)
+                same_tile = src_tile is not None and dst_tile is not None and src_tile == dst_tile
+                touches_target = src_name == self.target_object or dst_name == self.target_object
+                add_edge(src_idx, dst_idx, "object_object", same_tile, touches_target)
+
+        return {
+            "index": edge_index,
+            "features": edge_attr,
+            "mask": edge_mask,
+        }
+
+    # ------------------------------------------------------------------ globals
+    def _encode_globals(self) -> np.ndarray:
+        obj_idx = self.object_names.index(self.target_object)
+        rec_idx = self.receptacle_names.index(self.target_receptacle)
+        max_obj_norm = max(1.0, self.max_object_nodes - 1)
+        max_rec_norm = max(1.0, self.max_receptacle_nodes - 1)
+        carrying = 1.0 if self.state.carrying is not None else 0.0
+        carrying_target = 1.0 if self.state.carrying == self.target_object else 0.0
+        on_target_surface = (
+            1.0
+            if self._objects_on_receptacle(self.target_receptacle)
+            else 0.0
+        )
+        return np.asarray(
+            [
+                1.0 if self.task_type == "clear" else 0.0,
+                obj_idx / max_obj_norm,
+                rec_idx / max_rec_norm,
+                carrying,
+                carrying_target,
+                on_target_surface,
+            ],
             dtype=np.float32,
         )
-        self.state = SimpleGridState(agent=(0, 0), objects={}, carrying=None)
-        self._rng = np.random.default_rng()
 
-    def reset(self, *, seed: int | None = None, options: Dict | None = None):
-        super().reset(seed=seed)
-        self._rng = np.random.default_rng(seed)
-        options = options or {}
+    # ------------------------------------------------------------------ helpers
+    def _receptacle_centroid(self, name: str) -> Tuple[float, float]:
+        tiles = self.receptacles[name]
+        xs = [coord[0] for coord in tiles]
+        ys = [coord[1] for coord in tiles]
+        return (float(np.mean(xs)), float(np.mean(ys)))
 
-        agent_override = options.get("agent_pos")
-        if agent_override is not None:
-            agent = self._validate_coord(agent_override)
-        else:
-            agent = self._sample_coord()
+    def _default_max_edges(self) -> int:
+        obj = self.max_object_nodes
+        rec = self.max_receptacle_nodes
+        agent_obj = 2 * obj
+        agent_rec = 2 * rec
+        obj_rec = 2 * obj * rec
+        obj_obj = max(0, 2 * obj * (obj - 1))
+        return agent_obj + agent_rec + obj_rec + obj_obj
 
-        objects: Dict[str, Coord] = {}
-        occupied = {agent}
-        for name in self.active_objects:
-            coord = self._sample_coord(exclude=occupied)
-            objects[name] = coord
-            occupied.add(coord)
 
-        object_under_agent = options.get("object_under_agent")
-        if object_under_agent:
-            obj_name = (
-                object_under_agent
-                if isinstance(object_under_agent, str)
-                else self.active_objects[0]
-            )
-            if obj_name not in self.active_objects:
-                raise ValueError(f"Object '{obj_name}' is not active.")
-            objects[obj_name] = agent
-
-        self.state = SimpleGridState(agent=agent, objects=objects, carrying=None)
-        self._last_target_receptacle = None
-        self._resample_task()
-        self._task_steps = 0
-        return self._obs(), self._info()
-
-    def step(self, action: int):
-        self._task_steps += 1
-        reward = -0.05
-        success = False
-        horizon = False
-
-        prev_obj_dist = self._distance_to_target_object()
-        prev_target_dist = self._distance_to_target_receptacle()
-
-        if action == self.MOVE_UP:
-            reward += self._move_agent(0, -1)
-        elif action == self.MOVE_DOWN:
-            reward += self._move_agent(0, 1)
-        elif action == self.MOVE_LEFT:
-            reward += self._move_agent(-1, 0)
-        elif action == self.MOVE_RIGHT:
-            reward += self._move_agent(1, 0)
-        elif action == self.PICK:
-            picked = self._handle_pick()
-            if picked is None:
-                reward -= 1.0
-        elif action == self.PLACE:
-            if not self._handle_place():
-                reward -= 1.0
-
-        if self.distance_reward:
-            if self.state.carrying == self.target_object:
-                new_dist = self._distance_to_target_receptacle()
-                if prev_target_dist is None:
-                    prev_target_dist = new_dist
-                reward += self.distance_reward_scale * (prev_target_dist - new_dist)
-            else:
-                new_dist = self._distance_to_target_object()
-                if prev_obj_dist is None:
-                    prev_obj_dist = new_dist
-                reward += self.distance_reward_scale * (prev_obj_dist - new_dist)
-
-        target_tiles = self.receptacles[self.target_receptacle]
-        obj_pos = self._object_position(self.target_object)
-        if obj_pos in target_tiles:
-            reward = self.success_reward
-            success = True
-            self._resample_task()
-            self._task_steps = 0
-        elif self._task_steps >= self.max_task_steps:
-            horizon = True
-            self._resample_task()
-            self._task_steps = 0
-        return self._obs(), reward, success, horizon, self._info(success=success)
-
-    # ------------------------------------------------------------------ Helpers
-    def _move_agent(self, dx: int, dy: int) -> float:
-        ax, ay = self.state.agent
-        nx = np.clip(ax + dx, 0, self.grid_size - 1)
-        ny = np.clip(ay + dy, 0, self.grid_size - 1)
-        penalty = -1.0 if (nx == ax and ny == ay) else 0.0
-        self.state.agent = (nx, ny)
-        if self.state.carrying is not None:
-            self.state.objects[self.state.carrying] = (nx, ny)
-        return penalty
-
-    def _handle_pick(self) -> Optional[str]:
-        if self.state.carrying is not None:
-            return None
-        for name, coord in self.state.objects.items():
-            if coord == self.state.agent and name in self.active_objects:
-                self.state.carrying = name
-                return name
-        return None
-
-    def _handle_place(self) -> bool:
-        if self.state.carrying is None:
-            return False
-        self.state.objects[self.state.carrying] = self.state.agent
-        self.state.carrying = None
-        return True
-
-    def _validate_coord(self, coord: Coord) -> Coord:
-        x, y = coord
-        if not (0 <= x < self.grid_size and 0 <= y < self.grid_size):
-            raise ValueError(f"Coordinate {coord} is outside the grid.")
-        return int(x), int(y)
-
-    def _obs(self) -> np.ndarray:
-        return self._encode_state()
-
-    def _info(self, success: bool | None = None) -> Dict[str, object]:
-        return {
-            "agent": self.state.agent,
-            "objects": dict(self.state.objects),
-            "carrying": self.state.carrying,
-            "target_object": self.target_object,
-            "target_receptacle": self.target_receptacle,
-            "success": bool(success),
-        }
-
-    # ------------------------------------------------------------------ Task helpers
-    def _resample_task(self) -> None:
-        obj = self._rng.choice(self.active_objects)
-        rec_choices = RECEPTACLE_LIST
-        if self._last_target_receptacle is not None and len(RECEPTACLE_LIST) > 1:
-            rec_choices = [r for r in RECEPTACLE_LIST if r != self._last_target_receptacle]
-            if not rec_choices:
-                rec_choices = RECEPTACLE_LIST
-        rec = self._rng.choice(rec_choices)
-        target_tiles = self.receptacles[rec]
-        attempts = 0
-        while self.state.objects.get(obj) in target_tiles and attempts < 10:
-            obj = self._rng.choice(self.active_objects)
-            rec = self._rng.choice(rec_choices)
-            target_tiles = self.receptacles[rec]
-            attempts += 1
-        self.target_object = obj
-        self.target_receptacle = rec
-        self._last_target_receptacle = rec
-
-    def _object_position(self, name: str) -> Coord:
-        if self.state.carrying == name:
-            return self.state.agent
-        return self.state.objects.get(name, self.state.agent)
-
-    def _encode_state(self) -> np.ndarray:
-        grid = self.grid_size
-        features: List[float] = []
-        ax, ay = self.state.agent
-        features.append(ax / (grid - 1))
-        features.append(ay / (grid - 1))
-
-        holding = np.zeros(len(OBJECT_NAMES) + 1, dtype=np.float32)
-        if self.state.carrying is None:
-            holding[-1] = 1.0
-        else:
-            holding[OBJECT_NAMES.index(self.state.carrying)] = 1.0
-        features.extend(holding.tolist())
-
-        tile_dim = grid * grid
-        for name in OBJECT_NAMES:
-            vec = np.zeros(tile_dim + 1, dtype=np.float32)
-            coord = self.state.objects.get(name)
-            if self.state.carrying == name:
-                vec[-1] = 1.0
-            elif coord is not None:
-                idx = coord[1] * grid + coord[0]
-                vec[idx] = 1.0
-            features.extend(vec.tolist())
-
-        target_obj_vec = np.zeros(len(OBJECT_NAMES), dtype=np.float32)
-        target_obj_vec[OBJECT_NAMES.index(self.target_object)] = 1.0
-        features.extend(target_obj_vec.tolist())
-
-        target_rec_vec = np.zeros(len(RECEPTACLE_LIST), dtype=np.float32)
-        target_rec_vec[RECEPTACLE_LIST.index(self.target_receptacle)] = 1.0
-        features.extend(target_rec_vec.tolist())
-        return np.asarray(features, dtype=np.float32)
-
-    def _distance(self, a: Coord, b: Coord) -> int:
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-    def _distance_to_target_object(self) -> int | None:
-        obj_pos = self._object_position(self.target_object)
-        if obj_pos is None:
-            return None
-        return self._distance(self.state.agent, obj_pos)
-
-    def _distance_to_target_receptacle(self) -> int | None:
-        tiles = self.receptacles[self.target_receptacle]
-        return min(self._distance(self.state.agent, tile) for tile in tiles)
-
-    def _feature_length(self) -> int:
-        grid = self.grid_size
-        tile_dim = grid * grid
-        return (
-            2
-            + (len(OBJECT_NAMES) + 1)
-            + len(OBJECT_NAMES) * (tile_dim + 1)
-            + len(OBJECT_NAMES)
-            + len(RECEPTACLE_LIST)
-        )
-
-    def _sample_coord(self, exclude: Set[Coord] | None = None) -> Coord:
-        exclude = exclude or set()
-        while True:
-            coord = (
-                int(self._rng.integers(0, self.grid_size)),
-                int(self._rng.integers(0, self.grid_size)),
-            )
-            if coord not in exclude:
-                return coord
-
-    def set_active_objects(self, count: int) -> None:
-        count = max(1, min(count, self.max_objects))
-        if count == self.active_count:
-            return
-        self.active_count = count
-        self.active_objects = OBJECT_NAMES[:count]
-        occupied = set(self.state.objects.values())
-        occupied.add(self.state.agent)
-        for name in OBJECT_NAMES:
-            if name not in self.active_objects and name in self.state.objects:
-                if self.state.carrying == name:
-                    self.state.carrying = None
-                occupied.discard(self.state.objects[name])
-                del self.state.objects[name]
-        for name in self.active_objects:
-            if name not in self.state.objects:
-                coord = self._sample_coord(exclude=occupied)
-                self.state.objects[name] = coord
-                occupied.add(coord)
-        self._resample_task()
+__all__ = [
+    "SimpleGridEnv",
+    "OBJECT_NAMES",
+    "RECEPTACLE_LIST",
+]

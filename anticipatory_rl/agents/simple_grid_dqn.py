@@ -7,40 +7,182 @@ import random
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, List, Tuple
+from typing import Deque, Dict, List, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 
-from anticipatory_rl.envs.simple_grid_env import SimpleGridEnv, OBJECT_NAMES
+from anticipatory_rl.envs.simple_grid_env import SimpleGridEnv
 
 
-class QNetwork(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 128):
+def _np_copy(arr: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    return np.array(arr, dtype=dtype, copy=True)
+
+
+@dataclass
+class GraphObservation:
+    node_features: np.ndarray
+    node_types: np.ndarray
+    node_mask: np.ndarray
+    edge_index: np.ndarray
+    edge_features: np.ndarray
+    edge_mask: np.ndarray
+    global_context: np.ndarray
+
+    @classmethod
+    def from_env(cls, obs: Dict[str, object]) -> "GraphObservation":
+        nodes = obs["nodes"]
+        edges = obs["edges"]
+        return cls(
+            node_features=_np_copy(nodes["features"], np.float32),
+            node_types=_np_copy(nodes["types"], np.int64),
+            node_mask=_np_copy(nodes["mask"], np.float32),
+            edge_index=_np_copy(edges["index"], np.int64),
+            edge_features=_np_copy(edges["features"], np.float32),
+            edge_mask=_np_copy(edges["mask"], np.float32),
+            global_context=_np_copy(obs["global_context"], np.float32),
+        )
+
+
+@dataclass
+class GraphTensorBatch:
+    node_features: torch.Tensor
+    node_mask: torch.Tensor
+    node_types: torch.Tensor
+    edge_index: torch.Tensor
+    edge_features: torch.Tensor
+    edge_mask: torch.Tensor
+    global_context: torch.Tensor
+
+    def to(self, device: torch.device) -> "GraphTensorBatch":
+        return GraphTensorBatch(
+            node_features=self.node_features.to(device),
+            node_mask=self.node_mask.to(device),
+            node_types=self.node_types.to(device),
+            edge_index=self.edge_index.to(device),
+            edge_features=self.edge_features.to(device),
+            edge_mask=self.edge_mask.to(device),
+            global_context=self.global_context.to(device),
+        )
+
+
+def stack_graph_observations(
+    observations: Sequence[GraphObservation],
+    device: torch.device,
+) -> GraphTensorBatch:
+    node_features = torch.stack(
+        [torch.from_numpy(obs.node_features) for obs in observations], dim=0
+    ).to(device=device)
+    node_mask = torch.stack(
+        [torch.from_numpy(obs.node_mask) for obs in observations], dim=0
+    ).to(device=device)
+    node_types = torch.stack(
+        [torch.from_numpy(obs.node_types) for obs in observations], dim=0
+    ).to(device=device)
+    edge_index = torch.stack(
+        [torch.from_numpy(obs.edge_index) for obs in observations], dim=0
+    ).to(device=device)
+    edge_features = torch.stack(
+        [torch.from_numpy(obs.edge_features) for obs in observations], dim=0
+    ).to(device=device)
+    edge_mask = torch.stack(
+        [torch.from_numpy(obs.edge_mask) for obs in observations], dim=0
+    ).to(device=device)
+    global_context = torch.stack(
+        [torch.from_numpy(obs.global_context) for obs in observations], dim=0
+    ).to(device=device)
+    return GraphTensorBatch(
+        node_features=node_features,
+        node_mask=node_mask,
+        node_types=node_types,
+        edge_index=edge_index,
+        edge_features=edge_features,
+        edge_mask=edge_mask,
+        global_context=global_context,
+    )
+
+
+class GraphQNetwork(nn.Module):
+    def __init__(
+        self,
+        node_dim: int,
+        edge_dim: int,
+        global_dim: int,
+        hidden_dim: int = 128,
+        message_dim: int | None = None,
+        num_layers: int = 2,
+    ) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+        message_dim = message_dim or hidden_dim
+        self.node_encoder = nn.Linear(node_dim, hidden_dim)
+        self.edge_encoder = nn.Linear(edge_dim, hidden_dim)
+        self.global_encoder = nn.Linear(global_dim, hidden_dim)
+        self.message_mlps = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_dim + hidden_dim, message_dim),
+                    nn.ReLU(),
+                    nn.Linear(message_dim, hidden_dim),
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.update_mlps = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_dim + hidden_dim, hidden_dim),
+                    nn.ReLU(),
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 6),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+    def forward(self, batch: GraphTensorBatch) -> torch.Tensor:
+        node_mask = batch.node_mask.unsqueeze(-1)
+        node_latent = torch.relu(self.node_encoder(batch.node_features)) * node_mask
+        edge_latent = torch.relu(self.edge_encoder(batch.edge_features))
+        edge_mask = batch.edge_mask.unsqueeze(-1)
+        src_indices = batch.edge_index[:, 0, :].long()
+        dst_indices = batch.edge_index[:, 1, :].long()
+
+        for msg_mlp, upd_mlp in zip(self.message_mlps, self.update_mlps):
+            src_feat = self._gather_nodes(node_latent, src_indices)
+            msg_inp = torch.cat([src_feat, edge_latent], dim=-1)
+            messages = msg_mlp(msg_inp) * edge_mask
+            agg = torch.zeros_like(node_latent)
+            expanded_dst = dst_indices.unsqueeze(-1).expand_as(messages)
+            agg.scatter_add_(1, expanded_dst, messages)
+            node_latent = node_latent + upd_mlp(torch.cat([node_latent, agg], dim=-1))
+            node_latent = node_latent * node_mask
+
+        node_sum = (node_latent * node_mask).sum(dim=1)
+        denom = node_mask.sum(dim=1).clamp(min=1.0)
+        node_pool = node_sum / denom
+        global_latent = torch.relu(self.global_encoder(batch.global_context))
+        graph_feat = torch.cat([node_pool, global_latent], dim=-1)
+        return self.head(graph_feat)
+
+    @staticmethod
+    def _gather_nodes(nodes: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+        idx = indices.unsqueeze(-1).expand(-1, -1, nodes.size(-1))
+        return torch.gather(nodes, 1, idx)
 
 
 @dataclass
 class Transition:
-    state: np.ndarray
+    state: GraphObservation
     action: int
     reward: float
-    next_state: np.ndarray
+    next_state: GraphObservation
     done: bool
 
 
@@ -118,10 +260,21 @@ def train(args: argparse.Namespace) -> None:
         maxlen=args.goal_buffer_size if args.goal_buffer_size > 0 else None
     )
 
-    state, _ = env.reset(seed=args.seed)
-    input_dim = len(state)
-    q_net = QNetwork(input_dim=input_dim, hidden_dim=args.hidden_dim).to(device)
-    target_net = QNetwork(input_dim=input_dim, hidden_dim=args.hidden_dim).to(device)
+    node_dim = env.node_feature_dim
+    edge_dim = env.edge_feature_dim
+    global_dim = env.global_feat_dim
+    q_net = GraphQNetwork(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        global_dim=global_dim,
+        hidden_dim=args.hidden_dim,
+    ).to(device)
+    target_net = GraphQNetwork(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        global_dim=global_dim,
+        hidden_dim=args.hidden_dim,
+    ).to(device)
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
@@ -148,7 +301,8 @@ def train(args: argparse.Namespace) -> None:
     last_restart_step = -10**9
 
     progress = tqdm(total=args.total_steps, desc="SimpleGrid DQN")
-    state, _ = env.reset(seed=args.seed)
+    obs_raw, _ = env.reset(seed=args.seed)
+    state = GraphObservation.from_env(obs_raw)
     task_return = 0.0
     task_steps = 0
     goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
@@ -166,8 +320,8 @@ def train(args: argparse.Namespace) -> None:
         else:
             eps = base_eps
         with torch.no_grad():
-            inp = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-            q_vals = q_net(inp)
+            graph_batch = stack_graph_observations([state], device=device)
+            q_vals = q_net(graph_batch)
             greedy_action = int(torch.argmax(q_vals, dim=1).item())
             greedy_value = float(torch.max(q_vals).item())
         greedy_value_history.append(greedy_value)
@@ -179,7 +333,7 @@ def train(args: argparse.Namespace) -> None:
 
         obs, reward, success, horizon, info = env.step(action)
         done = success or horizon
-        next_state = obs
+        next_state = GraphObservation.from_env(obs)
         transition = Transition(state, action, reward, next_state, done)
         replay.push(transition)
         episode_transitions.append(transition)
@@ -225,7 +379,8 @@ def train(args: argparse.Namespace) -> None:
                     goal_buffer.append(trans)
             episode_transitions.clear()
             if tasks_since_reset >= args.tasks_per_reset:
-                state, _ = env.reset()
+                obs_raw, _ = env.reset()
+                state = GraphObservation.from_env(obs_raw)
                 tasks_since_reset = 0
                 episode_transitions.clear()
             if (
@@ -237,7 +392,8 @@ def train(args: argparse.Namespace) -> None:
 
         if not curriculum_applied and global_step >= curriculum_switch:
             env.set_active_objects(args.num_objects)
-            state, _ = env.reset()
+            obs_raw, _ = env.reset()
+            state = GraphObservation.from_env(obs_raw)
             task_return = 0.0
             task_steps = 0
             curriculum_applied = True
@@ -281,12 +437,10 @@ def train(args: argparse.Namespace) -> None:
                 else np.ones(len(batch), dtype=np.float32)
             )
 
-            states = torch.tensor(np.stack([t.state for t in batch]), dtype=torch.float32, device=device)
+            states = stack_graph_observations([t.state for t in batch], device=device)
             actions = torch.tensor([t.action for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
             rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-            next_states = torch.tensor(
-                np.stack([t.next_state for t in batch]), dtype=torch.float32, device=device
-            )
+            next_states = stack_graph_observations([t.next_state for t in batch], device=device)
             dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
             weights_t = torch.tensor(weights_arr, dtype=torch.float32, device=device).unsqueeze(1)
 

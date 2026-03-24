@@ -3,3 +3,9 @@ torch==2.2.0
 tqdm>=4.66.0
 PyYAML>=6.0
 matplotlib>=3.8.0
+openai>=1.60.0
+google-genai>=1.68.0
+pypdf>=6.0.0
+docx2txt>=0.9
+ai2thor>=5.0.0
+procthor>=1.0.0

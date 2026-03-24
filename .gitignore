@@ -14,3 +14,5 @@ runs/
 sas_plan*
 
 *.log
+*.err
+*.out
