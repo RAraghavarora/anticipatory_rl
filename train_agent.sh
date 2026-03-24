@@ -25,6 +25,7 @@ source /u/rarora1/ant_env/bin/activate
 python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --grid-size 5 \
   --num-objects 4 \
+  --run-label anticipatory \
   --total-steps 700000 \
   --replay-size 50000 \
   --batch-size 64 \

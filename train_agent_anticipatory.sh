@@ -1,9 +1,11 @@
 #!/bin/bash
+# Submit from the repo root (anticipatory_rl/) so paths resolve.
+# Log directory is committed as slurm_logs/; if missing: mkdir -p slurm_logs
 
 #================================================
-# SBATCH Slurm Configuration
+# SBATCH — logs under slurm_logs/ with readable job name + unique job id
 #================================================
-#SBATCH --job-name=anticipatory_agent
+#SBATCH --job-name=imgdq_ant_5x5_3r4o_tpr200
 #SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -12,19 +14,23 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=20g
 #SBATCH --time=48:00:00
-#SBATCH --output=anticipatory_agent%j.out
-#SBATCH --error=anticipatory_agent%j.err
+#SBATCH --output=slurm_logs/%x.%j.out
+#SBATCH --error=slurm_logs/%x.%j.err
 
 #================================================
-# Environment and Job Execution
+# Environment and job
 #================================================
-echo "Job started on $(hostname) at $(date)"
+set -euo pipefail
+echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
+echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
+echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
 
 python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --grid-size 5 \
   --num-objects 4 \
+  --run-label anticipatory \
   --total-steps 700000 \
   --replay-size 50000 \
   --batch-size 64 \
@@ -36,6 +42,7 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --tau 0.01 \
   --gamma 0.97 \
   --success-reward 12 \
-  --clear-receptacle-shaping-scale 3.0
+  --clear-receptacle-shaping-scale 3.0 \
+  --seed 0
 
-echo "Job finished at $(date)"
+echo "Job finished at $(date -Is)"

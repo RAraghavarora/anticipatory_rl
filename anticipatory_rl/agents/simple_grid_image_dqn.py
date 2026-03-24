@@ -7,7 +7,6 @@ import json
 import os
 import random
 from collections import deque
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -21,6 +20,167 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from anticipatory_rl.envs.simple_grid_image_env import OBJECT_NAMES, SimpleGridImageEnv
+
+
+# --- Matplotlib / TensorBoard visuals -----------------------------------------
+_PRETTY_MPL_RC: Dict[str, Any] = {
+    "figure.facecolor": "#f4f4f5",
+    "axes.facecolor": "#ffffff",
+    "axes.edgecolor": "#d4d4d8",
+    "axes.labelcolor": "#3f3f46",
+    "axes.titlecolor": "#18181b",
+    "text.color": "#3f3f46",
+    "xtick.color": "#71717a",
+    "ytick.color": "#71717a",
+    "grid.color": "#e4e4e7",
+    "grid.linestyle": "-",
+    "grid.linewidth": 0.9,
+    "axes.grid": True,
+    "grid.alpha": 0.85,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "font.size": 10,
+    "axes.titlesize": 11,
+    "axes.titleweight": "600",
+    "axes.labelsize": 10,
+    "figure.titlesize": 14,
+    "figure.titleweight": "600",
+    "lines.linewidth": 2.0,
+    "lines.antialiased": True,
+    "legend.frameon": True,
+    "legend.framealpha": 0.92,
+    "legend.edgecolor": "#e4e4e7",
+    "legend.facecolor": "#ffffff",
+    "legend.fontsize": 9,
+}
+
+_TB_COLORS = {
+    "epsilon": "#7c3aed",
+    "return": "#059669",
+    "success": "#2563eb",
+    "replay": "#64748b",
+    "move": "#db2777",
+    "clear": "#ea580c",
+    "clear_prob": "#0d9488",
+    "fill": "#a1a1aa",
+}
+
+
+def _apply_pretty_mpl_defaults() -> None:
+    plt.rcParams.update(_PRETTY_MPL_RC)
+
+
+def _tb_smooth(y: List[float], window: int) -> np.ndarray:
+    arr = np.asarray(y, dtype=np.float64)
+    n = len(arr)
+    if n < 2:
+        return arr.copy()
+    w = max(3, min(window | 1, n))  # odd, at least 3
+    if w > n:
+        w = n if n % 2 == 1 else n - 1
+    if w < 3:
+        return arr.copy()
+    kernel = np.ones(w, dtype=np.float64) / w
+    return np.convolve(arr, kernel, mode="same")
+
+
+def _build_tensorboard_dashboard_figure(
+    steps: List[int],
+    epsilon: List[float],
+    recent_return: List[float],
+    recent_success: List[float],
+    replay_size: List[float],
+    clear_task_prob: List[float],
+    move_sr: List[float],
+    clear_sr: List[float],
+    title_suffix: str = "",
+    smooth_window: int = 15,
+) -> plt.Figure:
+    """Multi-panel figure for SummaryWriter.add_figure (Scalars tab stays raw)."""
+    with plt.rc_context(_PRETTY_MPL_RC):
+        fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
+        st = np.asarray(steps, dtype=np.float64)
+
+        def _style_axis(ax: Any) -> None:
+            ax.tick_params(axis="both", which="major", length=4, width=0.8)
+            ax.set_xlabel("Environment step", fontsize=9, color="#71717a")
+
+        # (0,0) Exploration ε
+        ax = axes[0, 0]
+        ye = np.asarray(epsilon, dtype=np.float64)
+        ax.fill_between(st, ye, alpha=0.12, color=_TB_COLORS["epsilon"], linewidth=0)
+        ax.plot(st, ye, color=_TB_COLORS["epsilon"], linewidth=2.0)
+        ax.set_ylabel("ε", fontsize=10)
+        ax.set_title("Exploration (ε)", loc="left", pad=8)
+        if len(ye):
+            ax.set_ylim(0.0, max(1.05, float(np.nanmax(ye)) * 1.08))
+        else:
+            ax.set_ylim(0.0, 1.0)
+        _style_axis(ax)
+
+        # (0,1) Recent return (window ≈100 tasks) + smooth
+        ax = axes[0, 1]
+        yr = np.asarray(recent_return, dtype=np.float64)
+        ax.plot(st, yr, color=_TB_COLORS["return"], linewidth=1.0, alpha=0.35, label="raw")
+        if len(yr) >= 3:
+            ax.plot(st, _tb_smooth(list(yr), smooth_window), color=_TB_COLORS["return"], linewidth=2.2, label="smoothed")
+        else:
+            ax.plot(st, yr, color=_TB_COLORS["return"], linewidth=2.2)
+        ax.set_ylabel("Mean return", fontsize=10)
+        ax.set_title("Recent per-task return (~100 tasks)", loc="left", pad=8)
+        ax.legend(loc="upper right", fontsize=8)
+        _style_axis(ax)
+
+        # (0,2) Success rate
+        ax = axes[0, 2]
+        ys = np.asarray(recent_success, dtype=np.float64)
+        ax.fill_between(st, ys, alpha=0.15, color=_TB_COLORS["success"], linewidth=0)
+        if len(ys) >= 3:
+            ax.plot(st, _tb_smooth(list(ys), smooth_window), color=_TB_COLORS["success"], linewidth=2.2)
+        else:
+            ax.plot(st, ys, color=_TB_COLORS["success"], linewidth=2.2)
+        ax.axhline(0.5, color="#d4d4d8", linestyle="--", linewidth=1, zorder=0)
+        ax.set_ylim(-0.02, 1.05)
+        ax.set_ylabel("Success rate", fontsize=10)
+        ax.set_title("Rolling task success (~100)", loc="left", pad=8)
+        _style_axis(ax)
+
+        # (1,0) Replay buffer
+        ax = axes[1, 0]
+        yrep = np.asarray(replay_size, dtype=np.float64)
+        ax.fill_between(st, yrep, alpha=0.2, color=_TB_COLORS["replay"], linewidth=0)
+        ax.plot(st, yrep, color=_TB_COLORS["replay"], linewidth=2.0)
+        ax.set_ylabel("Transitions", fontsize=10)
+        ax.set_title("Replay buffer size", loc="left", pad=8)
+        _style_axis(ax)
+
+        # (1,1) Move vs clear success
+        ax = axes[1, 1]
+        ym = np.asarray(move_sr, dtype=np.float64)
+        yc = np.asarray(clear_sr, dtype=np.float64)
+        if np.isfinite(ym).any():
+            ax.plot(st, ym, color=_TB_COLORS["move"], linewidth=2.0, label="Move tasks", alpha=0.95)
+        if np.isfinite(yc).any():
+            ax.plot(st, yc, color=_TB_COLORS["clear"], linewidth=2.0, label="Clear tasks", alpha=0.95)
+        ax.set_ylim(-0.02, 1.05)
+        ax.set_ylabel("Success rate", fontsize=10)
+        ax.set_title("Success by task type (~100)", loc="left", pad=8)
+        ax.legend(loc="lower right", fontsize=8)
+        _style_axis(ax)
+
+        # (1,2) Clear-task sampling probability
+        ax = axes[1, 2]
+        yp = np.asarray(clear_task_prob, dtype=np.float64)
+        ax.fill_between(st, yp, alpha=0.15, color=_TB_COLORS["clear_prob"], linewidth=0)
+        ax.plot(st, yp, color=_TB_COLORS["clear_prob"], linewidth=2.0)
+        ax.set_ylim(-0.02, 1.05)
+        ax.set_ylabel("P(clear)", fontsize=10)
+        ax.set_title("Clear-task probability (env)", loc="left", pad=8)
+        _style_axis(ax)
+
+        fig.suptitle(f"SimpleGrid image DQN — training dashboard{title_suffix}", fontsize=14, y=1.01)
+        fig.patch.set_facecolor(_PRETTY_MPL_RC["figure.facecolor"])
+    return fig
 
 
 class ConvQNetwork(nn.Module):
@@ -236,10 +396,6 @@ class VectorEnv:
         self.grid_size = self.envs[0].grid_size
         self.action_space = self.envs[0].action_space
 
-    def set_clear_task_prob(self, prob: float) -> None:
-        for env in self.envs:
-            env.set_clear_task_prob(prob)
-
     def reset(self, seed: int | None = None):
         obs_list = []
         infos = []
@@ -273,52 +429,11 @@ class VectorEnv:
             env.set_active_objects(count)
 
 
-def _estimate_preparedness(
-    source_env: SimpleGridImageEnv,
-    q_net: nn.Module,
-    device: torch.device,
-    samples: int,
-    max_steps: Optional[int] = None,
-) -> Dict[str, float]:
-    if samples <= 0:
-        return {}
-    base_env = copy.deepcopy(source_env)
-    eval_horizon = max_steps or base_env.max_task_steps
-    rewards: List[float] = []
-    steps: List[int] = []
-    successes = 0
-    was_training = q_net.training
-    q_net.eval()
-    for _ in range(samples):
-        eval_env = copy.deepcopy(base_env)
-        eval_env._rng = np.random.default_rng()  # randomize future-task sampling
-        eval_env._resample_task()
-        obs = eval_env._obs()
-        total_reward = 0.0
-        for step in range(eval_horizon):
-            obs_tensor = torch.from_numpy(obs).unsqueeze(0).to(device=device, dtype=torch.float32)
-            with torch.no_grad():
-                q_vals = q_net(obs_tensor)
-            action = int(torch.argmax(q_vals, dim=1).item())
-            obs, reward, success, horizon, _ = eval_env.step(action)
-            total_reward += reward
-            if success or horizon:
-                successes += int(success)
-                steps.append(step + 1)
-                break
-        else:
-            steps.append(eval_horizon)
-        rewards.append(total_reward)
-    if was_training:
-        q_net.train()
-    avg_reward = float(np.mean(rewards)) if rewards else 0.0
-    avg_steps = float(np.mean(steps)) if steps else 0.0
-    success_rate = float(successes) / max(1, samples)
-    return {
-        "preparedness/avg_reward": avg_reward,
-        "preparedness/avg_steps": avg_steps,
-        "preparedness/success_rate": success_rate,
-    }
+def _resolve_run_label(args: argparse.Namespace) -> str:
+    """Label run directories as myopic vs anticipatory (overridable via --run-label)."""
+    if args.run_label is not None:
+        return args.run_label
+    return "myopic" if args.tasks_per_reset <= 1 else "anticipatory"
 
 
 def train(args: argparse.Namespace, device: torch.device) -> None:
@@ -335,12 +450,15 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         )
 
     env = VectorEnv(make_env, max(1, args.num_envs))
-    grid_dir = Path("runs") / f"{env.grid_size}_{args.tasks_per_reset}_image_dqn"
+    run_label = _resolve_run_label(args)
+    grid_dir = Path("runs") / f"{env.grid_size}_{run_label}_image_dqn_tpr{args.tasks_per_reset}"
     grid_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[train] Run artifacts → {grid_dir.resolve()} ({run_label})")
     args.output = grid_dir / args.output.name
     tb_dir = args.tb_log_dir or (grid_dir / "tb" / args.output.stem)
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(tb_dir))
+    _apply_pretty_mpl_defaults()
     env_reset_tasks = (
         args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
     )
@@ -415,10 +533,21 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     last_restart_step = -10**9
     goal_fraction = max(0.0, min(args.goal_buffer_fraction, 1.0))
     log_interval = max(1, args.log_interval)
-    preparedness_interval = (
-        max(1, args.preparedness_interval) if args.preparedness_interval > 0 else None
-    )
-    next_preparedness_eval = preparedness_interval
+    if args.tb_dashboard_interval is not None and args.tb_dashboard_interval > 0:
+        tb_dash_interval = max(1, args.tb_dashboard_interval)
+    elif args.tb_dashboard_interval is not None and args.tb_dashboard_interval <= 0:
+        tb_dash_interval = log_interval
+    else:
+        tb_dash_interval = max(2500, log_interval * 4)
+
+    tb_dash_steps: List[int] = []
+    tb_dash_eps: List[float] = []
+    tb_dash_return: List[float] = []
+    tb_dash_success: List[float] = []
+    tb_dash_replay: List[float] = []
+    tb_dash_clear_prob: List[float] = []
+    tb_dash_move_sr: List[float] = []
+    tb_dash_clear_sr: List[float] = []
 
     # --- Diagnostic accumulators ---
     action_counts = np.zeros(6, dtype=np.int64)
@@ -488,18 +617,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         frac = min(1.0, step / max(1, args.epsilon_decay))
         return args.epsilon_start + frac * (args.epsilon_final - args.epsilon_start)
 
-    initial_clear_prob = env.envs[0].clear_task_prob if env.num_envs > 0 else 0.0
-    flip_step = 300_000
-    flipped = False
     while global_step < args.total_steps:
-        if not flipped and global_step >= flip_step:
-            new_prob = float(np.clip(1.0 - initial_clear_prob, 0.0, 1.0))
-            env.set_clear_task_prob(new_prob)
-            flipped = True
-            print(
-                f"[INFO] Flipped clear_task_prob from {initial_clear_prob:.3f} "
-                f"to {new_prob:.3f} at step {global_step}"
-            )
         base_eps = current_epsilon(global_step)
         if global_step < epsilon_restart_until:
             eps = max(base_eps, args.epsilon_restart_value)
@@ -640,7 +758,8 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
         progress.update(num_envs)
         if global_step % log_interval == 0:
             writer.add_scalar("train/epsilon", eps, global_step)
-            writer.add_scalar("env/clear_task_prob", env.envs[0].clear_task_prob, global_step)
+            clear_p = float(env.envs[0].clear_task_prob)
+            writer.add_scalar("env/clear_task_prob", clear_p, global_step)
             writer.add_scalar("train/replay_size", len(replay), global_step)
             avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
             writer.add_scalar("train/recent_return", avg_return, global_step)
@@ -658,6 +777,34 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                     float(np.mean(rolling_clear_success)),
                     global_step,
                 )
+
+            tb_dash_steps.append(global_step)
+            tb_dash_eps.append(float(eps))
+            tb_dash_return.append(avg_return)
+            tb_dash_success.append(window_success)
+            tb_dash_replay.append(float(len(replay)))
+            tb_dash_clear_prob.append(clear_p)
+            tb_dash_move_sr.append(
+                float(np.mean(rolling_move_success)) if rolling_move_success else float("nan")
+            )
+            tb_dash_clear_sr.append(
+                float(np.mean(rolling_clear_success)) if rolling_clear_success else float("nan")
+            )
+
+            if global_step % tb_dash_interval == 0 and tb_dash_steps:
+                dash = _build_tensorboard_dashboard_figure(
+                    tb_dash_steps,
+                    tb_dash_eps,
+                    tb_dash_return,
+                    tb_dash_success,
+                    tb_dash_replay,
+                    tb_dash_clear_prob,
+                    tb_dash_move_sr,
+                    tb_dash_clear_sr,
+                    title_suffix=f" · {run_label}",
+                )
+                writer.add_figure("visuals/training_dashboard", dash, global_step)
+                plt.close(dash)
 
         for idx in range(num_envs):
             if task_done[idx]:
@@ -716,22 +863,6 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                     float(np.mean(recent_returns)) if recent_returns else 0.0
                 )
                 rolling_history_x.append(total_tasks)
-
-                while (
-                    preparedness_interval is not None
-                    and next_preparedness_eval is not None
-                    and total_tasks >= next_preparedness_eval
-                ):
-                    prep_metrics = _estimate_preparedness(
-                        env.envs[idx],
-                        q_net,
-                        device,
-                        args.preparedness_samples,
-                        args.preparedness_max_steps,
-                    )
-                    for metric_name, metric_value in prep_metrics.items():
-                        writer.add_scalar(metric_name, metric_value, global_step)
-                    next_preparedness_eval += preparedness_interval
 
                 # Anticipation: record this task's auto-satisfied status by position
                 if _episode_len > 0:
@@ -1117,47 +1248,64 @@ def _plot_metrics(
         return
     plot_path = weight_path.with_name(weight_path.stem + "_metrics.png")
     plot_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(5, 1, figsize=(10, 12))
-    reward_window = 100
-    step_ma = _moving_average(step_rewards, reward_window)
-    axes[0].plot(step_rewards, linewidth=0.4, alpha=0.15, color="#1f77b4")
-    if step_ma is not None:
-        ma_x = np.arange(reward_window - 1, reward_window - 1 + len(step_ma))
-        axes[0].plot(ma_x, step_ma, linewidth=1.2, color="#1f77b4")
-    axes[0].set_title(f"Per-step reward (MA window={reward_window})")
-    axes[0].set_ylabel("Reward")
-    return_window = 100
-    return_ma = _moving_average(episode_returns, return_window)
-    axes[1].plot(episode_returns, linewidth=0.6, alpha=0.2, color="#ff7f0e")
-    if return_ma is not None:
-        ma_x = np.arange(return_window - 1, return_window - 1 + len(return_ma))
-        axes[1].plot(ma_x, return_ma, linewidth=1.2, color="#ff7f0e")
-    axes[1].set_title(f"Per-task return (MA window={return_window})")
-    axes[1].set_xlabel("Episode")
-    axes[1].set_ylabel("Return")
-    if greedy_values:
-        axes[2].plot(greedy_values, linewidth=0.5)
-        axes[2].set_title("Greedy action value")
-        axes[2].set_xlabel("Step")
-        axes[2].set_ylabel("Q-value")
-    else:
-        axes[2].set_visible(False)
-    if td_errors:
-        axes[3].plot(td_errors, linewidth=0.5, color="#d62728")
-        axes[3].set_title("Mean TD error")
-        axes[3].set_xlabel("Update step")
-        axes[3].set_ylabel("|δ|")
-    else:
-        axes[3].set_visible(False)
-    if target_values:
-        axes[4].plot(target_values, linewidth=0.5, color="#9467bd")
-        axes[4].set_title("Target value magnitude")
-        axes[4].set_xlabel("Update step")
-        axes[4].set_ylabel("|Target|")
-    else:
-        axes[4].set_visible(False)
-    fig.tight_layout()
-    fig.savefig(plot_path)
+    c_rwd, c_ret, c_q, c_td, c_tgt = (
+        _TB_COLORS["success"],
+        _TB_COLORS["return"],
+        _TB_COLORS["epsilon"],
+        "#e11d48",
+        _TB_COLORS["clear"],
+    )
+    with plt.rc_context(_PRETTY_MPL_RC):
+        fig, axes = plt.subplots(5, 1, figsize=(10.5, 12.5), constrained_layout=True)
+        reward_window = 100
+        step_ma = _moving_average(step_rewards, reward_window)
+        x_r = np.arange(len(step_rewards))
+        axes[0].fill_between(x_r, step_rewards, alpha=0.12, color=c_rwd, linewidth=0)
+        axes[0].plot(x_r, step_rewards, linewidth=0.35, alpha=0.25, color=c_rwd)
+        if step_ma is not None:
+            ma_x = np.arange(reward_window - 1, reward_window - 1 + len(step_ma))
+            axes[0].plot(ma_x, step_ma, linewidth=2.0, color=c_rwd)
+        axes[0].set_title(f"Per-step reward (MA window={reward_window})")
+        axes[0].set_ylabel("Reward")
+        return_window = 100
+        return_ma = _moving_average(episode_returns, return_window)
+        x_e = np.arange(len(episode_returns))
+        axes[1].fill_between(x_e, episode_returns, alpha=0.12, color=c_ret, linewidth=0)
+        axes[1].plot(x_e, episode_returns, linewidth=0.5, alpha=0.35, color=c_ret)
+        if return_ma is not None:
+            ma_x = np.arange(return_window - 1, return_window - 1 + len(return_ma))
+            axes[1].plot(ma_x, return_ma, linewidth=2.0, color=c_ret)
+        axes[1].set_title(f"Per-task return (MA window={return_window})")
+        axes[1].set_xlabel("Task index")
+        axes[1].set_ylabel("Return")
+        if greedy_values:
+            axes[2].plot(greedy_values, linewidth=1.0, color=c_q, alpha=0.85)
+            axes[2].set_title("Greedy action value (masked max Q)")
+            axes[2].set_xlabel("Environment step")
+            axes[2].set_ylabel("Q-value")
+        else:
+            axes[2].set_visible(False)
+        if td_errors:
+            axes[3].plot(td_errors, linewidth=1.0, color=c_td, alpha=0.9)
+            axes[3].set_title("Mean |TD error|")
+            axes[3].set_xlabel("Update step")
+            axes[3].set_ylabel("|δ|")
+        else:
+            axes[3].set_visible(False)
+        if target_values:
+            axes[4].plot(target_values, linewidth=1.0, color=c_tgt, alpha=0.9)
+            axes[4].set_title("Target value magnitude")
+            axes[4].set_xlabel("Update step")
+            axes[4].set_ylabel("|Target|")
+        else:
+            axes[4].set_visible(False)
+        fig.patch.set_facecolor(_PRETTY_MPL_RC["figure.facecolor"])
+        fig.savefig(
+            plot_path,
+            dpi=140,
+            bbox_inches="tight",
+            facecolor=fig.get_facecolor(),
+        )
     plt.close(fig)
     print(f"Saved training curves to {plot_path}")
     if task_lengths:
@@ -1174,17 +1322,25 @@ def _plot_rolling_stats(
         return
     plot_path = weight_path.with_name(weight_path.stem + "_rolling.png")
     plot_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    axes[0].plot(task_indices, success_history, linewidth=0.8, color="#1f77b4")
-    axes[0].set_ylabel("Success rate")
-    axes[0].set_ylim(0.0, 1.05)
-    axes[0].set_title("Rolling success rate (window≈100)")
-    axes[1].plot(task_indices, return_history, linewidth=0.8, color="#ff7f0e")
-    axes[1].set_ylabel("Return")
-    axes[1].set_xlabel("Completed task")
-    axes[1].set_title("Rolling return (window≈100)")
-    fig.tight_layout()
-    fig.savefig(plot_path)
+    with plt.rc_context(_PRETTY_MPL_RC):
+        fig, axes = plt.subplots(2, 1, figsize=(10.5, 7.2), sharex=True, constrained_layout=True)
+        axes[0].fill_between(task_indices, success_history, alpha=0.15, color=_TB_COLORS["success"], linewidth=0)
+        axes[0].plot(task_indices, success_history, linewidth=2.0, color=_TB_COLORS["success"])
+        axes[0].set_ylabel("Success rate")
+        axes[0].set_ylim(0.0, 1.05)
+        axes[0].set_title("Rolling success rate (window ≈ 100)")
+        axes[1].fill_between(task_indices, return_history, alpha=0.12, color=_TB_COLORS["return"], linewidth=0)
+        axes[1].plot(task_indices, return_history, linewidth=2.0, color=_TB_COLORS["return"])
+        axes[1].set_ylabel("Return")
+        axes[1].set_xlabel("Completed task")
+        axes[1].set_title("Rolling return (window ≈ 100)")
+        fig.patch.set_facecolor(_PRETTY_MPL_RC["figure.facecolor"])
+        fig.savefig(
+            plot_path,
+            dpi=140,
+            bbox_inches="tight",
+            facecolor=fig.get_facecolor(),
+        )
     plt.close(fig)
     print(f"Saved rolling metrics to {plot_path}")
 
@@ -1522,28 +1678,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Environment steps between TensorBoard scalar logs.",
     )
     parser.add_argument(
+        "--tb-dashboard-interval",
+        type=int,
+        default=None,
+        help=(
+            "Steps between TensorBoard dashboard figures (IMAGES tab). "
+            "Default: max(2500, 4×log-interval). Use 0 or negative to match --log-interval."
+        ),
+    )
+    parser.add_argument(
         "--tb-log-dir",
         type=Path,
         default=None,
-        help="Optional TensorBoard log directory (defaults to runs/<grid>_image_dqn/tb/<run_name>).",
-    )
-    parser.add_argument(
-        "--preparedness-samples",
-        type=int,
-        default=5,
-        help="Number of Monte Carlo rollouts when estimating preparedness.",
-    )
-    parser.add_argument(
-        "--preparedness-interval",
-        type=int,
-        default=1_000,
-        help="Completed tasks between preparedness evaluations (<=0 disables).",
-    )
-    parser.add_argument(
-        "--preparedness-max-steps",
-        type=int,
-        default=None,
-        help="Max steps per preparedness rollout (default: env max_task_steps).",
+        help="Optional TensorBoard log directory (defaults to runs/<grid>_<label>_image_dqn_tpr*/tb/<run_name>).",
     )
     parser.add_argument(
         "--torch-threads",
@@ -1566,6 +1713,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to task/object/receptacle distribution YAML.",
     )
     parser.add_argument("--success-reward", type=float, default=10.0)
+    parser.add_argument(
+        "--run-label",
+        type=str,
+        choices=("anticipatory", "myopic"),
+        default=None,
+        help="Subdirectory label under runs/ (default: myopic if tasks-per-reset<=1, else anticipatory).",
+    )
     parser.add_argument(
         "--tasks-per-reset",
         type=int,
