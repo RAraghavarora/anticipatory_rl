@@ -657,3 +657,7 @@ class SimpleGridImageEnv(Env):
                 self.state.objects[name] = coord
                 occupied.add(coord)
         self._resample_task()
+
+    def set_clear_task_prob(self, prob: float) -> None:
+        """Dynamically adjust probability of sampling clear tasks."""
+        self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
