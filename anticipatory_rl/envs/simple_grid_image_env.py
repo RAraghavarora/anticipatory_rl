@@ -258,8 +258,10 @@ class SimpleGridImageEnv(Env):
             reward += self.clear_receptacle_shaping_scale * (n_clear_before - n_clear_after)
 
         if not success and self._task_steps >= self.max_task_steps:
+            # Time-limit is an exogenous truncation, not a task transition.
+            # Keep the same task active and let the caller decide whether to
+            # reset or continue from this state.
             horizon = True
-            self._resample_task()
             self._task_steps = 0
         return self._obs(), reward, success, horizon, self._info(success=success)
 

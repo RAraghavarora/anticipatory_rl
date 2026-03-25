@@ -415,12 +415,12 @@ class VectorEnv:
             env.step(int(action))
             for env, action in zip(self.envs, actions)
         ]
-        obs, rewards, success, horizon, infos = zip(*results)
+        obs, rewards, success, truncated, infos = zip(*results)
         return (
             np.stack(obs),
             np.asarray(rewards, dtype=np.float32),
             np.asarray(success, dtype=bool),
-            np.asarray(horizon, dtype=bool),
+            np.asarray(truncated, dtype=bool),
             infos,
         )
 
@@ -677,9 +677,11 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
             else:
                 steps_carrying_wrong += 1
 
-        next_state, reward, success, horizon, info = env.step(actions)
+        next_state, reward, success, truncated, info = env.step(actions)
         next_infos = list(info)
-        task_done = success | horizon
+        task_completed = success
+        task_ended = success | truncated
+        task_positions = tasks_since_reset.copy()
 
         for idx in range(num_envs):
             act = int(actions[idx])
@@ -715,14 +717,17 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
 
         episode_done_flags = np.zeros(num_envs, dtype=bool)
         env_reset_flags = np.zeros(num_envs, dtype=bool)
+        trunc_reset_flags = np.zeros(num_envs, dtype=bool)
+        bootstrap_done_flags = np.zeros(num_envs, dtype=bool)
         for idx in range(num_envs):
             steps_since_reset[idx] += 1
-            finished_task = bool(task_done[idx])
+            finished_task = bool(task_completed[idx])
             if finished_task:
                 tasks_since_reset[idx] += 1
                 env_tasks_since_reset[idx] += 1
                 if args.tasks_per_reset > 0 and tasks_since_reset[idx] >= args.tasks_per_reset:
                     episode_done_flags[idx] = True
+                    bootstrap_done_flags[idx] = True
                     tasks_since_reset[idx] = 0
                 if (
                     env_reset_tasks is not None
@@ -732,8 +737,15 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                     env_reset_flags[idx] = True
                     env_tasks_since_reset[idx] = 0
                     episode_done_flags[idx] = True
+                    bootstrap_done_flags[idx] = True
+            if truncated[idx]:
+                trunc_reset_flags[idx] = True
+                tasks_since_reset[idx] = 0
+                env_tasks_since_reset[idx] = 0
             if args.episode_step_limit > 0 and steps_since_reset[idx] >= args.episode_step_limit:
-                episode_done_flags[idx] = True
+                trunc_reset_flags[idx] = True
+                tasks_since_reset[idx] = 0
+                env_tasks_since_reset[idx] = 0
 
         for idx in range(num_envs):
             post_info = next_infos[idx] if idx < len(next_infos) else {}
@@ -742,10 +754,10 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 int(actions[idx]),
                 float(reward[idx]),
                 _encode_obs_storage(next_state[idx]),
-                bool(episode_done_flags[idx]),
+                bool(bootstrap_done_flags[idx]),
                 can_pick_next=bool(post_info.get("can_pick", False)),
                 can_place_next=bool(post_info.get("can_place", False)),
-                task_boundary=bool(task_done[idx]),
+                task_boundary=bool(task_completed[idx]),
             )
             replay.push(transition)
             episode_transitions[idx].append(transition)
@@ -807,7 +819,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 plt.close(dash)
 
         for idx in range(num_envs):
-            if task_done[idx]:
+            if task_ended[idx]:
                 episode_return = float(task_return[idx])
                 returns.append(episode_return)
                 task_lengths.append(int(task_steps[idx]))
@@ -840,7 +852,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 )
 
                 if not was_success:
-                    if bool(horizon[idx]):
+                    if bool(truncated[idx]):
                         fail_horizon += 1
                     elif bool(episode_done_flags[idx]):
                         fail_episode_step_limit += 1
@@ -848,10 +860,11 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 if task_start_obj_dist[idx] is not None:
                     initial_obj_dists.append(task_start_obj_dist[idx])
 
-                new_dist = _obj_dist_from_info(post_info)
-                if new_dist is not None and post_info.get("task_type") == "move":
-                    post_task_dist_to_next_obj.append(int(new_dist))
-                task_start_obj_dist[idx] = new_dist
+                if was_success:
+                    new_dist = _obj_dist_from_info(post_info)
+                    if new_dist is not None and post_info.get("task_type") == "move":
+                        post_task_dist_to_next_obj.append(int(new_dist))
+                    task_start_obj_dist[idx] = new_dist
 
                 if was_success:
                     tasks_completed += 1
@@ -864,18 +877,19 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 )
                 rolling_history_x.append(total_tasks)
 
-                # Anticipation: record this task's auto-satisfied status by position
+                # Anticipation: record this task's auto-satisfied status by task index
                 if _episode_len > 0:
-                    ep_pos = int(tasks_since_reset[idx]) - 1
+                    ep_pos = int(task_positions[idx])
                     if 0 <= ep_pos < _episode_len:
                         auto_sat = bool(current_task_auto_satisfied[idx])
                         auto_counts_by_pos[ep_pos] += int(auto_sat)
                         total_counts_by_pos[ep_pos] += 1
                         recent_auto_by_pos[ep_pos].append(int(auto_sat))
-                    # The env already resampled the next task; capture its flag
-                    current_task_auto_satisfied[idx] = bool(
-                        next_infos[idx].get("next_auto_satisfied", False)
-                    )
+                    if was_success:
+                        # On success the env has already sampled the next task.
+                        current_task_auto_satisfied[idx] = bool(
+                            next_infos[idx].get("next_auto_satisfied", False)
+                        )
                     # Periodically log the rolling anticipation delta
                     if (
                         total_tasks % _ANTIC_LOG_EVERY == 0
@@ -901,19 +915,19 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
                 task_steps[idx] = 0
 
         for idx in range(num_envs):
-            if env_reset_flags[idx]:
+            if env_reset_flags[idx] or trunc_reset_flags[idx]:
                 new_obs, new_info = env.reset_env(idx)
                 state[idx] = new_obs
                 next_infos[idx] = new_info
                 task_start_obj_dist[idx] = _obj_dist_from_info(new_info)
                 env_tasks_since_reset[idx] = 0
-            if episode_done_flags[idx]:
+            if episode_done_flags[idx] or trunc_reset_flags[idx]:
                 tasks_since_reset[idx] = 0
                 steps_since_reset[idx] = 0
                 task_return[idx] = 0.0
                 task_steps[idx] = 0
                 episode_transitions[idx].clear()
-                if not env_reset_flags[idx]:
+                if not env_reset_flags[idx] and not trunc_reset_flags[idx]:
                     task_start_obj_dist[idx] = _obj_dist_from_info(
                         next_infos[idx] if idx < len(next_infos) else {}
                     )
