@@ -81,6 +81,8 @@ class ThreeBoxEnv(Env):
         self,
         success_reward: float = 10.0,
         step_cost: float = 0.05,
+        invalid_action_penalty: float = 1.0,
+        wall_bump_penalty: float = 1.0,
         max_episode_steps: int = 200,
         prob_a: float = 0.2,
         render_tile_px: int = 12,
@@ -90,6 +92,8 @@ class ThreeBoxEnv(Env):
         self.grid_size = GRID_SIZE
         self.success_reward = success_reward
         self.step_cost = step_cost
+        self.invalid_action_penalty = invalid_action_penalty
+        self.wall_bump_penalty = wall_bump_penalty
         self.max_episode_steps = max_episode_steps
         self.prob_a = prob_a
 
@@ -169,6 +173,8 @@ class ThreeBoxEnv(Env):
             dx, dy = [(0, -1), (0, 1), (-1, 0), (1, 0)][action]
             nx = int(np.clip(self.agent[0] + dx, 0, self.grid_size - 1))
             ny = int(np.clip(self.agent[1] + dy, 0, self.grid_size - 1))
+            if (nx, ny) == self.agent:
+                reward -= self.wall_bump_penalty
             self.agent = (nx, ny)
             if self.carrying:
                 self.apple = (nx, ny)
@@ -176,12 +182,18 @@ class ThreeBoxEnv(Env):
         elif action == self.PICK:
             if not self.carrying and self.agent == self.apple:
                 self.carrying = True
+            else:
+                reward -= self.invalid_action_penalty
 
         elif action == self.PLACE:
             if self.carrying and self.agent in REC_TILES:
                 if not (self.task_phase == 1 and self.agent == REC_C):
                     self.carrying = False
                     self.apple = self.agent
+                else:
+                    reward -= self.invalid_action_penalty
+            else:
+                reward -= self.invalid_action_penalty
 
         # --- check Task 1 completion --------------------------------------
         if (
@@ -242,6 +254,10 @@ class ThreeBoxEnv(Env):
         return obs
 
     def _info(self) -> dict:
+        can_pick = (not self.carrying) and self.agent == self.apple
+        can_place = self.carrying and self.agent in REC_TILES and not (
+            self.task_phase == 1 and self.agent == REC_C
+        )
         return {
             "agent": self.agent,
             "apple": self.apple,
@@ -251,6 +267,8 @@ class ThreeBoxEnv(Env):
             "target_rec": self.target_rec,
             "steps": self._steps,
             "task2_steps": self._t2_steps,
+            "can_pick": can_pick,
+            "can_place": can_place,
         }
 
     # -------------------------------------------------------------- rendering
