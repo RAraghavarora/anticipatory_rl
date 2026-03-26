@@ -26,10 +26,12 @@ echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
+CONFIG_PATH=anticipatory_rl/configs/config_5x5_3r4o.yaml
 
 python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --grid-size 5 \
   --num-objects 4 \
+  --max-task-steps 200 \
   --run-label myopic \
   --total-steps 700000 \
   --replay-size 50000 \
@@ -38,7 +40,8 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --tasks-per-reset 1 \
   --env-reset-tasks 200 \
   --episode-step-limit 4000 \
-  --config-path anticipatory_rl/configs/config_5x5_3r4o.yaml \
+  --config-path "${CONFIG_PATH}" \
+  --ensure-receptacle-coverage \
   --tau 0.01 \
   --gamma 0.97 \
   --success-reward 12 \

@@ -440,12 +440,14 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
     def make_env():
         return SimpleGridImageEnv(
             grid_size=args.grid_size,
+            max_task_steps=args.max_task_steps,
             success_reward=args.success_reward,
             num_objects=args.num_objects,
             distance_reward=True,
             distance_reward_scale=args.distance_reward_scale,
             clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
             clear_task_prob=args.clear_task_prob,
+            ensure_receptacle_coverage=args.ensure_receptacle_coverage,
             config_path=args.config_path,
         )
 
@@ -1727,6 +1729,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to task/object/receptacle distribution YAML.",
     )
     parser.add_argument("--success-reward", type=float, default=10.0)
+    parser.add_argument(
+        "--max-task-steps",
+        type=int,
+        default=200,
+        help="Primitive-step cap inside the env for a single task (timeout is treated as truncation).",
+    )
+    parser.add_argument(
+        "--ensure-receptacle-coverage",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Initialize resets so each receptacle starts with at least one object when feasible.",
+    )
     parser.add_argument(
         "--run-label",
         type=str,

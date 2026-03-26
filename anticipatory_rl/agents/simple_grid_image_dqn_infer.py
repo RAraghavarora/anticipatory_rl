@@ -92,11 +92,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Output root (single run: default <checkpoint_dir>/infer; compare: default runs/compare_image_dqn_infer).",
     )
-    parser.add_argument("--total-steps", type=int, default=5_000, help="Primitive env steps per rollout.")
+    parser.add_argument(
+        "--num-tasks",
+        type=int,
+        default=1_000,
+        help="Number of completed-or-truncated tasks to evaluate.",
+    )
+    parser.add_argument(
+        "--total-steps",
+        type=int,
+        default=200_000,
+        help="Optional primitive-step safety cap; use <=0 to disable.",
+    )
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument("--success-reward", type=float, default=10.0)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
+    parser.add_argument("--gamma", type=float, default=0.97)
+    parser.add_argument("--max-task-steps", type=int, default=200)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -122,6 +135,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=2.0,
         help="Per-object reward for clear when objects leave target surface.",
+    )
+    parser.add_argument(
+        "--ensure-receptacle-coverage",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Initialize resets so each receptacle starts with at least one object when feasible.",
     )
     parser.add_argument(
         "--tasks-per-reset",
@@ -167,12 +186,14 @@ def parse_args() -> argparse.Namespace:
 def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
     return SimpleGridImageEnv(
         grid_size=args.grid_size,
+        max_task_steps=args.max_task_steps,
         num_objects=args.num_objects,
         success_reward=args.success_reward,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
         clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
         clear_task_prob=args.clear_task_prob,
+        ensure_receptacle_coverage=args.ensure_receptacle_coverage,
         config_path=args.config_path,
     )
 
@@ -287,6 +308,7 @@ def compute_anticipation_metrics(
     return {
         "episode_len": episode_len,
         "mean_auto_rate": _safe_mean(list(auto_rate_by_pos.values())),
+        "overall_auto_rate": float(len(auto_recs)) / max(1, len(task_records)),
         "auto_rate_by_pos": {str(k): v for k, v in auto_rate_by_pos.items()},
         "success_rate_by_pos": {str(k): v for k, v in success_rate_by_pos.items()},
         "avg_steps_by_pos": {str(k): v for k, v in avg_steps_by_pos.items()},
@@ -356,6 +378,7 @@ def _print_anticipation_report(metrics: dict, label: str) -> None:
     print(sep)
     print(f"         ANTICIPATION EVAL — {label}")
     print(sep)
+    print(f"  Overall auto-rate (task-weighted): {metrics['overall_auto_rate']:.1%}")
     print(f"  Mean auto-rate (all positions)   : {metrics['mean_auto_rate']:.1%}")
     print()
     print(f"  Auto tasks   : n={metrics['n_auto_tasks']:<5d} success={metrics['auto_success_rate']:.1%}")
@@ -443,6 +466,7 @@ def run_single_rollout(
 
     stats = {
         "total_steps": 0,
+        "tasks_requested": int(args.num_tasks),
         "tasks_attempted": 0,
         "successes": 0,
         "failures": 0,
@@ -452,11 +476,16 @@ def run_single_rollout(
     task_step_counter = 0
     task_return = 0.0
     task_records: List[dict] = []
-    task_frame_ranges: List[Tuple[dict, int, int]] = []
-    current_task_start = 0
-    progress = tqdm(total=args.total_steps, desc=f"Inference [{run_label}]")
+    total_reward = 0.0
+    discounted_return = 0.0
+    discount = 1.0
+    max_steps = None if args.total_steps is None or args.total_steps <= 0 else int(args.total_steps)
+    progress = tqdm(total=args.num_tasks, desc=f"Inference [{run_label}]", unit="task")
 
-    for step in range(args.total_steps):
+    step = 0
+    while stats["tasks_attempted"] < args.num_tasks:
+        if max_steps is not None and step >= max_steps:
+            break
         if save_frames:
             save_observation(output_dir, step, obs, args.save_format)
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
@@ -475,13 +504,17 @@ def run_single_rollout(
             )
 
         obs, reward, success, truncated, info = env.step(action)
-        progress.update(1)
         stats["total_steps"] += 1
         task_step_counter += 1
         task_return += float(reward)
+        total_reward += float(reward)
+        discounted_return += discount * float(reward)
+        discount *= float(args.gamma)
+        step += 1
 
         if success or truncated:
             stats["tasks_attempted"] += 1
+            progress.update(1)
             if success:
                 stats["successes"] += 1
             else:
@@ -502,8 +535,6 @@ def run_single_rollout(
             task_return = 0.0
             if success:
                 tasks_since_reset += 1
-            task_frame_ranges.append((record, current_task_start, step))
-            current_task_start = step + 1
             reset_required = bool(truncated)
             if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
                 reset_required = True
@@ -520,8 +551,13 @@ def run_single_rollout(
     success_rate = stats["successes"] / max(1, stats["tasks_attempted"])
     stats["success_rate"] = success_rate
     task_steps = [rec["steps"] for rec in task_records]
+    task_returns = [rec["return"] for rec in task_records]
     stats["avg_task_steps"] = float(np.mean(task_steps)) if task_steps else 0.0
     stats["median_task_steps"] = float(np.median(task_steps)) if task_steps else 0.0
+    stats["avg_task_return"] = float(np.mean(task_returns)) if task_returns else 0.0
+    stats["cumulative_reward"] = float(total_reward)
+    stats["reward_per_step"] = float(total_reward) / max(1, stats["total_steps"])
+    stats["discounted_return"] = float(discounted_return)
 
     antic_metrics: Optional[dict] = None
     if args.tasks_per_reset > 0 and task_records:
@@ -545,35 +581,20 @@ def run_single_rollout(
         f"[{run_label}] saved rollout → {output_dir} "
         f"| success {success_rate:.1%} ({stats['successes']}/{stats['tasks_attempted']}) "
         f"| avg steps/task {stats['avg_task_steps']:.1f}"
+        f" | reward/step {stats['reward_per_step']:.2f}"
+        f" | discounted return {stats['discounted_return']:.1f}"
     )
     if task_steps:
         summary += f" | median steps {stats['median_task_steps']:.1f}"
     if antic_metrics is not None:
-        summary += f" | mean auto-rate {antic_metrics['mean_auto_rate']:.1%}"
+        summary += f" | overall auto-rate {antic_metrics['overall_auto_rate']:.1%}"
     print(summary)
 
-    if task_step_counter > 0:
+    if stats["tasks_attempted"] < args.num_tasks:
         print(
-            f"[{run_label}] Step budget expired with an unfinished task "
-            f"({task_step_counter} steps so far); not counted in stats."
+            f"[{run_label}] Stopped early after {stats['total_steps']} primitive steps "
+            f"with {stats['tasks_attempted']}/{args.num_tasks} tasks evaluated."
         )
-        pending_record = {
-            "task_number": stats["tasks_attempted"] + 1,
-            "task_type": current_task.task_type,
-            "target_object": current_task.object_name,
-            "target_receptacle": current_task.receptacle_name,
-            "success": False,
-            "steps": task_step_counter,
-            "return": task_return,
-        }
-        task_frame_ranges.append((pending_record, current_task_start, args.total_steps - 1))
-    if task_frame_ranges:
-        print(f"[{run_label}] Frame ranges per sampled task:")
-        for record, start_idx, end_idx in task_frame_ranges:
-            label = _describe_record(record)
-            print(f"  Task {record['task_number']:>4}: frames {start_idx}–{end_idx} | {label}")
-    else:
-        print(f"[{run_label}] No completed tasks to report frame ranges for.")
 
     return report
 
@@ -591,15 +612,17 @@ def _plot_comparison(
     ant_vals = [
         ant_stats["success_rate"],
         ant_stats["avg_task_steps"],
+        ant_stats["reward_per_step"],
     ]
     myo_vals = [
         myo_stats["success_rate"],
         myo_stats["avg_task_steps"],
+        myo_stats["reward_per_step"],
     ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.5, 4.2), constrained_layout=True)
-    titles = ("Success rate", "Avg steps / task")
-    ylabels = ("Fraction", "Steps")
+    fig, axes = plt.subplots(1, 3, figsize=(12.0, 4.2), constrained_layout=True)
+    titles = ("Success rate", "Avg steps / task", "Reward / step")
+    ylabels = ("Fraction", "Steps", "Reward")
     for i, (ax, title, ylab) in enumerate(zip(axes, titles, ylabels)):
         ax.bar(
             [0, 1],
@@ -657,6 +680,7 @@ def run_compare(args: argparse.Namespace) -> None:
 
     comparison = {
         "seed": args.seed,
+        "num_tasks": args.num_tasks,
         "total_steps": args.total_steps,
         "tasks_per_reset": args.tasks_per_reset,
         "softmax_temperature": float(args.softmax_temperature),
@@ -668,8 +692,13 @@ def run_compare(args: argparse.Namespace) -> None:
         "delta_anticipatory_minus_myopic": {
             "success_rate": float(ant_s["success_rate"] - myo_s["success_rate"]),
             "avg_task_steps": float(ant_s["avg_task_steps"] - myo_s["avg_task_steps"]),
+            "reward_per_step": float(ant_s["reward_per_step"] - myo_s["reward_per_step"]),
+            "discounted_return": float(ant_s["discounted_return"] - myo_s["discounted_return"]),
             "mean_auto_rate": float(
                 (ant_a.get("mean_auto_rate") or 0.0) - (myo_a.get("mean_auto_rate") or 0.0)
+            ),
+            "overall_auto_rate": float(
+                (ant_a.get("overall_auto_rate") or 0.0) - (myo_a.get("overall_auto_rate") or 0.0)
             ),
         },
     }
@@ -694,7 +723,10 @@ def run_compare(args: argparse.Namespace) -> None:
     print("=" * 60)
     print(f"  Δ success rate      : {d['success_rate']:+.4f}")
     print(f"  Δ avg steps / task  : {d['avg_task_steps']:+.2f}  (negative is better if anticipatory)")
+    print(f"  Δ reward / step     : {d['reward_per_step']:+.4f}")
+    print(f"  Δ discounted return : {d['discounted_return']:+.2f}")
     print(f"  Δ mean auto-rate    : {d['mean_auto_rate']:+.4f}")
+    print(f"  Δ overall auto-rate : {d['overall_auto_rate']:+.4f}")
     print("=" * 60)
 
 

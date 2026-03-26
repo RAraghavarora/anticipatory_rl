@@ -21,10 +21,12 @@
 echo "Job started on $(hostname) at $(date)"
 
 source /u/rarora1/ant_env/bin/activate
+CONFIG_PATH=anticipatory_rl/configs/config_5x5_3r4o.yaml
 # python -m anticipatory_rl.agents.three_box_dqn --step-cost 1.0 --render-tile-px 4 --total-steps 500_000
 python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --grid-size 5 \
   --num-objects 4 \
+  --max-task-steps 200 \
   --run-label anticipatory \
   --total-steps 700000 \
   --replay-size 50000 \
@@ -32,7 +34,8 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --lr 3e-4 \
   --tasks-per-reset 1000 \
   --episode-step-limit 4000 \
-  --config-path anticipatory_rl/configs/config_5x5_3r4o.yaml \
+  --config-path "${CONFIG_PATH}" \
+  --ensure-receptacle-coverage \
   --tau 0.01 \
   --gamma 0.97 \
   --success-reward 12 \

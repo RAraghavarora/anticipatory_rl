@@ -103,6 +103,7 @@ class SimpleGridImageEnv(Env):
         render_tile_px: int = 24,
         render_margin_px: Optional[int] = None,
         clear_task_prob: Optional[float] = None,
+        ensure_receptacle_coverage: bool = True,
         config_path: str | Path | None = None,
     ) -> None:
         super().__init__()
@@ -155,6 +156,7 @@ class SimpleGridImageEnv(Env):
         default_prob = float(np.clip(task_distribution.get("clear_receptacle", 0.0), 0.0, 1.0))
         prob = default_prob if clear_task_prob is None else clear_task_prob
         self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
+        self.ensure_receptacle_coverage = bool(ensure_receptacle_coverage)
         self._pending_auto_success = False
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
@@ -162,16 +164,35 @@ class SimpleGridImageEnv(Env):
         self._rng = np.random.default_rng(seed)
         options = options or {}
         self._generate_receptacles()
+        ensure_coverage = bool(
+            options.get("ensure_receptacle_coverage", self.ensure_receptacle_coverage)
+        )
+        coverage_feasible = ensure_coverage and len(self.active_objects) >= len(self.receptacle_names)
 
         agent_override = options.get("agent_pos")
         if agent_override is not None:
             agent = self._validate_coord(agent_override)
         else:
-            agent = self._sample_coord()
+            agent_exclude = None
+            if coverage_feasible and len(self._receptacle_tiles) < self.grid_size * self.grid_size:
+                agent_exclude = self._receptacle_tiles
+            agent = self._sample_coord(exclude=agent_exclude)
 
         objects: Dict[str, Coord] = {}
         occupied: Set[Coord] = {agent}
-        for name in self.active_objects:
+        remaining_objects = list(self.active_objects)
+        if coverage_feasible:
+            shuffled_objects = list(self.active_objects)
+            self._rng.shuffle(shuffled_objects)
+            shuffled_receptacles = list(self.receptacle_names)
+            self._rng.shuffle(shuffled_receptacles)
+            for name, receptacle_name in zip(shuffled_objects, shuffled_receptacles):
+                coord = self._sample_receptacle_coord_for_name(receptacle_name, exclude=occupied)
+                objects[name] = coord
+                occupied.add(coord)
+            remaining_objects = [name for name in self.active_objects if name not in objects]
+
+        for name in remaining_objects:
             coord = self._sample_receptacle_coord(exclude=occupied)
             objects[name] = coord
             occupied.add(coord)
@@ -434,7 +455,16 @@ class SimpleGridImageEnv(Env):
                 return coord
 
     def _sample_receptacle_coord(self, exclude: Set[Coord] | None = None) -> Coord:
-        tiles = list(self._receptacle_tiles)
+        return self._sample_from_tiles(list(self._receptacle_tiles), exclude=exclude)
+
+    def _sample_receptacle_coord_for_name(
+        self,
+        receptacle_name: str,
+        exclude: Set[Coord] | None = None,
+    ) -> Coord:
+        return self._sample_from_tiles(self.receptacles.get(receptacle_name, []), exclude=exclude)
+
+    def _sample_from_tiles(self, tiles: Sequence[Coord], exclude: Set[Coord] | None = None) -> Coord:
         if not tiles:
             return self._sample_coord(exclude)
         exclude = exclude or set()

@@ -26,18 +26,24 @@ echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
+CONFIG_PATH=./anticipatory_rl/configs/config_5x5_3r4o.yaml
 
 python -m anticipatory_rl.agents.simple_grid_image_dqn_infer \
   --anticipatory-weights ./runs/5_anticipatory_image_dqn_tpr200/simple_grid_image_dqn.pt \
   --myopic-weights ./runs/5_myopic_image_dqn_tpr1/simple_grid_image_dqn.pt \
   --output-dir ./runs/compare_ant_vs_myo \
   --grid-size 5 \
-  --num-objects 3 \
-  --config-path ./anticipatory_rl/configs/config_5x5_3r3o.yaml \
+  --num-objects 4 \
+  --max-task-steps 200 \
+  --config-path "${CONFIG_PATH}" \
+  --ensure-receptacle-coverage \
   --tasks-per-reset 200 \
   --success-reward 12 \
   --clear-receptacle-shaping-scale 3.0 \
-  --total-steps 20000 \
+  --num-tasks 1000 \
+  --total-steps 200000 \
+  --gamma 0.97 \
+  --no-save-frames \
   --seed 0
 
 echo "Job finished at $(date -Is)"
