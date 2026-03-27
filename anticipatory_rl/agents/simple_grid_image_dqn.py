@@ -443,6 +443,7 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
             max_task_steps=args.max_task_steps,
             success_reward=args.success_reward,
             num_objects=args.num_objects,
+            correct_pick_bonus=args.correct_pick_bonus,
             distance_reward=True,
             distance_reward_scale=args.distance_reward_scale,
             clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
@@ -1667,6 +1668,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument(
@@ -1786,7 +1788,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-mode",
         type=str,
         default=None,
-        choices=("iid", "clear_followup"),
+        choices=("iid", "clear_followup", "paired_clear_followup"),
         help="Override the environment task process mode (default: from config, else iid).",
     )
     parser.add_argument(

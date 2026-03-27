@@ -22,19 +22,21 @@ echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
-CONFIG_PATH=./anticipatory_rl/configs/config_5x5_3r4o_clear_followup.yaml
+CONFIG_PATH=./anticipatory_rl/configs/config_5x5_3r4o_paired_clear_followup.yaml
 
 python -m anticipatory_rl.agents.simple_grid_image_dqn_infer \
-  --anticipatory-weights ./runs/5_anticipatory_followup_image_dqn_tpr200/simple_grid_image_dqn.pt \
-  --myopic-weights ./runs/5_myopic_followup_image_dqn_tpr1/simple_grid_image_dqn.pt \
-  --output-dir ./runs/compare_ant_vs_myo_followup \
+  --anticipatory-weights ./runs/5_anticipatory_paired_followup_image_dqn_tpr3/simple_grid_image_dqn.pt \
+  --myopic-weights ./runs/5_myopic_paired_followup_image_dqn_tpr1/simple_grid_image_dqn.pt \
+  --output-dir ./runs/compare_ant_vs_myo_paired_followup \
   --grid-size 5 \
   --num-objects 4 \
   --max-task-steps 200 \
   --config-path "${CONFIG_PATH}" \
   --ensure-receptacle-coverage \
-  --tasks-per-reset 200 \
+  --tasks-per-reset 3 \
   --success-reward 12 \
+  --correct-pick-bonus 0.0 \
+  --distance-reward-scale 0.0 \
   --clear-receptacle-shaping-scale 3.0 \
   --num-tasks 1000 \
   --total-steps 200000 \

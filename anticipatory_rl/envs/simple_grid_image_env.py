@@ -162,7 +162,7 @@ class SimpleGridImageEnv(Env):
         self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
         self.ensure_receptacle_coverage = bool(ensure_receptacle_coverage)
         self.task_mode = str(task_process.get("mode", "iid") if task_mode is None else task_mode)
-        if self.task_mode not in {"iid", "clear_followup"}:
+        if self.task_mode not in {"iid", "clear_followup", "paired_clear_followup"}:
             raise ValueError(f"Unsupported task_mode: {self.task_mode}")
         followup_prob_default = float(task_process.get("clear_followup_prob", 0.0))
         followup_prob = followup_prob_default if clear_followup_prob is None else clear_followup_prob
@@ -174,10 +174,51 @@ class SimpleGridImageEnv(Env):
         )
         if self.followup_target_mode not in {"argmax", "weighted"}:
             raise ValueError(f"Unsupported followup_target_mode: {self.followup_target_mode}")
+        clear_source_distribution = task_process.get("clear_source_distribution", {})
+        self.clear_source_distribution: Dict[str, float] = {
+            name: float(clear_source_distribution.get(name, 0.0))
+            for name in self.receptacle_names
+        }
+        paired_followup_targets = task_process.get("paired_followup_targets", {})
+        self.paired_followup_targets: Dict[str, str] = {
+            str(source): str(target)
+            for source, target in paired_followup_targets.items()
+            if str(source) in self.receptacle_names and str(target) in self.receptacle_names
+        }
+        self.followup_sequence_mode = str(task_process.get("followup_sequence_mode", "single"))
+        if self.followup_sequence_mode not in {"single", "all_displaced"}:
+            raise ValueError(
+                f"Unsupported followup_sequence_mode: {self.followup_sequence_mode}"
+            )
+        self.followup_object_mode = str(task_process.get("followup_object_mode", "weighted"))
+        if self.followup_object_mode not in {"weighted", "uniform"}:
+            raise ValueError(
+                f"Unsupported followup_object_mode: {self.followup_object_mode}"
+            )
+        self.paired_source_load = max(1, int(task_process.get("paired_source_load", 1)))
+        if self.task_mode == "paired_clear_followup":
+            active_sources = [
+                name
+                for name, weight in self.clear_source_distribution.items()
+                if weight > 0.0
+            ]
+            if not active_sources:
+                raise ValueError(
+                    "paired_clear_followup requires a non-empty clear_source_distribution."
+                )
+            missing_targets = [
+                source for source in active_sources if source not in self.paired_followup_targets
+            ]
+            if missing_targets:
+                raise ValueError(
+                    "paired_clear_followup requires paired_followup_targets for "
+                    f"{missing_targets}."
+                )
         self._pending_auto_success = False
         self._task_source = "iid"
         self._clear_task_displaced_objects: Tuple[str, ...] = ()
         self._clear_task_source_receptacle: str | None = None
+        self._followup_queue: List[Tuple[str, str]] = []
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
         super().reset(seed=seed)
@@ -198,24 +239,29 @@ class SimpleGridImageEnv(Env):
                 agent_exclude = self._receptacle_tiles
             agent = self._sample_coord(exclude=agent_exclude)
 
-        objects: Dict[str, Coord] = {}
-        occupied: Set[Coord] = {agent}
-        remaining_objects = list(self.active_objects)
-        if coverage_feasible:
-            shuffled_objects = list(self.active_objects)
-            self._rng.shuffle(shuffled_objects)
-            shuffled_receptacles = list(self.receptacle_names)
-            self._rng.shuffle(shuffled_receptacles)
-            for name, receptacle_name in zip(shuffled_objects, shuffled_receptacles):
-                coord = self._sample_receptacle_coord_for_name(receptacle_name, exclude=occupied)
+        if self.task_mode == "paired_clear_followup":
+            clear_source = self._sample_paired_clear_source()
+            clear_target = self.paired_followup_targets[clear_source]
+            objects = self._build_paired_followup_objects(agent, clear_source, clear_target)
+        else:
+            objects = {}
+            occupied: Set[Coord] = {agent}
+            remaining_objects = list(self.active_objects)
+            if coverage_feasible:
+                shuffled_objects = list(self.active_objects)
+                self._rng.shuffle(shuffled_objects)
+                shuffled_receptacles = list(self.receptacle_names)
+                self._rng.shuffle(shuffled_receptacles)
+                for name, receptacle_name in zip(shuffled_objects, shuffled_receptacles):
+                    coord = self._sample_receptacle_coord_for_name(receptacle_name, exclude=occupied)
+                    objects[name] = coord
+                    occupied.add(coord)
+                remaining_objects = [name for name in self.active_objects if name not in objects]
+
+            for name in remaining_objects:
+                coord = self._sample_receptacle_coord(exclude=occupied)
                 objects[name] = coord
                 occupied.add(coord)
-            remaining_objects = [name for name in self.active_objects if name not in objects]
-
-        for name in remaining_objects:
-            coord = self._sample_receptacle_coord(exclude=occupied)
-            objects[name] = coord
-            occupied.add(coord)
 
         object_under_agent = options.get("object_under_agent")
         if object_under_agent:
@@ -233,7 +279,11 @@ class SimpleGridImageEnv(Env):
         self._clear_task_displaced_objects = ()
         self._clear_task_source_receptacle = None
         self._task_source = "iid"
-        self._resample_task()
+        self._followup_queue = []
+        if self.task_mode == "paired_clear_followup":
+            self.set_task("clear", None, clear_source, task_source="paired_clear")
+        else:
+            self._resample_task()
         self._task_steps = 0
         return self._obs(), self._info()
 
@@ -383,6 +433,9 @@ class SimpleGridImageEnv(Env):
 
     # ------------------------------------------------------------------ Task helpers
     def _resample_task(self) -> None:
+        if self.task_mode == "paired_clear_followup":
+            self._resample_paired_clear_task()
+            return
         if (
             self.clear_task_prob > 0.0
             and self._rng.random() < self.clear_task_prob
@@ -392,6 +445,13 @@ class SimpleGridImageEnv(Env):
         self._resample_move_task()
 
     def _advance_after_task_success(self, completed_task_type: str) -> None:
+        if self.task_mode == "paired_clear_followup":
+            if completed_task_type == "clear" and self._start_paired_followup_queue():
+                return
+            if completed_task_type == "move" and self._advance_followup_queue():
+                return
+            self._resample_paired_clear_task()
+            return
         if completed_task_type == "clear" and self._resample_clear_followup_move():
             return
         self._resample_task()
@@ -445,6 +505,83 @@ class SimpleGridImageEnv(Env):
         rec = self._weighted_choice(self.surface_distribution, rec_choices)
         self.set_task("clear", None, rec, task_source="iid")
         return True
+
+    def _sample_paired_clear_source(self) -> str:
+        candidates = [
+            name for name, weight in self.clear_source_distribution.items() if weight > 0.0
+        ]
+        if not candidates:
+            raise ValueError("paired_clear_followup has no clear-source candidates.")
+        return self._weighted_choice(self.clear_source_distribution, candidates)
+
+    def _build_paired_followup_objects(
+        self,
+        agent: Coord,
+        clear_source: str,
+        clear_target: str,
+    ) -> Dict[str, Coord]:
+        objects: Dict[str, Coord] = {}
+        occupied: Set[Coord] = {agent}
+        shuffled_objects = list(self.active_objects)
+        self._rng.shuffle(shuffled_objects)
+        source_load = min(self.paired_source_load, len(shuffled_objects))
+        for name in shuffled_objects[:source_load]:
+            coord = self._sample_receptacle_coord_for_name(clear_source, exclude=occupied)
+            objects[name] = coord
+            occupied.add(coord)
+        remaining = shuffled_objects[source_load:]
+        ordered_receptacles = [clear_target] + [
+            rec
+            for rec in self.receptacle_names
+            if rec not in {clear_source, clear_target}
+        ]
+        if not ordered_receptacles:
+            ordered_receptacles = [clear_source]
+        for idx, name in enumerate(remaining):
+            receptacle_name = ordered_receptacles[idx % len(ordered_receptacles)]
+            coord = self._sample_receptacle_coord_for_name(receptacle_name, exclude=occupied)
+            objects[name] = coord
+            occupied.add(coord)
+        return objects
+
+    def _resample_paired_clear_task(self) -> None:
+        self._followup_queue = []
+        clear_source = self._sample_paired_clear_source()
+        self.set_task("clear", None, clear_source, task_source="paired_clear")
+
+    def _ordered_followup_objects(self, object_names: Sequence[str]) -> List[str]:
+        remaining = [name for name in object_names if name in self.active_objects]
+        ordered: List[str] = []
+        while remaining:
+            if self.followup_object_mode == "uniform":
+                choice = str(self._rng.choice(remaining))
+            else:
+                choice = self._weighted_choice(self.object_distribution, remaining)
+            ordered.append(choice)
+            remaining.remove(choice)
+        return ordered
+
+    def _advance_followup_queue(self) -> bool:
+        if not self._followup_queue:
+            return False
+        obj, rec = self._followup_queue.pop(0)
+        self.set_task("move", obj, rec, task_source="paired_followup")
+        return True
+
+    def _start_paired_followup_queue(self) -> bool:
+        if self.task_mode != "paired_clear_followup":
+            return False
+        cleared_receptacle = self._clear_task_source_receptacle
+        if cleared_receptacle is None:
+            return False
+        clear_target = self.paired_followup_targets.get(cleared_receptacle)
+        if clear_target is None:
+            return False
+        ordered_objects = self._ordered_followup_objects(self._clear_task_displaced_objects)
+        if self.followup_sequence_mode == "single":
+            ordered_objects = ordered_objects[:1]
+        self._followup_queue = [(obj, clear_target) for obj in ordered_objects]
+        return self._advance_followup_queue()
 
     def _resample_clear_followup_move(self) -> bool:
         if self.task_mode != "clear_followup":

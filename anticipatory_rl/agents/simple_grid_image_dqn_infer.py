@@ -107,6 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument("--success-reward", type=float, default=10.0)
+    parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=0.97)
     parser.add_argument("--max-task-steps", type=int, default=200)
@@ -158,7 +159,7 @@ def parse_args() -> argparse.Namespace:
         "--task-mode",
         type=str,
         default=None,
-        choices=("iid", "clear_followup"),
+        choices=("iid", "clear_followup", "paired_clear_followup"),
         help="Override the environment task process mode (default: from config, else iid).",
     )
     parser.add_argument(
@@ -215,6 +216,7 @@ def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
         max_task_steps=args.max_task_steps,
         num_objects=args.num_objects,
         success_reward=args.success_reward,
+        correct_pick_bonus=args.correct_pick_bonus,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
         clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,

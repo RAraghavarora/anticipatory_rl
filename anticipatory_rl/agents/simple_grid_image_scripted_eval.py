@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grid-size", type=int, default=10)
     parser.add_argument("--num-objects", type=int, default=len(OBJECT_NAMES))
     parser.add_argument("--success-reward", type=float, default=10.0)
+    parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
     parser.add_argument("--distance-reward-scale", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=0.97)
     parser.add_argument("--max-task-steps", type=int, default=200)
@@ -82,6 +83,12 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Multiplier on the scripted future-value term for the anticipatory clear policy.",
     )
+    parser.add_argument(
+        "--use-env-task-process",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the environment's internal task process instead of an external iid task list.",
+    )
     return parser.parse_args()
 
 
@@ -91,6 +98,7 @@ def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
         max_task_steps=args.max_task_steps,
         num_objects=args.num_objects,
         success_reward=args.success_reward,
+        correct_pick_bonus=args.correct_pick_bonus,
         distance_reward=True,
         distance_reward_scale=args.distance_reward_scale,
         clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
@@ -330,6 +338,29 @@ def _choose_myopic_object_and_dest(env: SimpleGridImageEnv) -> Tuple[str, str]:
     return obj_name, dest_rec
 
 
+def _choose_lowest_cost_object_for_dest(
+    env: SimpleGridImageEnv,
+    dest_rec: str,
+) -> str:
+    target_objects = _objects_on_receptacle(env, env.target_receptacle)
+    if not target_objects:
+        raise RuntimeError("Clear policy asked to move from an already-empty target.")
+    candidates = [
+        (
+            _immediate_relocation_cost(
+                env,
+                obj_name,
+                dest_rec,
+                carrying=False,
+            ),
+            obj_name,
+        )
+        for obj_name in target_objects
+    ]
+    _, obj_name = min(candidates)
+    return obj_name
+
+
 def _choose_myopic_dest_for_carried(env: SimpleGridImageEnv, object_name: str) -> str:
     candidates: List[Tuple[int, str]] = []
     for dest_rec in _candidate_destinations(env):
@@ -467,7 +498,12 @@ def scripted_action(
 
     carrying = env.state.carrying
     if carrying is not None:
-        if policy_label == "myopic":
+        if policy_label == "anticipatory" and env.task_mode == "paired_clear_followup":
+            dest_rec = env.paired_followup_targets.get(
+                env.target_receptacle,
+                env.target_receptacle,
+            )
+        elif policy_label == "myopic":
             dest_rec = _choose_myopic_dest_for_carried(env, carrying)
         else:
             dest_rec = _choose_anticipatory_dest_for_carried(
@@ -480,7 +516,13 @@ def scripted_action(
             return SimpleGridImageEnv.PLACE
         return _next_step_towards(env.state.agent, goal)
 
-    if policy_label == "myopic":
+    if policy_label == "anticipatory" and env.task_mode == "paired_clear_followup":
+        dest_rec = env.paired_followup_targets.get(
+            env.target_receptacle,
+            env.target_receptacle,
+        )
+        obj_name = _choose_lowest_cost_object_for_dest(env, dest_rec)
+    elif policy_label == "myopic":
         obj_name, _ = _choose_myopic_object_and_dest(env)
     else:
         obj_name, _ = _choose_anticipatory_object_and_dest(
@@ -522,8 +564,9 @@ def run_policy(
     output_dir.mkdir(parents=True, exist_ok=True)
     env = make_env(args)
     env.reset(seed=args.seed)
+    use_env_task_process = bool(args.use_env_task_process)
 
-    if args.tasks_per_sequence <= 0:
+    if not use_env_task_process and args.tasks_per_sequence <= 0:
         raise ValueError("--tasks-per-sequence must be >= 1.")
 
     task_rng = np.random.default_rng(args.seed + 1)
@@ -539,8 +582,12 @@ def run_policy(
         task_cursor += 1
         return task
 
-    current_task = dequeue_task()
-    _, _ = apply_sampled_task(env, current_task)
+    current_task: Optional[SampledTask]
+    if use_env_task_process:
+        current_task = None
+    else:
+        current_task = dequeue_task()
+        _, _ = apply_sampled_task(env, current_task)
     current_task_auto_satisfied = bool(getattr(env, "_pending_auto_success", False))
 
     stats = {
@@ -565,6 +612,12 @@ def run_policy(
     while stats["tasks_attempted"] < args.num_tasks:
         if max_steps is not None and step >= max_steps:
             break
+        task_snapshot = SampledTask(
+            env.task_type if use_env_task_process else current_task.task_type,
+            env.target_object if use_env_task_process else current_task.object_name,
+            env.target_receptacle if use_env_task_process else current_task.receptacle_name,
+        )
+        task_auto_snapshot = current_task_auto_satisfied
         action = scripted_action(
             env,
             policy_label,
@@ -589,13 +642,13 @@ def run_policy(
             task_records.append(
                 {
                     "task_number": stats["tasks_attempted"],
-                    "task_type": current_task.task_type,
-                    "target_object": current_task.object_name,
-                    "target_receptacle": current_task.receptacle_name,
+                    "task_type": task_snapshot.task_type,
+                    "target_object": task_snapshot.object_name,
+                    "target_receptacle": task_snapshot.receptacle_name,
                     "success": bool(success),
                     "steps": task_step_counter,
                     "return": task_return,
-                    "auto_satisfied": current_task_auto_satisfied,
+                    "auto_satisfied": task_auto_snapshot,
                     "episode_position": tasks_since_reset,
                 }
             )
@@ -611,8 +664,9 @@ def run_policy(
                 reset_seed = args.seed + 100_003 * episode_index
                 env.reset(seed=reset_seed)
                 tasks_since_reset = 0
-            current_task = dequeue_task()
-            _, _ = apply_sampled_task(env, current_task)
+            if not use_env_task_process:
+                current_task = dequeue_task()
+                _, _ = apply_sampled_task(env, current_task)
             current_task_auto_satisfied = bool(getattr(env, "_pending_auto_success", False))
 
     progress.close()

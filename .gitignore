@@ -4,6 +4,7 @@ __pycache__/
 # IDE / tooling
 .vscode/
 .DS_Store
+keyconfig.py
 
 # Logs / recordings / run artifacts
 runs/
