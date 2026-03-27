@@ -42,6 +42,8 @@ python -m anticipatory_rl.agents.simple_grid_image_dqn \
   --episode-step-limit 4000 \
   --config-path "${CONFIG_PATH}" \
   --ensure-receptacle-coverage \
+  --epsilon-final 0.0 \
+  --epsilon-restart-threshold -1.0 \
   --tau 0.01 \
   --gamma 0.97 \
   --success-reward 12 \
