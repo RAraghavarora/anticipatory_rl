@@ -225,6 +225,8 @@ def train(args: argparse.Namespace) -> Path:
             args.epsilon_final,
             args.epsilon_decay,
         )
+        current_task_snapshot = dict(info.get("task", {}))
+        current_task_auto_snapshot = bool(current_task_auto_satisfied)
         valid_mask = np.asarray(info.get("valid_action_mask"), dtype=np.float32)
         action = _select_action(q_net, obs, valid_mask, epsilon, device)
         next_obs, reward, success, truncated, next_info = env.step(action)
@@ -301,7 +303,10 @@ def train(args: argparse.Namespace) -> Path:
                     "truncated": bool(truncated),
                     "steps": int(task_steps),
                     "return": float(task_return),
-                    "auto_satisfied": bool(current_task_auto_satisfied),
+                    "auto_satisfied": current_task_auto_snapshot,
+                    "task_type": current_task_snapshot.get("task_type"),
+                    "target_location": current_task_snapshot.get("target_location"),
+                    "target_kind": current_task_snapshot.get("target_kind"),
                     "task_type_after": task_info.get("task_type"),
                     "target_location_after": task_info.get("target_location"),
                     "target_kind_after": task_info.get("target_kind"),
