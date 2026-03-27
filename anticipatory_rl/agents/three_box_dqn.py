@@ -110,7 +110,7 @@ class ReplayBuffer:
 @dataclass
 class Metrics:
     episode_returns: List[float] = field(default_factory=list)
-    rolling_drop_a: List[float] = field(default_factory=list)
+    rolling_drop_b: List[float] = field(default_factory=list)
     rolling_drop_x: List[int] = field(default_factory=list)
     task2_step_log: List[int] = field(default_factory=list)
     td_errors: List[float] = field(default_factory=list)
@@ -202,7 +202,7 @@ def rollout_policy(
                 recent_drops.append(dl)
                 drop_count += 1
                 pct = sum(1 for d in recent_drops if d == "B") / len(recent_drops)
-                metrics.rolling_drop_a.append(pct)
+                metrics.rolling_drop_b.append(pct)
                 metrics.rolling_drop_x.append(drop_count)
 
         metrics.episode_returns.append(ep_return)
@@ -298,7 +298,7 @@ def train_agent(
             recent_drops.append(dl)
             drop_count += 1
             pct = sum(1 for d in recent_drops if d == "B") / len(recent_drops)
-            metrics.rolling_drop_a.append(pct)
+            metrics.rolling_drop_b.append(pct)
             metrics.rolling_drop_x.append(drop_count)
 
         # ---- episode boundary ----
@@ -359,12 +359,12 @@ def train_agent(
                 else "n/a"
             )
             drop_pct = (
-                f"{metrics.rolling_drop_a[-1] * 100:.0f}%"
-                if metrics.rolling_drop_a
+                f"{metrics.rolling_drop_b[-1] * 100:.0f}%"
+                if metrics.rolling_drop_b
                 else "n/a"
             )
             progress.set_postfix(
-                ret=avg_ret, drop_A=drop_pct, eps=f"{eps:.2f}"
+                ret=avg_ret, drop_B=drop_pct, eps=f"{eps:.2f}"
             )
 
     progress.close()
@@ -425,16 +425,16 @@ def plot_comparison(
     fig.savefig(out_dir / "returns.png", dpi=150)
     plt.close(fig)
 
-    # ---- 2. Drop % on A (rolling) ----
+    # ---- 2. Drop % on B (rolling) ----
     fig, ax = plt.subplots(figsize=(10, 4))
     for m, lbl, c in [
         (anti_m, "Anticipatory", colors["anti"]),
         (myopic_m, "Myopic", colors["myopic"]),
     ]:
-        if m.rolling_drop_a:
+        if m.rolling_drop_b:
             ax.plot(
                 m.rolling_drop_x,
-                [p * 100 for p in m.rolling_drop_a],
+                [p * 100 for p in m.rolling_drop_b],
                 label=lbl,
                 color=c,
                 linewidth=1.2,

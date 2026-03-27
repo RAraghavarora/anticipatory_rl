@@ -104,6 +104,9 @@ class SimpleGridImageEnv(Env):
         render_margin_px: Optional[int] = None,
         clear_task_prob: Optional[float] = None,
         ensure_receptacle_coverage: bool = True,
+        task_mode: str | None = None,
+        clear_followup_prob: Optional[float] = None,
+        followup_target_mode: str | None = None,
         config_path: str | Path | None = None,
     ) -> None:
         super().__init__()
@@ -120,6 +123,7 @@ class SimpleGridImageEnv(Env):
             "object_source_distribution", {}
         )
         task_distribution: Dict[str, float] = loaded_config.get("task_distribution", {})
+        task_process: Dict[str, object] = loaded_config.get("task_process", {})
         self.grid_size = grid_size
         self.max_task_steps = max_task_steps
         self.success_reward = success_reward
@@ -157,7 +161,23 @@ class SimpleGridImageEnv(Env):
         prob = default_prob if clear_task_prob is None else clear_task_prob
         self.clear_task_prob = float(np.clip(prob, 0.0, 1.0))
         self.ensure_receptacle_coverage = bool(ensure_receptacle_coverage)
+        self.task_mode = str(task_process.get("mode", "iid") if task_mode is None else task_mode)
+        if self.task_mode not in {"iid", "clear_followup"}:
+            raise ValueError(f"Unsupported task_mode: {self.task_mode}")
+        followup_prob_default = float(task_process.get("clear_followup_prob", 0.0))
+        followup_prob = followup_prob_default if clear_followup_prob is None else clear_followup_prob
+        self.clear_followup_prob = float(np.clip(followup_prob, 0.0, 1.0))
+        self.followup_target_mode = str(
+            task_process.get("followup_target_mode", "argmax")
+            if followup_target_mode is None
+            else followup_target_mode
+        )
+        if self.followup_target_mode not in {"argmax", "weighted"}:
+            raise ValueError(f"Unsupported followup_target_mode: {self.followup_target_mode}")
         self._pending_auto_success = False
+        self._task_source = "iid"
+        self._clear_task_displaced_objects: Tuple[str, ...] = ()
+        self._clear_task_source_receptacle: str | None = None
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
         super().reset(seed=seed)
@@ -210,17 +230,21 @@ class SimpleGridImageEnv(Env):
 
         self.state = SimpleGridState(agent=agent, objects=objects)
         self._last_target_receptacle = None
+        self._clear_task_displaced_objects = ()
+        self._clear_task_source_receptacle = None
+        self._task_source = "iid"
         self._resample_task()
         self._task_steps = 0
         return self._obs(), self._info()
 
     def step(self, action: int):
         if self._pending_auto_success:
+            completed_task_type = self.task_type
             self._pending_auto_success = False
             reward = self.success_reward
             success = True
             horizon = False
-            self._resample_task()
+            self._advance_after_task_success(completed_task_type)
             self._task_steps = 0
             return self._obs(), reward, success, horizon, self._info(success=success)
 
@@ -263,15 +287,17 @@ class SimpleGridImageEnv(Env):
         if self.task_type == "move":
             obj_pos = self._object_position(self.target_object)
             if obj_pos in target_tiles and carrying_empty:
+                completed_task_type = self.task_type
                 reward = self.success_reward
                 success = True
-                self._resample_task()
+                self._advance_after_task_success(completed_task_type)
                 self._task_steps = 0
         else:
             if not self._objects_on_receptacle(self.target_receptacle) and carrying_empty:
+                completed_task_type = self.task_type
                 reward = self.success_reward
                 success = True
-                self._resample_task()
+                self._advance_after_task_success(completed_task_type)
                 self._task_steps = 0
 
         if self.task_type == "clear" and not success:
@@ -351,6 +377,8 @@ class SimpleGridImageEnv(Env):
             "can_pick": can_pick,
             "can_place": can_place,
             "next_auto_satisfied": self._pending_auto_success,
+            "task_source": self._task_source,
+            "task_mode": self.task_mode,
         }
 
     # ------------------------------------------------------------------ Task helpers
@@ -363,6 +391,36 @@ class SimpleGridImageEnv(Env):
                 return
         self._resample_move_task()
 
+    def _advance_after_task_success(self, completed_task_type: str) -> None:
+        if completed_task_type == "clear" and self._resample_clear_followup_move():
+            return
+        self._resample_task()
+
+    def set_task(
+        self,
+        task_type: str,
+        target_object: str | None,
+        target_receptacle: str,
+        *,
+        task_source: str = "external",
+    ) -> None:
+        if task_type not in {"move", "clear"}:
+            raise ValueError(f"Unsupported task_type: {task_type}")
+        self.task_type = task_type
+        self.target_object = target_object
+        self.target_receptacle = target_receptacle
+        self._last_target_receptacle = target_receptacle
+        self._task_source = task_source
+        if task_type == "clear":
+            self._clear_task_source_receptacle = target_receptacle
+            self._clear_task_displaced_objects = tuple(
+                self._objects_on_receptacle(target_receptacle)
+            )
+        else:
+            self._clear_task_source_receptacle = None
+            self._clear_task_displaced_objects = ()
+        self._update_pending_auto_success()
+
     def _resample_move_task(self) -> None:
         rec_choices: List[str] = list(self.receptacle_names)
         if self._last_target_receptacle is not None and len(self.receptacle_names) > 1:
@@ -372,11 +430,7 @@ class SimpleGridImageEnv(Env):
         obj = self._weighted_choice(self.object_distribution, self.active_objects)
         source_dist = self.object_source_distribution.get(obj, self.surface_distribution)
         rec = self._weighted_choice(source_dist, rec_choices)
-        self.task_type = "move"
-        self.target_object = obj
-        self.target_receptacle = rec
-        self._last_target_receptacle = rec
-        self._update_pending_auto_success()
+        self.set_task("move", obj, rec, task_source="iid")
 
     def _resample_clear_task(self) -> bool:
         # Sample clear target from surface weights even if already empty: proactive
@@ -389,11 +443,37 @@ class SimpleGridImageEnv(Env):
             if filtered:
                 rec_choices = filtered
         rec = self._weighted_choice(self.surface_distribution, rec_choices)
-        self.task_type = "clear"
-        self.target_object = None
-        self.target_receptacle = rec
-        self._last_target_receptacle = rec
-        self._update_pending_auto_success()
+        self.set_task("clear", None, rec, task_source="iid")
+        return True
+
+    def _resample_clear_followup_move(self) -> bool:
+        if self.task_mode != "clear_followup":
+            return False
+        if not self._clear_task_displaced_objects:
+            return False
+        if self.clear_followup_prob <= 0.0 or self._rng.random() >= self.clear_followup_prob:
+            return False
+        cleared_receptacle = self._clear_task_source_receptacle
+        if cleared_receptacle is None:
+            return False
+        obj_candidates = [
+            obj for obj in self._clear_task_displaced_objects if obj in self.active_objects
+        ]
+        if not obj_candidates:
+            return False
+        obj = self._weighted_choice(self.object_distribution, obj_candidates)
+        rec_choices = [rec for rec in self.receptacle_names if rec != cleared_receptacle]
+        if not rec_choices:
+            return False
+        target_dist = self.object_source_distribution.get(obj, self.surface_distribution)
+        if self.followup_target_mode == "argmax":
+            rec = max(
+                rec_choices,
+                key=lambda name: (float(target_dist.get(name, 0.0)), name),
+            )
+        else:
+            rec = self._weighted_choice(target_dist, rec_choices)
+        self.set_task("move", obj, rec, task_source="clear_followup")
         return True
 
     def _object_position(self, name: str | None) -> Coord | None:

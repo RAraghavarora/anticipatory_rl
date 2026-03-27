@@ -1,7 +1,12 @@
 task_distribution:
-  bring_single: 0.5
+  bring_single: 0.0
   bring_pair: 0.0
-  clear_receptacle: 0.5
+  clear_receptacle: 1.0
+
+task_process:
+  mode: clear_followup
+  clear_followup_prob: 1.0
+  followup_target_mode: argmax
 
 object_distribution:
   water_bottle: 0.25

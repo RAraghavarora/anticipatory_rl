@@ -155,6 +155,32 @@ def parse_args() -> argparse.Namespace:
         help="Tasks sampled ahead per buffer refill (must be > 0).",
     )
     parser.add_argument(
+        "--task-mode",
+        type=str,
+        default=None,
+        choices=("iid", "clear_followup"),
+        help="Override the environment task process mode (default: from config, else iid).",
+    )
+    parser.add_argument(
+        "--clear-followup-prob",
+        type=float,
+        default=None,
+        help="Probability that a successful clear task emits a displaced-object follow-up move task.",
+    )
+    parser.add_argument(
+        "--followup-target-mode",
+        type=str,
+        default=None,
+        choices=("argmax", "weighted"),
+        help="How correlated clear-followup move targets are chosen from per-object receptacle priors.",
+    )
+    parser.add_argument(
+        "--use-env-task-process",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Evaluate tasks produced by the environment itself instead of forcing an external iid task sequence.",
+    )
+    parser.add_argument(
         "--save-format",
         choices=("png", "npy"),
         default="png",
@@ -194,6 +220,9 @@ def make_env(args: argparse.Namespace) -> SimpleGridImageEnv:
         clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
         clear_task_prob=args.clear_task_prob,
         ensure_receptacle_coverage=args.ensure_receptacle_coverage,
+        task_mode=args.task_mode,
+        clear_followup_prob=args.clear_followup_prob,
+        followup_target_mode=args.followup_target_mode,
         config_path=args.config_path,
     )
 
@@ -252,15 +281,14 @@ def sample_task_sequence(
 
 
 def apply_sampled_task(env: SimpleGridImageEnv, task: SampledTask):
-    env.task_type = task.task_type
-    env.target_object = task.object_name
-    env.target_receptacle = task.receptacle_name
-    if hasattr(env, "_last_target_receptacle"):
-        env._last_target_receptacle = task.receptacle_name  # noqa: SLF001
+    env.set_task(
+        task.task_type,
+        task.object_name,
+        task.receptacle_name,
+        task_source="external",
+    )
     if hasattr(env, "_task_steps"):
         env._task_steps = 0  # noqa: SLF001
-    if hasattr(env, "_pending_auto_success") and hasattr(env, "_task_already_satisfied"):
-        env._pending_auto_success = env._task_already_satisfied()  # noqa: SLF001
     return env._obs(), env._info()
 
 
@@ -432,16 +460,21 @@ def run_single_rollout(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     env = make_env(args)
-    obs, _ = env.reset(seed=args.seed)
+    obs, info = env.reset(seed=args.seed)
     obs_shape = obs.shape
     q_net = ConvQNetwork(obs_shape, hidden_dim=args.hidden_dim, num_actions=env.action_space.n).to(device)
     q_net.load_state_dict(_load_state_dict(state_path, device))
     q_net.eval()
+    use_env_task_process = (
+        env.task_mode != "iid"
+        if args.use_env_task_process is None
+        else bool(args.use_env_task_process)
+    )
 
     action_gen = torch.Generator()
     action_gen.manual_seed(int(args.seed))
 
-    if args.tasks_per_sequence <= 0:
+    if not use_env_task_process and args.tasks_per_sequence <= 0:
         raise ValueError("--tasks-per-sequence must be >= 1.")
 
     task_rng = np.random.default_rng(args.seed + 1)
@@ -457,8 +490,12 @@ def run_single_rollout(
         task_cursor += 1
         return task
 
-    current_task = dequeue_task()
-    obs, info = apply_sampled_task(env, current_task)
+    current_task: Optional[SampledTask]
+    if use_env_task_process:
+        current_task = None
+    else:
+        current_task = dequeue_task()
+        obs, info = apply_sampled_task(env, current_task)
     current_task_auto_satisfied: bool = bool(getattr(env, "_pending_auto_success", False))
 
     pick_action = SimpleGridImageEnv.PICK
@@ -486,6 +523,12 @@ def run_single_rollout(
     while stats["tasks_attempted"] < args.num_tasks:
         if max_steps is not None and step >= max_steps:
             break
+        task_snapshot = SampledTask(
+            env.task_type if use_env_task_process else current_task.task_type,
+            env.target_object if use_env_task_process else current_task.object_name,
+            env.target_receptacle if use_env_task_process else current_task.receptacle_name,
+        )
+        task_auto_snapshot = current_task_auto_satisfied
         if save_frames:
             save_observation(output_dir, step, obs, args.save_format)
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
@@ -521,13 +564,13 @@ def run_single_rollout(
                 stats["failures"] += 1
             record = {
                 "task_number": stats["tasks_attempted"],
-                "task_type": current_task.task_type,
-                "target_object": current_task.object_name,
-                "target_receptacle": current_task.receptacle_name,
+                "task_type": task_snapshot.task_type,
+                "target_object": task_snapshot.object_name,
+                "target_receptacle": task_snapshot.receptacle_name,
                 "success": bool(success),
                 "steps": task_step_counter,
                 "return": task_return,
-                "auto_satisfied": current_task_auto_satisfied,
+                "auto_satisfied": task_auto_snapshot,
                 "episode_position": tasks_since_reset,
             }
             task_records.append(record)
@@ -543,8 +586,12 @@ def run_single_rollout(
                 reset_seed = args.seed + 100_003 * episode_index
                 obs, info = env.reset(seed=reset_seed)
                 tasks_since_reset = 0
-            current_task = dequeue_task()
-            obs, info = apply_sampled_task(env, current_task)
+            elif not use_env_task_process:
+                # Keep using the externally applied task process between episodes.
+                pass
+            if not use_env_task_process:
+                current_task = dequeue_task()
+                obs, info = apply_sampled_task(env, current_task)
             current_task_auto_satisfied = bool(getattr(env, "_pending_auto_success", False))
 
     progress.close()
@@ -570,6 +617,7 @@ def run_single_rollout(
     report = {
         "run_label": run_label,
         "checkpoint": str(state_path),
+        "use_env_task_process": bool(use_env_task_process),
         "stats": stats,
         "anticipation": antic_metrics,
         "tasks": task_records,
@@ -605,6 +653,7 @@ def _plot_comparison(
     out_path: Path,
     *,
     action_policy_line: str,
+    task_process_line: str,
 ) -> None:
     ant_stats = anticipatory["stats"]
     myo_stats = myopic["stats"]
@@ -639,7 +688,7 @@ def _plot_comparison(
         if i == 0:
             ax.set_ylim(0, 1.05)
     fig.suptitle(
-        f"Frozen weights — {action_policy_line}; same task RNG & env reset seeds",
+        f"Frozen weights — {action_policy_line}; {task_process_line}",
         fontsize=12,
         fontweight="600",
     )
@@ -683,6 +732,7 @@ def run_compare(args: argparse.Namespace) -> None:
         "num_tasks": args.num_tasks,
         "total_steps": args.total_steps,
         "tasks_per_reset": args.tasks_per_reset,
+        "use_env_task_process": bool(ant_report.get("use_env_task_process", False)),
         "softmax_temperature": float(args.softmax_temperature),
         "action_policy": _action_policy_label(float(args.softmax_temperature)),
         "anticipatory_checkpoint": str(ant_path),
@@ -708,11 +758,17 @@ def run_compare(args: argparse.Namespace) -> None:
     print(f"Wrote comparison JSON → {cmp_path}")
 
     policy_line = _action_policy_label(float(args.softmax_temperature))
+    task_process_line = (
+        "env-driven correlated task process; same reset seeds"
+        if comparison["use_env_task_process"]
+        else "same task RNG & env reset seeds"
+    )
     _plot_comparison(
         ant_report,
         myo_report,
         base_out / "comparison_summary.png",
         action_policy_line=policy_line,
+        task_process_line=task_process_line,
     )
 
     d = comparison["delta_anticipatory_minus_myopic"]

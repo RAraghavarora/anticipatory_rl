@@ -448,6 +448,9 @@ def train(args: argparse.Namespace, device: torch.device) -> None:
             clear_receptacle_shaping_scale=args.clear_receptacle_shaping_scale,
             clear_task_prob=args.clear_task_prob,
             ensure_receptacle_coverage=args.ensure_receptacle_coverage,
+            task_mode=args.task_mode,
+            clear_followup_prob=args.clear_followup_prob,
+            followup_target_mode=args.followup_target_mode,
             config_path=args.config_path,
         )
 
@@ -1744,7 +1747,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-label",
         type=str,
-        choices=("anticipatory", "myopic"),
         default=None,
         help="Subdirectory label under runs/ (default: myopic if tasks-per-reset<=1, else anticipatory).",
     )
@@ -1779,6 +1781,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=2.0,
         help="Per-object reward for clear_receptacle when objects leave the target surface (default 2.0).",
+    )
+    parser.add_argument(
+        "--task-mode",
+        type=str,
+        default=None,
+        choices=("iid", "clear_followup"),
+        help="Override the environment task process mode (default: from config, else iid).",
+    )
+    parser.add_argument(
+        "--clear-followup-prob",
+        type=float,
+        default=None,
+        help="Probability that a successful clear task emits a displaced-object follow-up move task.",
+    )
+    parser.add_argument(
+        "--followup-target-mode",
+        type=str,
+        default=None,
+        choices=("argmax", "weighted"),
+        help="How correlated clear-followup move targets are chosen from per-object receptacle priors.",
     )
     return parser
 

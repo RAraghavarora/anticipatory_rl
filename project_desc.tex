@@ -1,0 +1,425 @@
+\documentclass[10pt]{article} % For LaTeX2e
+\usepackage[preprint]{rlc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Recommended (but not required) packages
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amssymb}            % Defines common symbols like \mathbb R
+\usepackage{mathtools}          % Extends amsmath, providing common math tools
+\usepackage{mathrsfs}           % Enables \mathscr, which can work in cases that \mathcal does not
+%\mathtoolsset{showonlyrefs}     % Only number equations that are referenced (optional)
+\usepackage{graphicx}           % For including images
+\usepackage{subcaption}         % Allows for the use of subfigures and subcaptions
+\usepackage[space]{grffile}     % For spaces in image names
+\usepackage{url}                % For displaying urls
+\usepackage{algorithm}          % For algorithm floats
+\usepackage{algpseudocode}      % For algorithmic pseudocode
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Title Page Specification
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\title{Reinforcement Learning for Anticipatory Planning}
+
+\author{Raghav Arora \\
+    raghavaurora@utexas.edu \\
+    ECE \\
+    UT Austin}
+
+% The \author macro works with any number of authors. Use \AND 
+% to separate the names and addresses of multiple authors.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Begin document, create title and abstract
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\maketitle
+
+% \begin{abstract}
+% Write your project abstract here. The abstract should provide a concise summary of your project's objectives, methodology, and expected outcomes. Keep it to one paragraph and make it informative yet accessible.
+% \end{abstract}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Section: Introduction
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+\label{sec:introduction}
+To deploy autonomous service robots in human-centric environments, such as homes, offices, or restaurants, the robots need to follow human instructions and perform the tasks given to them. For the robots to integrate into these environments, they need to perform not just single isolated tasks, but operate autonomously for long periods of time.
+Often, the tasks given to the robots are similar or repeated over time, such as cleaning the dining table after a meal, or serving water to incoming guests in a restaurant. A robot that can \textit{foresee} the likely needs of its human collaborators and prepare the environment accordingly can dramatically improve task efficiency and reduce human cognitive load. 
+For this foresight, the robot needs to learn the tasks and patterns in the environment, anticipate the upcoming tasks, and optimize for the anticipated tasks. For robots working in dynamic environments for long durations, the robots also need to adapt to changing needs and patterns of the environment. 
+\\
+Recent work has explored the use of \textit{Anticipation} for quicker and more efficient Task Planning, as well as \textit{Preparation} before a given task ~\citep{dhakal_anticipatory_2023,dhakal_anticipatory_2024,talukder_anticipatory_2024}. These work use offline trained GNNs to learn the cost of anticipated tasks.
+This learned model, captures the relationships between objects in the environment, and serves as a static heuristic during deployment, guiding the planner toward states that were associated with low future costs in the training data.
+
+Such approach faces two major issues: First, learning the task distribution is a challenging problem, and before the robot can learn the cost of anticipated tasks, it needs to collect a lot of data to estimate the distribution.
+Second, prior approaches often limit their anticipatory reasoning to a single follow-up task, effectively operating on a short-sighted horizon. While such offline anticipatory training reduces computational complexity, it fails to account for the cumulative impact of actions over a continuous stream of instructions. Because the environment persists between tasks , a truly 'long-lived' robot should optimize its behavior over an infinite horizon, where every action is weighed against its potential value for all subsequent tasks in the sequence.
+% Secondly, the stationarity assumption directly contradicts the nature of human life and work. Human routines, and thus the tasks they generate, are inherently non-stationary, and depend on the context of the environment and the human's current state. For instance, the tasks in a home may be much different in the evening compared to the morning, and may differ based on the day of the week.
+
+% Hence, an offline learned model is not capable of adapting to novel situations, changing user preferences, or shifts in high-level goals in the environment. 
+
+In this work, we propose Anticipatory Reinforcement Learning, a framework that reframes the anticipatory planning problem as a continual-task Markov Decision Process (MDP). By augmenting the environment state with the current task instruction, we enable the agent to learn an optimal value function that inherently captures the \textit{preparedness} of the environment .
+
+% Unlike static heuristics, our approach utilizes Potential-Based Reward Shaping. We learn an anticipatory potential—an estimate of the expected future value of a state across the entire task distribution . This provides the robot with a dense reward signal, guiding it to take actions that solve the immediate task while simultaneously organizing the environment for future needs .
+
+\vspace{-2em}
+\subsection{Problem Statement}
+
+\subsection{Anticipatory Planning}
+The \textit{Anticipatory Planning} objective was proposed by \cite{dhakal_anticipatory_2023} where an agent receives tasks $\tau_t \sim \mathcal{P}(\tau)$ sequentially, and the agent is required to solve the current task, while also minimizing the expected cost of anticipated future tasks. 
+
+The anticipatory planning is:
+\begin{equation}
+\label{eq:anticipatory_planning}
+\begin{aligned}
+    s_g^* &= \operatorname*{argmin}_{s_g^\prime \in \mathcal{G_\tau}}\left[V^*_{s_g^\prime}(s_0) + \sum_{\tau^\prime}{P(\tau^\prime) V^*_{\tau^\prime}(s_g^\prime)}\right] \\
+    &= \operatorname*{argmin}_{s_g^\prime \in \mathcal{G_\tau}}\left[V^*_{s_g^\prime}(s_0) + \boldsymbol{V}^*_{A.P.}(s_g^\prime)\right]
+\end{aligned}
+\end{equation}
+
+where $V^*_{s_g^\prime}(s_0)$ is the optimal cost of moving from  $s_0$ to $s_g^\prime$ for the current task $\tau$, and $V^*_{\tau^\prime}(s_g^\prime)$ is the optimal cost to complete a future task $\tau^\prime$ starting from state $s_g^\prime$.
+The term $\boldsymbol{V}^*_{A.P.}(s_g^\prime) = \sum_{\tau^\prime}{P(\tau^\prime) V^*_{\tau^\prime}(s_g^\prime)}$ is the expected cost of anticipated future tasks, which they define as the \textit{Anticipatory Planning Cost}.
+
+\subsection{Anticipatory Planning as a Reinforcement Learning Problem}
+
+We can model a long-lived robot that receives a stream of tasks as a single infinite-horizon MDP by augmenting the environment state with the current task instruction. Let the environment state be $s \in \mathcal{S}$, the action be $a \in \mathcal{A}$, and the (countable) set of tasks be $\tau \in \mathcal{T}$ with task distribution $P(\tau)$. Define a goal predicate $g(s,\tau) \in \{0,1\}$ that indicates whether task $\tau$ is complete in state $s$.
+
+We define the augmented state space $\mathcal{X} = \mathcal{S} \times \mathcal{T}$, where $x=(s,\tau)$. A policy is task-conditioned: $\pi(a \mid s,\tau)$.
+
+The environment transitions according to $P(s'\mid s,a)$. The task only changes at task boundaries:
+\begin{equation}
+\label{eq:task_transition}
+\begin{aligned}
+    \tau' &= \tau, &&\text{if } g(s',\tau)=0, \\
+    \tau' &\sim P(\tau), &&\text{if } g(s',\tau)=1.
+\end{aligned}
+\end{equation}
+
+During training, we additionally impose a fixed primitive-step cap per task as an exogenous truncation for data collection. If this cap is reached before completion, the rollout is reset, but this event is not treated as a task completion and does not induce a task transition in the underlying MDP.
+
+Let $r(s,\tau,a,s')$ denote the reward 
+% (in our setting, typically the negative of an execution cost, plus any task-completion bonus). 
+The value function for a policy $\pi$ in the augmented MDP is
+\begin{equation}
+    V^{\pi}(s,\tau) = \mathbb{E}^{\pi}\left[\sum_{t=0}^{\infty} \gamma^{t} r(s_t,\tau_t,a_t,s_{t+1}) \;\middle|\; s_0=s,\tau_0=\tau\right].
+\end{equation}
+
+This formulation makes the anticipatory objective natural: the quality of a physical state $s$ for the future task stream is the expected value when the next task is drawn from $P$.
+We define the (policy-dependent) anticipatory value
+\begin{equation}
+    \boldsymbol{V}^{\pi}_{A.P.}(s) \triangleq \mathbb{E}_{\tau \sim P(\tau)}\left[ V^{\pi}(s,\tau) \right],
+\end{equation}
+and the optimal anticipatory value $\boldsymbol{V}^{*}_{A.P.}(s) = \mathbb{E}_{\tau \sim P(\tau)}\left[ V^{*}(s,\tau) \right]$. Intuitively, $\boldsymbol{V}_{A.P.}(s)$ captures how \textit{prepared} the environment state $s$ is for the continuing stream of future tasks.
+
+
+
+
+% \subsection{Objectives}
+% List the main objectives and goals of your project.
+
+% \subsection{Scope}
+% Define the scope and boundaries of your project.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Section: Literature Review
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Literature Review}
+\label{sec:literature}
+
+% Provide a comprehensive review of relevant literature and prior work related to your project. Discuss existing approaches, their strengths and limitations, and how your work builds upon or differs from them.
+
+\subsection{Anticipatory Planning}
+\label{sec:ant_plan}
+
+\cite{dhakal_anticipatory_2023} proposed the framework for \textit{Anticipatory Planning}, where a robot is sequentially executing tasks, and instead of optimizing for the immediate task, the robot optimizes for the current and \textit{anticipated} future tasks. 
+Building on this foundation, \cite{dhakal_anticipatory_2024, talukder_anticipatory_2024} incorporated Task and Motion Planning (TAMP), and large-scale environments, respectively. 
+These works use an offline trained Graph Neural Network to predict the expected cost of anticipated tasks, and assume that the robot has access to the ground truth task distribution. 
+\\
+\cite{arora_anticipate_2024, singh_anticipate_2024} used Large Language Models (LLMs) to find patterns in the user's task execution history to better anticipate upcoming tasks, followed by classical PDDL-based task planner for planning. While these works achieve lower cost, and faster planning over a sequence of tasks, the efficiency of the framework is limited by the LLM-based anticipation and is fails for tasks which may not be semantically related, or are out of context of previous history.
+
+\cite{patel_proactive_nodate} introduced a generative GNN model to track and predict object movements for proactive human assistance. They collect and present the HOMER (and HOMER+\citep{patel_homer_plus}) dataset of routine household behaviours spanning sevaral weeks.
+Following this, TAACo framework \citep{patel_robot_2025} anticipates user's preferred manner of assistance for a given task based on user feedback.
+
+** Look into \citep{bouhsain_learning_2023}**
+
+Both GNN-based, and LLM-based methods assume access to a static task distribution for the home, and learning this distribution is not considered by these works. In real-world, often the task distribution is not known a priori, and the distribution can change over time. To tackle this gap, this work proposes to learn the task distribution online, which allows the robot to adapt to the changing task distribution.
+
+\subsection{Online and Lifelong Learning}
+\label{sec:online}
+\cite{ma_efficient_2025,duan_sample_2025,feng_non-stationary_2023, jiang_task-motion_2019,pan_survey_2025, romero_h-grail_2025, ahmadi_multi-robot_2006, shah_deep_2020, hester_texplore_2013, zhu_advancing_2024, agarwal_l3mp_2025}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Section: Methodology
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Methodology (contains unrefined thoughts right now, needs to be re-written)}
+\label{sec:methodology}
+
+
+\subsection{Approach}
+
+\begin{figure}
+    \centering
+\includegraphics[width=0.25\linewidth]{images/toy_grid.png}
+    \caption{Gridworld toy problem}
+    \label{fig:gridworld}
+\end{figure}
+
+\subsubsection{Toy Problem}
+We define a toy problem using a small 5x5 2D gridworld problem as shown in \ref{fig:gridworld}, with 1 agent, 3 receptacles, and 4 objects.
+The receptacles could have any size in the range 1x1 to 2x2, and objects can only be placed on a receptacle tile.
+
+We make a mock task distribution, which has two types of tasks:
+
+1) Move X to Y: Where the agent has to move object X to receptacle Y
+\\ 2) Clear Y: The agent has to clear the receptacle Y, i.e. there should be no object on that receptacle.
+
+A task is considered complete with $g(\tau_t) = 1$ if the target object is on the right tile, or the target receptacle is clear, and the agent is not holding any object.
+
+For the diagnostic experiment reported in Sec.~\ref{sec:results}, we use a move-heavy ablation in which the probability of move-object tasks is 80\%, and the probability of clear tasks is 20\%.
+For the move X to Y tasks, each object is assigned a categorical distribution over possible receptacles. Specifically, each object has a preferred receptacle that receives most of the probability mass, with object-specific preference strengths between 70\% and 85\%.
+
+We train two simple convolutional DQN agents, one myopic, and one anticipatory. 
+Both agents are trained in the same continual environment, where the physical environment is reset only after long sequences of tasks. The anticipatory agent bootstraps across successful task boundaries, so the post-task state is valued according to the expected stream of future tasks. The myopic agent uses the same environment and reset schedule, but treats each successful task boundary as terminal in the Bellman update, thereby severing credit assignment across tasks while preserving the same state distribution.
+In addition, we impose a per-task cap of 200 primitive steps as a training-time truncation. If a task is not solved within this cap, the rollout is reset for convenience, but this timeout is not modeled as a task transition and no future-task value is propagated across it.
+
+\subsection{The Role of Discount Factor in Anticipatory Behavior}
+\label{sec:gamma-proof}
+
+We now clarify two separate mechanisms in our continual-task reinforcement learning formulation: whether value is allowed to propagate across successful task boundaries, and how strongly distant rewards are discounted once that propagation is enabled.
+Recall the augmented MDP with states $x = (s,\tau) \in \mathcal{S}\times\mathcal{T}$, actions $a\in\mathcal{A}$, reward $r(s,\tau,a,s')$, and task transition according to Eq.~\eqref{eq:task_transition}.  
+For a policy $\pi$, the value function is
+\[
+V^{\pi}(s,\tau) = \mathbb{E}^{\pi}\!\left[\sum_{t=0}^{\infty}\gamma^{t} r_t \;\middle|\; s_0=s,\tau_0=\tau\right].
+\]
+
+\subsubsection*{Myopic baseline (task-boundary truncation)}
+Our experimental myopic baseline is not obtained by resetting the physical environment after each task. Instead, both agents operate in the same persistent environment and share the same reset schedule; the only difference is the Bellman target used at successful task boundaries.
+For the anticipatory agent, a successful completion transition is backed up through the next sampled task:
+\[
+y_{\text{ant}} = r(s,\tau,a,s') + \gamma \max_{a'} Q(s',\tau',a'),
+\]
+where $\tau'$ is sampled according to Eq.~\eqref{eq:task_transition}. For the myopic agent, the same successful task-boundary transition is treated as terminal for learning:
+\[
+y_{\text{myopic}} = r(s,\tau,a,s').
+\]
+Thus the myopic baseline optimizes each task in isolation while still acting in the same persistent world state distribution. This isolates the effect of cross-task credit assignment without confounding it with different environment resets.
+
+\subsubsection*{One‑task anticipation (intermediate $\gamma$)}
+Once task-boundary bootstrapping is enabled, the discount factor $\gamma$ controls how much the agent values future tasks. For $\gamma > 0$ but not too large, the agent begins to consider the next task.  
+Write the value function for a state $s$ just after completing the current task (i.e., $g(s,\tau)=1$). Then the next task $\tau'$ is drawn from $P(\tau)$ and the value satisfies
+\[
+V^{\pi}(s,\tau) = \mathbb{E}_{s'}\!\left[ r(s,\tau,a,s') + \gamma\, \mathbb{E}_{\tau'\sim P}\!\left[ V^{\pi}(s',\tau') \right] \right],
+\]
+where the outer expectation is over the transition due to the last action of the current task.  
+If we assume that the current task is solved optimally and then the agent executes an optimal policy for the next task, we recover the structure of Dhakal’s one‑task anticipatory planning (Eq.~\eqref{eq:anticipatory_planning} up to a change of sign from cost to reward).  
+Indeed, the term $\mathbb{E}_{\tau'\sim P}[V^{\pi}(s',\tau')]$ is precisely the expected value of the next task from state $s'$.  
+For a sufficiently large $\gamma$, the agent will prefer actions that lead to states $s'$ with high expected value for the next task, thereby reproducing the “anticipatory planning cost” minimization.  
+In the limit where $\gamma$ is large enough that the second task dominates the immediate reward, but still decays rapidly so that the third task is negligible, the policy approximates the one‑task anticipation.
+
+\subsubsection*{Infinite‑horizon anticipation ($\gamma \to 1$)}
+As $\gamma \to 1$, the value function accumulates rewards over an unbounded horizon.  
+Because the task sequence is i.i.d. from $P(\tau)$ after each completion, the value of a physical state $s$ becomes
+\[
+V^{\pi}(s) \;\triangleq\; \mathbb{E}_{\tau\sim P}\!\left[ V^{\pi}(s,\tau) \right]
+\]
+and satisfies the Bellman equation
+\[
+V^{\pi}(s) = \mathbb{E}_{\tau\sim P}\!\left[ \mathbb{E}^{\pi}\!\left[ \sum_{t=0}^{T_\tau-1} r_t + \gamma^{T_\tau} V^{\pi}(s_{T_\tau}) \;\middle|\; s_0=s,\tau_0=\tau \right] \right],
+\]
+where $T_\tau$ is the (random) number of steps to complete task $\tau$.  
+For $\gamma=1$, this becomes the undiscounted expected total reward over the infinite task sequence.  
+The optimal policy therefore maximizes the long‑run average reward, i.e., it makes decisions that prepare the environment for the entire future task stream, not only the next task.  
+This is the full anticipatory behavior we aim to learn.
+
+\subsubsection*{Continuous interpolation}
+More generally, the discount factor $\gamma$ controls the effective planning horizon.  
+We can expand the value function recursively:
+\[
+V^{\pi}(s,\tau) = \mathbb{E}^{\pi}\!\left[ \sum_{k=0}^{\infty} \gamma^{T_{\tau,k}} r_{\tau,k} \right],
+\]
+where $r_{\tau,k}$ denotes the total reward of the $k$-th task after the current one, and $T_{\tau,k}$ is the cumulative number of steps up to that task.  
+With task-boundary bootstrapping enabled, $\gamma=0$ makes only $k=0$ matter.  
+For $0<\gamma<1$, tasks further in the future are discounted by $\gamma^{\text{cumulative steps}}$, which tends to give more weight to the first few tasks.  
+As $\gamma$ increases, the effective horizon lengthens, and the agent’s behavior smoothly transitions from short-horizon anticipation to a full anticipatory policy that considers the entire task distribution. By contrast, our myopic baseline disables this cross-task propagation altogether by truncating the Bellman backup at successful task boundaries.
+
+Thus the discount factor provides a natural mechanism to control the degree of anticipation, and our continual‑task MDP formulation with $\gamma \to 1$ yields the true infinite‑horizon anticipatory policy.
+
+% We use an off-policy, task-conditioned value-based learner over the augmented state $x_t=(s_t,\tau_t)\in\mathcal{S}\times\mathcal{T}$. To encourage anticipatory behavior, we use potential-based reward shaping with a learned potential $\Phi_{\psi}(s)\approx \boldsymbol{V}^{*}_{A.P.}(s)$. Given the environment reward $r_t=r(s_t,\tau_t,a_t,s_{t+1})$, the shaped reward is
+% \begin{equation}
+%     \tilde r_t = r_t + \gamma\,\Phi_{\psi}(s_{t+1}) - \Phi_{\psi}(s_t),
+% \end{equation}
+% which preserves the optimal policy while providing a dense signal for preparedness.
+% See algorithm \ref{alg:continual-tc-dqn} for the current working algorithm using DQN.
+
+% \begin{algorithm}[t]
+% \caption{Continual Task-Conditioned DQN with Anticipatory Potential Shaping}
+% \label{alg:continual-tc-dqn}
+% \begin{algorithmic}[1]
+% \Require Task set $\mathcal{T}$, task sampler $P(\tau)$, environment $\mathrm{env}$, max tasks $K$, per-task horizon $H$, replay buffer $\mathcal{D}$, discount $\gamma$, exploration $\epsilon$
+% \State Initialize environment; observe initial state $s_0$
+% \State Sample initial task $\tau_0 \sim P(\tau)$
+% \State Initialize Q-network $Q_{\theta}(s,\tau,a)$ and target network $Q_{\bar\theta} \gets Q_{\theta}$
+% \State Initialize potential model $\Phi_{\psi}(s)$
+% \For{$t = 0,1,\dots,K-1$}
+%     \State Reset per-task step counter $h \gets 0$
+%     \While{$h < H$}
+%         \State Select action $a_h$ using $\epsilon$-greedy w.r.t. $Q_{\theta}(s_h,\tau_t,\cdot)$
+%         \State Execute $a_h$ in $\mathrm{env}$, observe $s_{h+1}$ and environment reward $r_h$
+%         \State Compute shaped reward $\tilde r_h \gets r_h + \gamma\,\Phi_{\psi}(s_{h+1}) - \Phi_{\psi}(s_h)$
+%         \State Store transition $(s_h,\tau_t,a_h,\tilde r_h,s_{h+1})$ in $\mathcal{D}$
+%         \If{$|\mathcal{D}|$ is sufficient for learning}
+%             \State Sample minibatch $(s,\tau,a,\tilde r,s') \sim \mathcal{D}$
+%             \State $y \gets \tilde r + \gamma\,\mathbb{I}[\neg g(s',\tau)]\,\max_{a'} Q_{\bar\theta}(s',\tau,a')$
+%             \State Update $\theta$ to minimize $\lVert Q_{\theta}(s,\tau,a) - y \rVert$
+%             \State Periodically update target network $Q_{\bar\theta} \gets Q_{\theta}$
+%         \EndIf
+%         \If{$g(s_{h+1},\tau_t)=1$}
+%             \State \textbf{break} \Comment{task completed}
+%         \EndIf
+%         \State $h \gets h+1$
+%     \EndWhile
+%     \State Sample next task $\tau_{t+1} \sim P(\tau)$
+% \EndFor
+% \end{algorithmic}
+% \end{algorithm}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Section: Results and Analysis
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Results and Analysis}
+\label{sec:results}
+
+We report the current diagnostic experiment under the move-heavy task distribution described above, with 4 objects, 3 receptacles, a primitive-step cap of 200 per task, and identical environment reset schedules for both agents. Training is run for 700k primitive steps, and evaluation uses greedy argmax inference over 1000 sampled tasks with matched task RNG and reset seeds across agents.
+
+\subsection{Training Dynamics}
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/anti_metrics.png}
+        \caption{Anticipatory training metrics.}
+        \label{fig:ant-train-metrics-current}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/myo_metrics.png}
+        \caption{Myopic training metrics.}
+        \label{fig:myo-train-metrics-current}
+    \end{subfigure}
+    \caption{Per-step and per-task training diagnostics for the current 700k-step runs.}
+    \label{fig:train-metrics-current}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/anti_rolling.png}
+        \caption{Anticipatory rolling summaries.}
+        \label{fig:ant-train-rolling-current}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/myo_rolling.png}
+        \caption{Myopic rolling summaries.}
+        \label{fig:myo-train-rolling-current}
+    \end{subfigure}
+    \caption{Rolling training summaries for the same runs.}
+    \label{fig:train-rolling-current}
+\end{figure*}
+
+\begin{table}[t]
+    \centering
+    \begin{tabular}{lcc}
+        \hline
+        Metric at 700k training steps & Anticipatory & Myopic \\
+        \hline
+        Completed tasks & 27,640 & 52,128 \\
+        Cumulative training success & 0.95 & 0.99 \\
+        Final recent return & -1.4 & 3.6 \\
+        Final recent task length & 17.2 & 12.0 \\
+        \hline
+    \end{tabular}
+    \caption{Final training summaries reported by the two runs. The return and task-length values are the final progress-bar summaries from training, while success is cumulative over completed tasks.}
+    \label{tab:training-results-current}
+\end{table}
+
+The myopic agent is substantially easier to optimize in this setting. Within the same 700k-step budget it completes nearly twice as many tasks, attains higher cumulative training success, and maintains shorter recent task lengths. The anticipatory agent does not show a training-time advantage in this ablation, despite being trained in the same persistent environment with cross-task bootstrapping enabled.
+
+\subsection{Greedy Evaluation}
+
+\begin{table}[t]
+    \centering
+    \begin{tabular}{lcc}
+        \hline
+        Greedy evaluation metric & Anticipatory & Myopic \\
+        \hline
+        Overall success rate & 89.6\% & 95.1\% \\
+        Overall auto-rate (task-weighted) & 33.8\% & 35.1\% \\
+        Mean auto-rate across positions & 30.9\% & 33.5\% \\
+        Active-task success rate & 84.3\% & 92.4\% \\
+        Avg. steps on solved active tasks & 8.6 & 9.4 \\
+        Auto tasks ($n$) & 338 & 351 \\
+        Active tasks ($n$) & 662 & 649 \\
+        \hline
+    \end{tabular}
+    \caption{Greedy argmax evaluation over 1000 tasks with matched task sequences and reset seeds.}
+    \label{tab:eval-results-current}
+\end{table}
+
+The evaluation results also favor the myopic baseline overall. The anticipatory agent solves successful active tasks slightly faster (8.6 vs. 9.4 steps), but this local advantage does not translate into better overall performance. Its overall success rate is lower, its auto-satisfaction rate is slightly lower, and its reward per step is lower by 0.5316 compared with the myopic agent.
+
+This apparent mismatch between ``active-task average steps'' and ``overall average steps per task'' is expected. The active-task step metric averages only over active tasks that are successfully solved, whereas the overall steps-per-task statistic also includes failed and truncated tasks. Because the anticipatory agent fails more active tasks in this experiment, those longer unsuccessful rollouts increase its overall step cost even though its successful active-task completions are slightly shorter.
+
+Overall, the current 80/20 move-clear diagnostic does not yet show the intended anticipatory advantage. In this benchmark, the anticipatory agent remains less sample efficient during training and underperforms the myopic baseline on the main evaluation metrics, even though it exhibits a small speed advantage on the subset of active tasks that it does solve successfully.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Section: Conclusion
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusion}
+\label{sec:conclusion}
+
+\subsubsection*{Broader Impact Statement}
+\label{sec:broaderImpact}
+Discuss the potential broader impacts of your project, including any ethical considerations, societal implications, or potential risks.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% NOTE: THIS MARKS THE END OF THE "MAIN TEXT"
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Bibliography
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\bibliography{main}
+\bibliographystyle{rlc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Appendices
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\appendix
+
+\section{The first appendix}
+\label{sec:appendix1}
+This is an example of an appendix. 
+
+\noindent \textbf{Note:} You may move the appendices to appear before or after the references. Appendices before the references are viewed as part of the ``main text'' and are subject to the 8--12 page limit, are peer reviewed, and can contain content central to the claims of the paper. Appendices that appear after the references are not part of the ``main text,'' have no page limits, are not necessarily reviewed, and should not contain any claims or material central to the paper.
+
+\section{The second appendix}
+\label{sec:appendix2}
+This is an example of a second appendix. If there is only a single section in the appendix, you may simply call it ``Appendix'' as follows:
+
+\section*{Appendix}
+% No label, since this can't be referenced meaningfully with \ref{}.
+This format should only be used if there is a single appendix (unlike in this document).
+
+\subsection{Keywords to checkout}
+foresight, Proactive-assistance, concept-drift
+
+\end{document}
