@@ -1,41 +1,139 @@
+object_specs:
+  - name: mug_red
+    kind: mug
+  - name: glass_tall
+    kind: glass
+  - name: glass_short
+    kind: glass
+  - name: bowl_small
+    kind: bowl
+  - name: bowl_large
+    kind: bowl
+
 task_distribution:
-  serve_water: 0.35
-  make_coffee: 0.25
-  serve_fruit_bowl: 0.15
-  clear_containers: 0.15
-  wash_objects: 0.10
+  serve_water: 0.32
+  make_coffee: 0.24
+  serve_fruit_bowl: 0.14
+  clear_containers: 0.18
+  wash_objects: 0.12
+
+task_transition_distribution:
+  serve_water:
+    serve_water: 0.05
+    make_coffee: 0.55
+    serve_fruit_bowl: 0.10
+    clear_containers: 0.25
+    wash_objects: 0.05
+  make_coffee:
+    serve_water: 0.10
+    make_coffee: 0.05
+    serve_fruit_bowl: 0.10
+    clear_containers: 0.60
+    wash_objects: 0.15
+  serve_fruit_bowl:
+    serve_water: 0.15
+    make_coffee: 0.05
+    serve_fruit_bowl: 0.05
+    clear_containers: 0.60
+    wash_objects: 0.15
+  clear_containers:
+    serve_water: 0.10
+    make_coffee: 0.10
+    serve_fruit_bowl: 0.05
+    clear_containers: 0.00
+    wash_objects: 0.75
+  wash_objects:
+    serve_water: 0.40
+    make_coffee: 0.35
+    serve_fruit_bowl: 0.20
+    clear_containers: 0.05
+    wash_objects: 0.00
+
+wash_followup_task_distribution:
+  mug:
+    serve_water: 0.20
+    make_coffee: 0.65
+    serve_fruit_bowl: 0.05
+    clear_containers: 0.10
+    wash_objects: 0.00
+  glass:
+    serve_water: 0.70
+    make_coffee: 0.05
+    serve_fruit_bowl: 0.10
+    clear_containers: 0.15
+    wash_objects: 0.00
+  bowl:
+    serve_water: 0.10
+    make_coffee: 0.05
+    serve_fruit_bowl: 0.70
+    clear_containers: 0.15
+    wash_objects: 0.00
+
+same_location_followup_prob:
+  serve_water: 0.90
+  make_coffee: 0.90
+  serve_fruit_bowl: 0.90
+  clear_containers: 1.00
+  wash_objects: 0.85
+
+active_service_location_stickiness: 0.85
+followup_wash_from_cleared_prob: 0.95
 
 service_location_distribution:
-  pass_counter: 0.34
-  table_left: 0.33
-  table_right: 0.33
+  pass_counter: 0.20
+  table_left: 0.40
+  table_right: 0.40
 
 wash_kind_distribution:
-  mug: 0.40
+  mug: 0.45
   glass: 0.30
-  bowl: 0.30
+  bowl: 0.25
+
+service_contents_distribution:
+  mug:
+    empty: 0.50
+    water: 0.25
+    coffee: 0.25
+    fruit: 0.00
+  glass:
+    empty: 0.55
+    water: 0.45
+    coffee: 0.00
+    fruit: 0.00
+  bowl:
+    empty: 0.55
+    water: 0.00
+    coffee: 0.00
+    fruit: 0.45
+
+service_empty_dirty_prob:
+  mug: 0.20
+  glass: 0.15
+  bowl: 0.15
 
 reset_location_distribution:
   mug:
-    kitchen_counter: 0.40
-    dish_rack: 0.25
-    sink: 0.05
-    pass_counter: 0.10
-    table_left: 0.10
-    table_right: 0.10
+    kitchen_counter: 0.55
+    dish_rack: 0.20
+    sink: 0.10
+    bus_tub: 0.05
+    pass_counter: 0.03
+    table_left: 0.03
+    table_right: 0.04
   glass:
     kitchen_counter: 0.15
     dish_rack: 0.45
     sink: 0.05
-    pass_counter: 0.10
-    table_left: 0.10
-    table_right: 0.10
-    bus_tub: 0.05
+    bus_tub: 0.10
+    pass_counter: 0.08
+    table_left: 0.08
+    table_right: 0.09
   bowl:
-    kitchen_counter: 0.20
+    kitchen_counter: 0.25
     dish_rack: 0.35
     sink: 0.05
-    fruit_station: 0.10
-    pass_counter: 0.10
-    table_left: 0.10
-    table_right: 0.10
+    fruit_station: 0.15
+    bus_tub: 0.05
+    pass_counter: 0.05
+    table_left: 0.05
+    table_right: 0.05

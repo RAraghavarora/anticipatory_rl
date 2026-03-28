@@ -135,6 +135,7 @@ class RestaurantSymbolicEnv(Env):
         loaded_config = DEFAULT_CONFIG
         if config_path is not None:
             loaded_config = _load_config(Path(config_path))
+        self.object_specs = self._normalize_object_specs(loaded_config.get("object_specs"))
         self.task_distribution: Dict[str, float] = {
             name: float(loaded_config.get("task_distribution", {}).get(name, 0.0))
             for name in TASK_TYPES
@@ -147,12 +148,52 @@ class RestaurantSymbolicEnv(Env):
             name: float(loaded_config.get("wash_kind_distribution", {}).get(name, 0.0))
             for name in OBJECT_KINDS
         }
+        transition_cfg = loaded_config.get("task_transition_distribution", {})
+        self.task_transition_distribution: Dict[str, Dict[str, float]] = {
+            task_type: {
+                name: float(transition_cfg.get(task_type, {}).get(name, 0.0))
+                for name in TASK_TYPES
+            }
+            for task_type in TASK_TYPES
+        }
+        kind_transition_cfg = loaded_config.get("wash_followup_task_distribution", {})
+        self.wash_followup_task_distribution: Dict[str, Dict[str, float]] = {
+            kind: {
+                name: float(kind_transition_cfg.get(kind, {}).get(name, 0.0))
+                for name in TASK_TYPES
+            }
+            for kind in OBJECT_KINDS
+        }
+        same_loc_cfg = loaded_config.get("same_location_followup_prob", {})
+        self.same_location_followup_prob: Dict[str, float] = {
+            task_type: float(same_loc_cfg.get(task_type, 0.0))
+            for task_type in TASK_TYPES
+        }
+        self.active_service_location_stickiness = float(
+            loaded_config.get("active_service_location_stickiness", 0.0)
+        )
+        self.followup_wash_from_cleared_prob = float(
+            loaded_config.get("followup_wash_from_cleared_prob", 0.0)
+        )
         reset_loc_cfg = loaded_config.get("reset_location_distribution", {})
         self.reset_location_distribution: Dict[str, Dict[str, float]] = {
             kind: {
                 loc: float(reset_loc_cfg.get(kind, {}).get(loc, 0.0))
                 for loc in LOCATIONS
             }
+            for kind in OBJECT_KINDS
+        }
+        service_content_cfg = loaded_config.get("service_contents_distribution", {})
+        self.service_contents_distribution: Dict[str, Dict[str, float]] = {
+            kind: {
+                content: float(service_content_cfg.get(kind, {}).get(content, 0.0))
+                for content in CONTENTS
+            }
+            for kind in OBJECT_KINDS
+        }
+        dirty_cfg = loaded_config.get("service_empty_dirty_prob", {})
+        self.service_empty_dirty_prob: Dict[str, float] = {
+            kind: float(dirty_cfg.get(kind, 0.0))
             for kind in OBJECT_KINDS
         }
         self.max_task_steps = max(1, int(max_task_steps))
@@ -167,8 +208,8 @@ class RestaurantSymbolicEnv(Env):
         self.fruit_cost = float(fruit_cost)
         self._rng = np.random.default_rng(rng_seed)
 
-        self.object_specs = OBJECT_SPECS
-        self.object_names = OBJECT_NAMES
+        self.object_names = tuple(name for name, _ in self.object_specs)
+        self.object_name_index = {name: idx for idx, name in enumerate(self.object_names)}
         self.num_objects = len(self.object_names)
         self.num_locations = len(LOCATIONS)
 
@@ -206,6 +247,8 @@ class RestaurantSymbolicEnv(Env):
         self._task_steps = 0
         self._pending_auto_success = False
         self._task_source = "iid"
+        self._active_service_location: Optional[str] = None
+        self._task_context: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Gym API
@@ -229,6 +272,10 @@ class RestaurantSymbolicEnv(Env):
         )
         self._task_steps = 0
         self._task_source = "iid"
+        self._active_service_location = self._weighted_choice(
+            self.service_location_distribution,
+            SERVICE_LOCATIONS,
+        )
         self._resample_task()
         return self._obs(), self._info(success=False)
 
@@ -291,6 +338,7 @@ class RestaurantSymbolicEnv(Env):
             target_kind=target_kind,
         )
         self._task_source = task_source
+        self._start_task_context()
         self._update_pending_auto_success()
 
     def get_action_meanings(self) -> List[str]:
@@ -303,30 +351,113 @@ class RestaurantSymbolicEnv(Env):
     # Internal task process
     # ------------------------------------------------------------------
     def _advance_after_task_success(self, completed_task: RestaurantTask) -> None:
-        del completed_task
-        self._resample_task()
+        if completed_task.target_location in SERVICE_LOCATIONS:
+            self._active_service_location = completed_task.target_location
+        next_task, task_source = self._sample_next_task(completed_task)
+        self.set_task(
+            next_task.task_type,
+            target_location=next_task.target_location,
+            target_kind=next_task.target_kind,
+            task_source=task_source,
+        )
 
     def _resample_task(self) -> None:
+        next_task, task_source = self._sample_iid_task()
+        self.set_task(
+            next_task.task_type,
+            target_location=next_task.target_location,
+            target_kind=next_task.target_kind,
+            task_source=task_source,
+        )
+
+    def _sample_iid_task(self) -> Tuple[RestaurantTask, str]:
         task_type = self._weighted_choice(self.task_distribution, TASK_TYPES)
         if task_type in {"serve_water", "make_coffee", "serve_fruit_bowl", "clear_containers"}:
-            target_location = self._weighted_choice(
-                self.service_location_distribution,
-                SERVICE_LOCATIONS,
+            target_location = self._sample_service_location(None)
+            return (
+                RestaurantTask(
+                    task_type=task_type,
+                    target_location=target_location,
+                    target_kind=None,
+                ),
+                "iid",
             )
-            self.set_task(
-                task_type,
-                target_location=target_location,
-                target_kind=None,
-                task_source="iid",
-            )
-            return
         target_kind = self._weighted_choice(self.wash_kind_distribution, OBJECT_KINDS)
-        self.set_task(
-            task_type,
-            target_location=None,
-            target_kind=target_kind,
-            task_source="iid",
+        return (
+            RestaurantTask(
+                task_type=task_type,
+                target_location=None,
+                target_kind=target_kind,
+            ),
+            "iid",
         )
+
+    def _sample_next_task(self, completed_task: RestaurantTask) -> Tuple[RestaurantTask, str]:
+        source_distribution = self._transition_distribution_for(completed_task)
+        if source_distribution is None:
+            return self._sample_iid_task()
+
+        next_task_type = self._weighted_choice(source_distribution, TASK_TYPES)
+        if next_task_type == "wash_objects":
+            target_kind = self._sample_followup_wash_kind(completed_task)
+            return (
+                RestaurantTask(task_type="wash_objects", target_location=None, target_kind=target_kind),
+                f"transition:{completed_task.task_type}->wash_objects",
+            )
+
+        target_location = self._sample_service_location(completed_task)
+        return (
+            RestaurantTask(task_type=next_task_type, target_location=target_location, target_kind=None),
+            f"transition:{completed_task.task_type}->{next_task_type}",
+        )
+
+    def _transition_distribution_for(
+        self,
+        completed_task: RestaurantTask,
+    ) -> Optional[Mapping[str, float]]:
+        if completed_task.task_type == "wash_objects" and completed_task.target_kind is not None:
+            by_kind = self.wash_followup_task_distribution.get(completed_task.target_kind, {})
+            if any(weight > 0.0 for weight in by_kind.values()):
+                return by_kind
+        by_task = self.task_transition_distribution.get(completed_task.task_type, {})
+        if any(weight > 0.0 for weight in by_task.values()):
+            return by_task
+        return None
+
+    def _sample_service_location(self, completed_task: Optional[RestaurantTask]) -> str:
+        if (
+            completed_task is not None
+            and completed_task.target_location in SERVICE_LOCATIONS
+            and self._rng.random()
+            < self.same_location_followup_prob.get(completed_task.task_type, 0.0)
+        ):
+            return str(completed_task.target_location)
+        if (
+            self._active_service_location in SERVICE_LOCATIONS
+            and self._rng.random() < self.active_service_location_stickiness
+        ):
+            return str(self._active_service_location)
+        return self._weighted_choice(self.service_location_distribution, SERVICE_LOCATIONS)
+
+    def _sample_followup_wash_kind(self, completed_task: RestaurantTask) -> str:
+        if completed_task.task_type == "clear_containers":
+            washable_kinds = list(self._task_context.get("washable_kinds", []))
+            if washable_kinds and self._rng.random() < self.followup_wash_from_cleared_prob:
+                weighted_kinds = {kind: float(washable_kinds.count(kind)) for kind in set(washable_kinds)}
+                return self._weighted_choice(weighted_kinds, OBJECT_KINDS)
+        return self._weighted_choice(self.wash_kind_distribution, OBJECT_KINDS)
+
+    def _start_task_context(self) -> None:
+        context: Dict[str, Any] = {}
+        if self.task.task_type == "clear_containers" and self.task.target_location is not None:
+            target_objects = [
+                obj for obj in self.state.objects.values() if obj.location == self.task.target_location
+            ]
+            context["initial_target_objects"] = [obj.name for obj in target_objects]
+            context["washable_kinds"] = [
+                obj.kind for obj in target_objects if obj.dirty or obj.contents != "empty"
+            ]
+        self._task_context = context
 
     def _task_already_satisfied(self) -> bool:
         if self.task.task_type == "serve_water":
@@ -412,10 +543,12 @@ class RestaurantSymbolicEnv(Env):
         self.state.holding = None
         previous_contents = obj.contents
         obj.location = location
-        if location in {"sink", "bus_tub"}:
+        if location == "sink":
             if previous_contents != "empty":
                 obj.dirty = True
             obj.contents = "empty"
+        elif location == "bus_tub":
+            obj.dirty = True
         elif location in SERVICE_LOCATIONS and previous_contents != "empty":
             obj.dirty = True
         return -(travel + self.place_cost), True
@@ -424,7 +557,7 @@ class RestaurantSymbolicEnv(Env):
         if self.state.holding is None:
             return 0.0, False
         obj = self.state.objects[self.state.holding]
-        if not obj.dirty:
+        if not obj.dirty or obj.contents != "empty":
             return 0.0, False
         travel = self._travel_cost(self.state.agent_location, "sink")
         self.state.agent_location = "sink"
@@ -493,13 +626,18 @@ class RestaurantSymbolicEnv(Env):
         if location == "bus_tub":
             return True, "empty"
         if location in SERVICE_LOCATIONS:
-            if kind == "mug":
+            configured = self.service_contents_distribution.get(kind, {})
+            if any(weight > 0.0 for weight in configured.values()):
+                contents = self._weighted_choice(configured, CONTENTS)
+            elif kind == "mug":
                 contents = str(self._rng.choice(["water", "coffee", "empty"], p=[0.35, 0.35, 0.30]))
             elif kind == "glass":
                 contents = str(self._rng.choice(["water", "empty"], p=[0.7, 0.3]))
             else:
                 contents = str(self._rng.choice(["fruit", "empty"], p=[0.7, 0.3]))
-            dirty = contents != "empty" or bool(self._rng.random() < 0.4)
+            dirty = contents != "empty" or bool(
+                self._rng.random() < self.service_empty_dirty_prob.get(kind, 0.4)
+            )
             return dirty, contents
         return False, "empty"
 
@@ -514,7 +652,7 @@ class RestaurantSymbolicEnv(Env):
         if self.state.holding is None:
             held_vec[-1] = 1.0
         else:
-            held_vec[OBJECT_NAME_INDEX[self.state.holding]] = 1.0
+            held_vec[self.object_name_index[self.state.holding]] = 1.0
         pieces.append(held_vec)
 
         for name in self.object_names:
@@ -567,6 +705,7 @@ class RestaurantSymbolicEnv(Env):
             },
             "success": bool(success),
             "task_source": self._task_source,
+            "active_service_location": self._active_service_location,
             "next_auto_satisfied": bool(self._pending_auto_success),
             "valid_action_mask": self._valid_action_mask(),
         }
@@ -584,7 +723,11 @@ class RestaurantSymbolicEnv(Env):
         if action < self._wash_action:
             return held is not None
         if action == self._wash_action:
-            return held is not None and self.state.objects[held].dirty
+            return (
+                held is not None
+                and self.state.objects[held].dirty
+                and self.state.objects[held].contents == "empty"
+            )
         if action == self._fill_action:
             if held is None:
                 return False
@@ -621,3 +764,27 @@ class RestaurantSymbolicEnv(Env):
             return str(self._rng.choice(candidates))
         probs = weights / total
         return str(self._rng.choice(candidates, p=probs))
+
+    def _normalize_object_specs(
+        self,
+        object_specs: Any,
+    ) -> Tuple[Tuple[str, str], ...]:
+        if not object_specs:
+            return OBJECT_SPECS
+        normalized: List[Tuple[str, str]] = []
+        for item in object_specs:
+            if isinstance(item, Mapping):
+                name = str(item["name"])
+                kind = str(item["kind"])
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                name = str(item[0])
+                kind = str(item[1])
+            else:
+                raise ValueError(f"Invalid object spec entry: {item!r}")
+            if kind not in OBJECT_KINDS:
+                raise ValueError(f"Unsupported object kind in object_specs: {kind}")
+            normalized.append((name, kind))
+        names = [name for name, _ in normalized]
+        if len(set(names)) != len(names):
+            raise ValueError("object_specs must use unique object names.")
+        return tuple(normalized)
