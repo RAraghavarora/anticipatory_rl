@@ -23,6 +23,11 @@ CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "restaurant_symb
 def _load_config(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
+    if path.is_dir():
+        raise IsADirectoryError(
+            f"Expected config file path, got directory: {path}. "
+            f"Pass a YAML file such as {CONFIG_PATH}."
+        )
     with path.open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
@@ -175,6 +180,11 @@ class RestaurantSymbolicEnv(Env):
         self.followup_wash_from_cleared_prob = float(
             loaded_config.get("followup_wash_from_cleared_prob", 0.0)
         )
+        consume_cfg = loaded_config.get("service_consumption_prob", {})
+        self.service_consumption_prob: Dict[str, float] = {
+            task_type: float(consume_cfg.get(task_type, 0.0))
+            for task_type in TASK_TYPES
+        }
         reset_loc_cfg = loaded_config.get("reset_location_distribution", {})
         self.reset_location_distribution: Dict[str, Dict[str, float]] = {
             kind: {
@@ -249,6 +259,8 @@ class RestaurantSymbolicEnv(Env):
         self._task_source = "iid"
         self._active_service_location: Optional[str] = None
         self._task_context: Dict[str, Any] = {}
+        self._last_picked_object: Optional[str] = None
+        self._last_placed_object: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Gym API
@@ -276,6 +288,8 @@ class RestaurantSymbolicEnv(Env):
             self.service_location_distribution,
             SERVICE_LOCATIONS,
         )
+        self._last_picked_object = None
+        self._last_placed_object = None
         self._resample_task()
         return self._obs(), self._info(success=False)
 
@@ -351,6 +365,7 @@ class RestaurantSymbolicEnv(Env):
     # Internal task process
     # ------------------------------------------------------------------
     def _advance_after_task_success(self, completed_task: RestaurantTask) -> None:
+        self._apply_between_task_transition(completed_task)
         if completed_task.target_location in SERVICE_LOCATIONS:
             self._active_service_location = completed_task.target_location
         next_task, task_source = self._sample_next_task(completed_task)
@@ -459,6 +474,45 @@ class RestaurantSymbolicEnv(Env):
             ]
         self._task_context = context
 
+    def _apply_between_task_transition(self, completed_task: RestaurantTask) -> None:
+        if completed_task.task_type not in {"serve_water", "make_coffee", "serve_fruit_bowl"}:
+            return
+        probability = self.service_consumption_prob.get(completed_task.task_type, 0.0)
+        if probability <= 0.0 or self._rng.random() >= probability:
+            return
+        served_name = self._select_served_object(completed_task)
+        if served_name is None:
+            return
+        served_obj = self.state.objects[served_name]
+        if completed_task.target_location is None or served_obj.location != completed_task.target_location:
+            return
+        served_obj.contents = "empty"
+        served_obj.dirty = True
+
+    def _select_served_object(self, completed_task: RestaurantTask) -> Optional[str]:
+        if completed_task.target_location is None:
+            return None
+        candidates: List[str] = []
+        for name, obj in self.state.objects.items():
+            if obj.location != completed_task.target_location:
+                continue
+            if completed_task.task_type == "serve_water":
+                if obj.kind in {"mug", "glass"} and obj.contents == "water":
+                    candidates.append(name)
+            elif completed_task.task_type == "make_coffee":
+                if obj.kind == "mug" and obj.contents == "coffee":
+                    candidates.append(name)
+            elif completed_task.task_type == "serve_fruit_bowl":
+                if obj.kind == "bowl" and obj.contents == "fruit":
+                    candidates.append(name)
+        if not candidates:
+            return None
+        if self._last_placed_object in candidates:
+            return self._last_placed_object
+        if self._last_picked_object in candidates:
+            return self._last_picked_object
+        return str(self._rng.choice(candidates))
+
     def _task_already_satisfied(self) -> bool:
         if self.task.task_type == "serve_water":
             assert self.task.target_location is not None
@@ -532,6 +586,7 @@ class RestaurantSymbolicEnv(Env):
         self.state.agent_location = obj.location
         self.state.holding = obj_name
         obj.location = "__held__"
+        self._last_picked_object = obj_name
         return -(travel + self.pick_cost), True
 
     def _place_object(self, location: str) -> Tuple[float, bool]:
@@ -551,6 +606,7 @@ class RestaurantSymbolicEnv(Env):
             obj.dirty = True
         elif location in SERVICE_LOCATIONS and previous_contents != "empty":
             obj.dirty = True
+        self._last_placed_object = obj.name
         return -(travel + self.place_cost), True
 
     def _wash_held(self) -> Tuple[float, bool]:

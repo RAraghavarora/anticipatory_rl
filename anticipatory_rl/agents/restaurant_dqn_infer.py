@@ -20,7 +20,11 @@ import torch
 from tqdm import tqdm
 
 from anticipatory_rl.agents.restaurant_dqn import RestaurantQNetwork
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv, TASK_TYPES
+from anticipatory_rl.envs.restaurant_symbolic_env import (
+    CONFIG_PATH as DEFAULT_RESTAURANT_CONFIG_PATH,
+    RestaurantSymbolicEnv,
+    TASK_TYPES,
+)
 
 
 def _select_device() -> torch.device:
@@ -78,10 +82,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fruit-cost", type=float, default=2.0)
     parser.add_argument(
         "--config-path",
-        type=Path,
-        default=Path("anticipatory_rl/configs/restaurant_symbolic.yaml"),
+        type=str,
+        default=str(DEFAULT_RESTAURANT_CONFIG_PATH),
     )
     args = parser.parse_args()
+    raw_config_path = (args.config_path or "").strip()
+    args.config_path = (
+        DEFAULT_RESTAURANT_CONFIG_PATH if not raw_config_path else Path(raw_config_path)
+    )
 
     ant = args.anticipatory_weights
     myo = args.myopic_weights

@@ -20,21 +20,21 @@ task_distribution:
 task_transition_distribution:
   serve_water:
     serve_water: 0.05
-    make_coffee: 0.55
+    make_coffee: 0.70
     serve_fruit_bowl: 0.10
-    clear_containers: 0.25
+    clear_containers: 0.10
     wash_objects: 0.05
   make_coffee:
     serve_water: 0.10
     make_coffee: 0.05
     serve_fruit_bowl: 0.10
-    clear_containers: 0.60
+    clear_containers: 0.70
     wash_objects: 0.15
   serve_fruit_bowl:
     serve_water: 0.15
     make_coffee: 0.05
     serve_fruit_bowl: 0.05
-    clear_containers: 0.60
+    clear_containers: 0.65
     wash_objects: 0.15
   clear_containers:
     serve_water: 0.10
@@ -70,14 +70,21 @@ wash_followup_task_distribution:
     wash_objects: 0.00
 
 same_location_followup_prob:
-  serve_water: 0.90
-  make_coffee: 0.90
-  serve_fruit_bowl: 0.90
+  serve_water: 0.95
+  make_coffee: 0.95
+  serve_fruit_bowl: 0.95
   clear_containers: 1.00
-  wash_objects: 0.85
+  wash_objects: 0.90
 
-active_service_location_stickiness: 0.85
+active_service_location_stickiness: 0.95
 followup_wash_from_cleared_prob: 0.95
+
+service_consumption_prob:
+  serve_water: 0.95
+  make_coffee: 0.95
+  serve_fruit_bowl: 0.90
+  clear_containers: 0.00
+  wash_objects: 0.00
 
 service_location_distribution:
   pass_counter: 0.20
@@ -91,25 +98,25 @@ wash_kind_distribution:
 
 service_contents_distribution:
   mug:
-    empty: 0.50
-    water: 0.25
-    coffee: 0.25
+    empty: 0.65
+    water: 0.15
+    coffee: 0.20
     fruit: 0.00
   glass:
-    empty: 0.55
-    water: 0.45
+    empty: 0.70
+    water: 0.30
     coffee: 0.00
     fruit: 0.00
   bowl:
-    empty: 0.55
+    empty: 0.65
     water: 0.00
     coffee: 0.00
-    fruit: 0.45
+    fruit: 0.35
 
 service_empty_dirty_prob:
-  mug: 0.20
-  glass: 0.15
-  bowl: 0.15
+  mug: 0.10
+  glass: 0.08
+  bowl: 0.08
 
 reset_location_distribution:
   mug:
