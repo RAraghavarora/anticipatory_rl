@@ -4,7 +4,7 @@
 #================================================
 # SBATCH
 #================================================
-#SBATCH --job-name=infer_restaurant
+#SBATCH --job-name=infer_restaurant_cap
 #SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -25,9 +25,9 @@ source /u/rarora1/ant_env/bin/activate
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
 python -m anticipatory_rl.agents.restaurant_dqn_infer \
-  --anticipatory-weights ./runs/restaurant_anticipatory/restaurant_dqn.pt \
-  --myopic-weights ./runs/restaurant_myopic/restaurant_dqn.pt \
-  --output-dir ./runs/compare_restaurant_dqn \
+  --anticipatory-weights ./runs/restaurant_capacity_anticipatory/restaurant_dqn.pt \
+  --myopic-weights ./runs/restaurant_capacity_myopic/restaurant_dqn.pt \
+  --output-dir ./runs/compare_restaurant_capacity_dqn \
   --config-path "${CONFIG_PATH}" \
   --num-tasks 5000 \
   --total-steps 250000 \

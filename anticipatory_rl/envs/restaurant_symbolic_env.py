@@ -206,6 +206,11 @@ class RestaurantSymbolicEnv(Env):
             kind: float(dirty_cfg.get(kind, 0.0))
             for kind in OBJECT_KINDS
         }
+        capacity_cfg = loaded_config.get("location_capacity", {})
+        self.location_capacity: Dict[str, int] = {
+            name: max(1, int(capacity_cfg.get(name, 99)))
+            for name in LOCATIONS
+        }
         self.max_task_steps = max(1, int(max_task_steps))
         self.success_reward = float(success_reward)
         self.invalid_action_penalty = float(invalid_action_penalty)
@@ -592,6 +597,8 @@ class RestaurantSymbolicEnv(Env):
     def _place_object(self, location: str) -> Tuple[float, bool]:
         if self.state.holding is None:
             return 0.0, False
+        if not self._location_has_space(location):
+            return 0.0, False
         obj = self.state.objects[self.state.holding]
         travel = self._travel_cost(self.state.agent_location, location)
         self.state.agent_location = location
@@ -660,10 +667,7 @@ class RestaurantSymbolicEnv(Env):
     def _sample_object_layout(self) -> Dict[str, RestaurantObjectState]:
         objects: Dict[str, RestaurantObjectState] = {}
         for name, kind in self.object_specs:
-            location = self._weighted_choice(
-                self.reset_location_distribution.get(kind, {}),
-                LOCATIONS,
-            )
+            location = self._sample_reset_location(kind, objects)
             dirty, contents = self._sample_object_status(kind, location)
             objects[name] = RestaurantObjectState(
                 name=name,
@@ -777,7 +781,10 @@ class RestaurantSymbolicEnv(Env):
         if action < self._place_offset:
             return held is None
         if action < self._wash_action:
-            return held is not None
+            if held is None:
+                return False
+            location = LOCATIONS[action - self._place_offset]
+            return self._location_has_space(location)
         if action == self._wash_action:
             return (
                 held is not None
@@ -820,6 +827,32 @@ class RestaurantSymbolicEnv(Env):
             return str(self._rng.choice(candidates))
         probs = weights / total
         return str(self._rng.choice(candidates, p=probs))
+
+    def _sample_reset_location(
+        self,
+        kind: str,
+        placed_objects: Mapping[str, RestaurantObjectState],
+    ) -> str:
+        feasible = [
+            location
+            for location in LOCATIONS
+            if self._location_occupancy(location, placed_objects) < self.location_capacity.get(location, 99)
+        ]
+        if not feasible:
+            feasible = list(LOCATIONS)
+        distribution = self.reset_location_distribution.get(kind, {})
+        return self._weighted_choice(distribution, feasible)
+
+    def _location_occupancy(
+        self,
+        location: str,
+        objects: Optional[Mapping[str, RestaurantObjectState]] = None,
+    ) -> int:
+        source = self.state.objects if objects is None else objects
+        return sum(1 for obj in source.values() if obj.location == location)
+
+    def _location_has_space(self, location: str) -> bool:
+        return self._location_occupancy(location) < self.location_capacity.get(location, 99)
 
     def _normalize_object_specs(
         self,

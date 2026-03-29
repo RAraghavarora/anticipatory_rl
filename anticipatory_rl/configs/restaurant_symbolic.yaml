@@ -118,6 +118,18 @@ service_empty_dirty_prob:
   glass: 0.08
   bowl: 0.08
 
+location_capacity:
+  kitchen_counter: 2
+  coffee_machine: 1
+  water_station: 1
+  fruit_station: 1
+  dish_rack: 2
+  sink: 1
+  pass_counter: 1
+  table_left: 1
+  bus_tub: 2
+  table_right: 1
+
 reset_location_distribution:
   mug:
     kitchen_counter: 0.55

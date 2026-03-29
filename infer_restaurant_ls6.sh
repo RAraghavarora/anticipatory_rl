@@ -4,7 +4,7 @@
 #================================================
 # SBATCH (TACC Lonestar6)
 #================================================
-#SBATCH -J rest_infer_ls6
+#SBATCH -J rest_infer_cap_ls6
 #SBATCH -o slurm_logs/%x.o%j
 #SBATCH -e slurm_logs/%x.e%j
 #SBATCH -p gpu-a100
@@ -31,9 +31,9 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
 srun python -m anticipatory_rl.agents.restaurant_dqn_infer \
-  --anticipatory-weights ./runs/restaurant_anticipatory/restaurant_dqn.pt \
-  --myopic-weights ./runs/restaurant_myopic/restaurant_dqn.pt \
-  --output-dir ./runs/compare_restaurant_dqn \
+  --anticipatory-weights ./runs/restaurant_capacity_anticipatory/restaurant_dqn.pt \
+  --myopic-weights ./runs/restaurant_capacity_myopic/restaurant_dqn.pt \
+  --output-dir ./runs/compare_restaurant_capacity_dqn \
   --config-path "${CONFIG_PATH}" \
   --num-tasks 5000 \
   --total-steps 250000 \

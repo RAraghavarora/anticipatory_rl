@@ -4,7 +4,7 @@
 #================================================
 # SBATCH (TACC Lonestar6)
 #================================================
-#SBATCH -J rest_myo_tpr1_ls6
+#SBATCH -J rest_myo_cap_tpr1_ls6
 #SBATCH -o slurm_logs/%x.o%j
 #SBATCH -e slurm_logs/%x.e%j
 #SBATCH -p gpu-a100
@@ -32,7 +32,7 @@ CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
 srun python -m anticipatory_rl.agents.restaurant_dqn \
   --config-path "${CONFIG_PATH}" \
-  --run-label restaurant_myopic \
+  --run-label restaurant_capacity_myopic \
   --total-steps 500000 \
   --replay-size 50000 \
   --batch-size 128 \

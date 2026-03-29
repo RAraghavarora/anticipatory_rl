@@ -4,7 +4,7 @@
 #================================================
 # SBATCH
 #================================================
-#SBATCH --job-name=rest_myo_tpr1
+#SBATCH --job-name=rest_myo_cap_tpr1
 #SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -26,7 +26,7 @@ CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
 python -m anticipatory_rl.agents.restaurant_dqn \
   --config-path "${CONFIG_PATH}" \
-  --run-label restaurant_myopic \
+  --run-label restaurant_capacity_myopic \
   --total-steps 500000 \
   --replay-size 50000 \
   --batch-size 128 \
