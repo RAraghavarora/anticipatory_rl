@@ -35,6 +35,16 @@ if [ ! -f "${CHECKPOINT}" ]; then
   exit 1
 fi
 
+if [ ! -x downward/builds/release/bin/downward ]; then
+  if [ "${BUILD_DOWNWARD_IF_MISSING:-0}" = "1" ]; then
+    ./build_downward_ls6.sh
+  else
+    echo "Missing Fast Downward binary at downward/builds/release/bin/downward" >&2
+    echo "Run ./build_downward_ls6.sh first, or resubmit with BUILD_DOWNWARD_IF_MISSING=1." >&2
+    exit 1
+  fi
+fi
+
 srun python -m paper1_blockworld.reproduce_paper1 \
   --paper-settings \
   --tasks-per-environment 24 \

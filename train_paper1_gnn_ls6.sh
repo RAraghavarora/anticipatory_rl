@@ -41,7 +41,17 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 echo "Accelerate: num_processes=${NUM_GPUS} main_process_port=${MASTER_PORT}"
 echo "Dataset workers: ${DATASET_WORKERS}"
 
-srun --ntasks=1 accelerate launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
+if [ ! -x downward/builds/release/bin/downward ]; then
+  if [ "${BUILD_DOWNWARD_IF_MISSING:-0}" = "1" ]; then
+    ./build_downward_ls6.sh
+  else
+    echo "Missing Fast Downward binary at downward/builds/release/bin/downward" >&2
+    echo "Run ./build_downward_ls6.sh first, or resubmit with BUILD_DOWNWARD_IF_MISSING=1." >&2
+    exit 1
+  fi
+fi
+
+srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
   --num-train-envs 250 \
   --num-val-envs 0 \
   --num-test-envs 0 \
