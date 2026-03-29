@@ -50,7 +50,7 @@ conda activate thesis
 srun --ntasks=1 accelerate launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
   --num-train-envs 250 \
   --num-val-envs 0 \
-  --num-test-envs 150 \
+  --num-test-envs 0 \
   --states-per-env 200 \
   --tasks-per-environment 24 \
   --future-task-sample all \

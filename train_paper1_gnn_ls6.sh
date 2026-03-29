@@ -7,11 +7,10 @@
 #SBATCH -J paper1_gnn_ls6
 #SBATCH -o slurm_logs/%x.o%j
 #SBATCH -e slurm_logs/%x.e%j
-#SBATCH -p gpu-a100
+#SBATCH -p gpu-a100-small
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH -t 48:00:00
 #SBATCH -A IRI23005
@@ -45,7 +44,7 @@ echo "Dataset workers: ${DATASET_WORKERS}"
 srun --ntasks=1 accelerate launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
   --num-train-envs 250 \
   --num-val-envs 0 \
-  --num-test-envs 150 \
+  --num-test-envs 0 \
   --states-per-env 200 \
   --tasks-per-environment 24 \
   --future-task-sample all \
