@@ -67,6 +67,10 @@ class Task:
 
 @dataclass(frozen=True)
 class WorldConfig:
+    '''
+    2D Blocksworld configuration.
+    '''
+    
     width: int = 7
     height: int = 7
     move_cost: int = 25
@@ -198,6 +202,10 @@ class WorldState:
 
 
 class WorldGenerator:
+    """
+    Given a config with regions and a task, generate a 2D blockworld state.
+    """
+    
     def __init__(self, config: WorldConfig | None = None) -> None:
         self.config = config or WorldConfig()
 
@@ -219,6 +227,10 @@ class WorldGenerator:
         rng: random.Random,
         count: int = 24,
     ) -> List[Task]:
+        """
+        For every non-white block and non-white region, create a task of single and pairwise object-region assignment.
+        Then pick top `count` tasks with unique goal assignments.
+        """
         single_tasks = [
             Task(((block, region),))
             for block in NONWHITE_BLOCKS

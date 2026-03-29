@@ -37,7 +37,7 @@ For convenience, the evaluator still also supports an **exact / sampled one-step
 
 - `world.py`: world generator, state representation, task library
 - `planner.py`: PDDL problem generation and Fast Downward wrapper
-- `gnn.py`: graph encoder and pure-PyTorch GraphSAGE-style regressor
+- `gnn.py`: graph encoder and PyTorch Geometric GraphSAGE regressor
 - `estimator.py`: oracle and learned future-cost estimators
 - `train_gnn.py`: dataset generation and GNN training
 - `reproduce_paper1.py`: baselines, preparation, evaluation loop
@@ -57,10 +57,22 @@ Train the anticipatory GNN:
 conda run -n thesis python -m paper1_blockworld.train_gnn --smoke-test
 ```
 
+Distributed training with `accelerate`:
+
+```bash
+conda run -n thesis accelerate launch --multi_gpu --num_processes 4 \
+  -m paper1_blockworld.train_gnn \
+  --batch-size 8
+```
+
+`--batch-size` is treated as the global batch size, so the paper setting of `8` stays unchanged when training is split across multiple GPUs.
+The planner-labeled dataset is cached as a `.pt` file under the output directory by default; override it with `--dataset-cache /path/to/file.pt`.
+
 A paper-aligned training run:
 
 ```bash
-conda run -n thesis python -m paper1_blockworld.train_gnn \
+conda run -n thesis accelerate launch --multi_gpu --num_processes 4 \
+  -m paper1_blockworld.train_gnn \
   --num-train-envs 250 \
   --num-val-envs 0 \
   --num-test-envs 150 \
@@ -69,7 +81,8 @@ conda run -n thesis python -m paper1_blockworld.train_gnn \
   --future-task-sample all \
   --epochs 10 \
   --batch-size 8 \
-  --lr 0.01
+  --lr 0.01 \
+  --dataset-workers 16
 ```
 
 Evaluate with the trained checkpoint:
@@ -114,6 +127,8 @@ These assumptions are documented so the code is inspectable and easy to adjust.
 
 - The implementation now uses PyTorch Geometric `SAGEConv`, matching the paper’s model family more closely.
 - Training labels are generated from planner-computed one-step anticipatory cost under the environment's uniform task library.
+- Distributed training uses Hugging Face `accelerate`; planner-labeled datasets are cached once on the main process and reused by all workers.
+- Planner label generation can be parallelized across CPU workers with `--dataset-workers`; this is the main lever for reducing end-to-end wall time.
 - The learned estimator is intended to match the paper's role in the pipeline, while the oracle estimator remains useful for debugging and upper-bound comparisons.
 
 ## Remaining Ambiguity
