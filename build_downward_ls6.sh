@@ -5,6 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+FD_GCC_MODULE="${FD_GCC_MODULE:-gcc/13.2.0}"
+
 if ! command -v module >/dev/null 2>&1; then
   # "module" is usually a shell function on LS6, but keep the message explicit.
   echo "Environment modules are not available in this shell." >&2
@@ -12,7 +14,7 @@ if ! command -v module >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -n "${FD_GCC_MODULE:-}" ]; then
+if [ -n "${FD_GCC_MODULE}" ]; then
   module load "${FD_GCC_MODULE}"
 fi
 
@@ -37,9 +39,13 @@ fi
 
 export CC="${CC:-$(command -v gcc)}"
 export CXX="${CXX:-${GXX_PATH}}"
+GCC_LIBSTDCPP=$(g++ -print-file-name=libstdc++.so.6)
+GCC_LIBDIR=$(dirname "${GCC_LIBSTDCPP}")
+export LD_LIBRARY_PATH="${GCC_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 echo "CC=${CC}"
 echo "CXX=${CXX}"
+echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 
 if [ "${FD_CLEAN_BUILD:-1}" = "1" ]; then
   echo "Removing cached Fast Downward build in downward/builds"

@@ -22,24 +22,50 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p slurm_logs
 mkdir -p paper1_blockworld/checkpoints
 
-IFS=',' read -ra CUDA_DEVICES <<< "${CUDA_VISIBLE_DEVICES:-0}"
-NUM_GPUS=${#CUDA_DEVICES[@]}
+FD_GCC_MODULE="${FD_GCC_MODULE:-gcc/13.2.0}"
 DATASET_WORKERS=${SLURM_CPUS_PER_TASK:-1}
+
+module load cuda/12.2
+module load "${FD_GCC_MODULE}"
+source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
+conda activate thesis
+
+GCC_LIBSTDCPP=$(g++ -print-file-name=libstdc++.so.6)
+GCC_LIBDIR=$(dirname "${GCC_LIBSTDCPP}")
+export LD_LIBRARY_PATH="${GCC_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export PYTHONUNBUFFERED=1
+
+if [[ "${SLURM_GPUS_ON_NODE:-}" =~ ^[0-9]+$ ]]; then
+  NUM_GPUS=${SLURM_GPUS_ON_NODE}
+elif command -v nvidia-smi >/dev/null 2>&1; then
+  NUM_GPUS=$(nvidia-smi -L | wc -l | tr -d ' ')
+else
+  IFS=',' read -ra CUDA_DEVICES <<< "${CUDA_VISIBLE_DEVICES:-0}"
+  NUM_GPUS=${#CUDA_DEVICES[@]}
+fi
+
 MASTER_PORT=${MASTER_PORT:-$((29500 + (${SLURM_JOB_ID:-0} % 1000)))}
-ACCELERATE_ARGS=(--num_processes "${NUM_GPUS}" --num_machines 1 --main_process_port "${MASTER_PORT}")
+ACCELERATE_ARGS=(
+  --num_processes "${NUM_GPUS}"
+  --num_machines 1
+  --main_process_port "${MASTER_PORT}"
+  --mixed_precision no
+  --dynamo_backend no
+)
 if [ "${NUM_GPUS}" -gt 1 ]; then
   ACCELERATE_ARGS+=(--multi_gpu)
 fi
-
-module load cuda/12.2
-source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
-conda activate thesis
 
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 echo "Accelerate: num_processes=${NUM_GPUS} main_process_port=${MASTER_PORT}"
 echo "Dataset workers: ${DATASET_WORKERS}"
+echo "GCC module: ${FD_GCC_MODULE}"
+echo "g++: $(command -v g++)"
+echo "g++ version: $(g++ -dumpfullversion -dumpversion)"
+echo "libstdc++: ${GCC_LIBSTDCPP}"
+echo "PYTHONUNBUFFERED=${PYTHONUNBUFFERED}"
 
 if [ ! -x downward/builds/release/bin/downward ]; then
   if [ "${BUILD_DOWNWARD_IF_MISSING:-0}" = "1" ]; then

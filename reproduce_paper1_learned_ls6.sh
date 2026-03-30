@@ -21,13 +21,24 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p slurm_logs
 mkdir -p runs/paper1_blockworld_exact
 
+FD_GCC_MODULE="${FD_GCC_MODULE:-gcc/13.2.0}"
+
 module load cuda/12.2
+module load "${FD_GCC_MODULE}"
 source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
 conda activate thesis
+
+GCC_LIBSTDCPP=$(g++ -print-file-name=libstdc++.so.6)
+GCC_LIBDIR=$(dirname "${GCC_LIBSTDCPP}")
+export LD_LIBRARY_PATH="${GCC_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
+echo "GCC module: ${FD_GCC_MODULE}"
+echo "g++: $(command -v g++)"
+echo "g++ version: $(g++ -dumpfullversion -dumpversion)"
+echo "libstdc++: ${GCC_LIBSTDCPP}"
 
 CHECKPOINT=paper1_blockworld/checkpoints/paper1_anticipatory_gnn.pt
 if [ ! -f "${CHECKPOINT}" ]; then

@@ -6,7 +6,9 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 import random
+import shutil
 from statistics import mean
+import time
 from typing import Any, Dict, List, Sequence, Tuple
 
 from accelerate import Accelerator
@@ -177,6 +179,36 @@ def infer_dataset_workers(requested_workers: int, *, num_envs: int) -> int:
     return 1
 
 
+def save_environment_shard(
+    shard_path: Path,
+    *,
+    examples: Sequence[GraphRegressionExample],
+    mean_target: float,
+) -> None:
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = shard_path.with_suffix(shard_path.suffix + ".tmp")
+    torch.save(
+        {
+            "examples": list(examples),
+            "mean_target": mean_target,
+        },
+        temp_path,
+    )
+    os.replace(temp_path, shard_path)
+
+
+def compute_example_stats(
+    examples: Sequence[GraphRegressionExample],
+) -> Dict[str, float]:
+    targets = [example.target for example in examples]
+    return {
+        "num_examples": float(len(examples)),
+        "target_mean": float(mean(targets)) if targets else 0.0,
+        "target_min": float(min(targets)) if targets else 0.0,
+        "target_max": float(max(targets)) if targets else 0.0,
+    }
+
+
 def make_graph_examples(
     config: WorldConfig,
     states: Sequence[WorldState],
@@ -193,12 +225,14 @@ def make_graph_examples(
 
 def build_examples(
     *,
+    split_name: str,
     num_envs: int,
     states_per_env: int,
     tasks_per_environment: int,
     future_task_sample: int | None,
     seed: int,
     dataset_workers: int,
+    shard_dir: Path | None = None,
 ) -> Tuple[List[GraphRegressionExample], Dict[str, float]]:
     '''
     Build a dataset of (s_t, V_AP(s_t))
@@ -215,14 +249,43 @@ def build_examples(
     master_rng = random.Random(seed)
     env_seeds = [master_rng.randint(0, 10**9) for _ in range(num_envs)]
     worker_count = infer_dataset_workers(dataset_workers, num_envs=num_envs)
+    split_shard_dir = shard_dir / split_name if shard_dir is not None else None
     print(
         f"Generating planner-labeled data for {num_envs} environments "
-        f"with dataset_workers={worker_count}"
+        f"with dataset_workers={worker_count}",
+        flush=True,
     )
 
     env_examples_by_idx: List[List[GraphRegressionExample] | None] = [None] * num_envs
+    if split_shard_dir is not None:
+        split_shard_dir.mkdir(parents=True, exist_ok=True)
+        for env_idx in range(num_envs):
+            shard_path = split_shard_dir / f"env_{env_idx:05d}.pt"
+            if not shard_path.exists():
+                continue
+            shard_payload = load_torch_payload(shard_path)
+            env_examples = list(shard_payload["examples"])
+            env_examples_by_idx[env_idx] = env_examples
+            print(
+                f"[dataset env {env_idx + 1}/{num_envs}] "
+                f"loaded shard with states={len(env_examples)}",
+                flush=True,
+            )
+    pending_env_indices = [
+        env_idx for env_idx, env_examples in enumerate(env_examples_by_idx) if env_examples is None
+    ]
+    if not pending_env_indices:
+        examples = [
+            example
+            for env_examples in env_examples_by_idx
+            if env_examples is not None
+            for example in env_examples
+        ]
+        return examples, compute_example_stats(examples)
+
     if worker_count == 1:
-        for env_idx, env_seed in enumerate(env_seeds):
+        for env_idx in pending_env_indices:
+            env_seed = env_seeds[env_idx]
             _, config, states, env_targets, env_mean_target = _build_environment_examples(
                 env_idx,
                 env_seed,
@@ -233,22 +296,29 @@ def build_examples(
             )
             env_examples = make_graph_examples(config, states, env_targets)
             env_examples_by_idx[env_idx] = env_examples
+            if split_shard_dir is not None:
+                save_environment_shard(
+                    split_shard_dir / f"env_{env_idx:05d}.pt",
+                    examples=env_examples,
+                    mean_target=env_mean_target,
+                )
             print(
                 f"[dataset env {env_idx + 1}/{num_envs}] "
-                f"states={len(env_examples)} mean_target={env_mean_target:.1f}"
+                f"states={len(env_examples)} mean_target={env_mean_target:.1f}",
+                flush=True,
             )
     else:
         ctx = mp.get_context("spawn")
         worker_args = [
             (
                 env_idx,
-                env_seed,
+                env_seeds[env_idx],
                 num_envs,
                 states_per_env,
                 tasks_per_environment,
                 future_task_sample,
             )
-            for env_idx, env_seed in enumerate(env_seeds)
+            for env_idx in pending_env_indices
         ]
         with ctx.Pool(processes=worker_count) as pool:
             for env_idx, config, states, env_targets, env_mean_target in pool.imap_unordered(
@@ -257,9 +327,16 @@ def build_examples(
             ):
                 env_examples = make_graph_examples(config, states, env_targets)
                 env_examples_by_idx[env_idx] = env_examples
+                if split_shard_dir is not None:
+                    save_environment_shard(
+                        split_shard_dir / f"env_{env_idx:05d}.pt",
+                        examples=env_examples,
+                        mean_target=env_mean_target,
+                    )
                 print(
                     f"[dataset env {env_idx + 1}/{num_envs}] "
-                    f"states={len(env_examples)} mean_target={env_mean_target:.1f}"
+                    f"states={len(env_examples)} mean_target={env_mean_target:.1f}",
+                    flush=True,
                 )
 
     examples = [
@@ -268,15 +345,7 @@ def build_examples(
         if env_examples is not None
         for example in env_examples
     ]
-    targets = [example.target for example in examples]
-
-    stats = {
-        "num_examples": float(len(examples)),
-        "target_mean": float(mean(targets)) if targets else 0.0,
-        "target_min": float(min(targets)) if targets else 0.0,
-        "target_max": float(max(targets)) if targets else 0.0,
-    }
-    return examples, stats
+    return examples, compute_example_stats(examples)
 
 
 def build_dataset_bundle(
@@ -289,30 +358,37 @@ def build_dataset_bundle(
     future_task_sample: int | None,
     seed: int,
     dataset_workers: int,
+    shard_dir: Path | None = None,
 ) -> Dict[str, Any]:
     train_examples, train_stats = build_examples(
+        split_name="train",
         num_envs=num_train_envs,
         states_per_env=states_per_env,
         tasks_per_environment=tasks_per_environment,
         future_task_sample=future_task_sample,
         seed=seed,
         dataset_workers=dataset_workers,
+        shard_dir=shard_dir,
     )
     val_examples, val_stats = build_examples(
+        split_name="val",
         num_envs=num_val_envs,
         states_per_env=states_per_env,
         tasks_per_environment=tasks_per_environment,
         future_task_sample=future_task_sample,
         seed=seed + 1_000,
         dataset_workers=dataset_workers,
+        shard_dir=shard_dir,
     )
     test_examples, test_stats = build_examples(
+        split_name="test",
         num_envs=num_test_envs,
         states_per_env=states_per_env,
         tasks_per_environment=tasks_per_environment,
         future_task_sample=future_task_sample,
         seed=seed + 2_000,
         dataset_workers=dataset_workers,
+        shard_dir=shard_dir,
     )
     return {
         "train_examples": train_examples,
@@ -339,6 +415,10 @@ def default_dataset_cache_path(args: argparse.Namespace) -> Path:
     return args.output_dir / filename
 
 
+def default_dataset_shard_dir(cache_path: Path) -> Path:
+    return cache_path.parent / f"{cache_path.stem}_parts"
+
+
 def load_torch_payload(path: Path) -> Dict[str, Any]:
     try:
         return torch.load(path, map_location="cpu", weights_only=False)
@@ -346,34 +426,89 @@ def load_torch_payload(path: Path) -> Dict[str, Any]:
         return torch.load(path, map_location="cpu")
 
 
-def load_or_build_dataset_bundle(
+def distributed_rank_from_env() -> int:
+    raw_rank = os.environ.get("RANK")
+    if raw_rank is None:
+        return 0
+    try:
+        return int(raw_rank)
+    except ValueError:
+        return 0
+
+
+def wait_for_dataset_cache(
+    cache_path: Path,
+    *,
+    lock_path: Path,
+    poll_interval_seconds: float = 5.0,
+    timeout_seconds: float = 72 * 60 * 60,
+) -> None:
+    start_time = time.monotonic()
+    next_log_time = start_time
+    while True:
+        if cache_path.exists() and not lock_path.exists():
+            return
+        elapsed = time.monotonic() - start_time
+        if elapsed > timeout_seconds:
+            raise TimeoutError(
+                f"Timed out after {timeout_seconds:.0f}s waiting for dataset cache {cache_path}"
+            )
+        if time.monotonic() >= next_log_time:
+            print(f"Waiting for planner-labeled dataset cache at {cache_path}", flush=True)
+            next_log_time = time.monotonic() + 60.0
+        time.sleep(poll_interval_seconds)
+
+
+def ensure_dataset_cache(
     args: argparse.Namespace,
-    accelerator: Accelerator,
     *,
     future_task_sample: int | None,
-) -> Tuple[Dict[str, Any], Path]:
+) -> Path:
     cache_path = args.dataset_cache or default_dataset_cache_path(args)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    shard_dir = default_dataset_shard_dir(cache_path)
+    lock_path = cache_path.with_suffix(cache_path.suffix + ".building")
+    temp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    rank = distributed_rank_from_env()
+    is_main_process = rank == 0
 
-    if accelerator.is_main_process:
+    if is_main_process:
         if cache_path.exists() and not args.rebuild_dataset_cache:
-            accelerator.print(f"Loading planner-labeled dataset cache from {cache_path}")
+            print(f"Loading planner-labeled dataset cache from {cache_path}", flush=True)
         else:
-            accelerator.print(f"Building planner-labeled dataset cache at {cache_path}")
-            dataset_bundle = build_dataset_bundle(
-                num_train_envs=args.num_train_envs,
-                num_val_envs=args.num_val_envs,
-                num_test_envs=args.num_test_envs,
-                states_per_env=args.states_per_env,
-                tasks_per_environment=args.tasks_per_environment,
-                future_task_sample=future_task_sample,
-                seed=args.seed,
-                dataset_workers=args.dataset_workers,
-            )
-            torch.save(dataset_bundle, cache_path)
+            print(f"Building planner-labeled dataset cache at {cache_path}", flush=True)
+            if lock_path.exists():
+                lock_path.unlink()
+            lock_path.touch()
+            try:
+                if args.rebuild_dataset_cache and shard_dir.exists():
+                    shutil.rmtree(shard_dir)
+                if cache_path.exists():
+                    cache_path.unlink()
+                if temp_path.exists():
+                    temp_path.unlink()
+                dataset_bundle = build_dataset_bundle(
+                    num_train_envs=args.num_train_envs,
+                    num_val_envs=args.num_val_envs,
+                    num_test_envs=args.num_test_envs,
+                    states_per_env=args.states_per_env,
+                    tasks_per_environment=args.tasks_per_environment,
+                    future_task_sample=future_task_sample,
+                    seed=args.seed,
+                    dataset_workers=args.dataset_workers,
+                    shard_dir=shard_dir,
+                )
+                torch.save(dataset_bundle, temp_path)
+                os.replace(temp_path, cache_path)
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+                if lock_path.exists():
+                    lock_path.unlink()
+    else:
+        wait_for_dataset_cache(cache_path, lock_path=lock_path)
 
-    accelerator.wait_for_everyone()
-    return load_torch_payload(cache_path), cache_path
+    return cache_path
 
 
 def per_device_batch_size(global_batch_size: int, world_size: int) -> int:
@@ -428,6 +563,11 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
+    future_task_sample = parse_future_task_sample(args.future_task_sample)
+    dataset_cache_path = ensure_dataset_cache(
+        args,
+        future_task_sample=future_task_sample,
+    )
     force_cpu = (
         args.device == "cpu"
         and os.environ.get("LOCAL_RANK") is None
@@ -437,12 +577,7 @@ def main() -> None:
         cpu=force_cpu,
         mixed_precision=args.mixed_precision,
     )
-    future_task_sample = parse_future_task_sample(args.future_task_sample)
-    dataset_bundle, dataset_cache_path = load_or_build_dataset_bundle(
-        args,
-        accelerator,
-        future_task_sample=future_task_sample,
-    )
+    dataset_bundle = load_torch_payload(dataset_cache_path)
 
     train_examples = dataset_bundle["train_examples"]
     val_examples = dataset_bundle["val_examples"]
@@ -597,9 +732,9 @@ def main() -> None:
             args.save_dataset.parent.mkdir(parents=True, exist_ok=True)
             args.save_dataset.write_text(json.dumps(summary["dataset"], indent=2), encoding="utf-8")
 
-        print(f"\nSaved checkpoint to {checkpoint_path}")
-        print(f"Validation MAE: {best_val:.3f}")
-        print(f"Test MAE: {test_mae:.3f}")
+        print(f"\nSaved checkpoint to {checkpoint_path}", flush=True)
+        print(f"Validation MAE: {best_val:.3f}", flush=True)
+        print(f"Test MAE: {test_mae:.3f}", flush=True)
 
 
 if __name__ == "__main__":
