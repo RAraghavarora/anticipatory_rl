@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import resource
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Sequence, Tuple
 
@@ -51,15 +51,52 @@ class ConvQNetwork(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.encoder(x))
 
+class ReplayBuffer:
+    """Fixed-size array-backed replay to avoid Python-object memory blowups."""
 
-@dataclass
-class Transition:
-    state: np.ndarray
-    action: int
-    reward: float
-    next_state: np.ndarray
-    done: bool
-    task_boundary: bool = False
+    def __init__(self, capacity: int, obs_shape: Tuple[int, ...]) -> None:
+        self.capacity = max(1, int(capacity))
+        self.obs = np.empty((self.capacity, *obs_shape), dtype=np.uint8)
+        self.next_obs = np.empty((self.capacity, *obs_shape), dtype=np.uint8)
+        self.actions = np.empty(self.capacity, dtype=np.int64)
+        self.rewards = np.empty(self.capacity, dtype=np.float32)
+        self.dones = np.empty(self.capacity, dtype=bool)
+        self.task_boundaries = np.empty(self.capacity, dtype=bool)
+        self.size = 0
+        self.pos = 0
+
+    def __len__(self) -> int:
+        return self.size
+
+    def add(
+        self,
+        *,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        task_boundary: bool,
+    ) -> None:
+        idx = self.pos
+        self.obs[idx] = state
+        self.next_obs[idx] = next_state
+        self.actions[idx] = int(action)
+        self.rewards[idx] = float(reward)
+        self.dones[idx] = bool(done)
+        self.task_boundaries[idx] = bool(task_boundary)
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        return (
+            self.obs[idxs],
+            self.actions[idxs],
+            self.rewards[idxs],
+            self.next_obs[idxs],
+            self.dones[idxs],
+        )
 
 
 class VectorEnv:
@@ -118,7 +155,7 @@ def _encode_obs_storage(obs: np.ndarray) -> np.ndarray:
     return np.rint(clipped * 255.0).astype(np.uint8, copy=False)
 
 
-def _decode_obs_batch(obs_batch: List[np.ndarray], device: torch.device) -> torch.Tensor:
+def _decode_obs_batch(obs_batch: np.ndarray, device: torch.device) -> torch.Tensor:
     arr = np.asarray(obs_batch, dtype=np.uint8)
     return torch.tensor(arr, dtype=torch.float32, device=device).div_(255.0)
 
@@ -224,6 +261,13 @@ def _write_json(data: Dict[str, Any] | List[Dict[str, Any]], path: Path) -> None
         json.dump(data, fh, indent=2, default=str)
 
 
+def _rss_gb() -> float:
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if rss > 1024 * 1024 * 1024:
+        return float(rss / (1024.0 ** 3))
+    return float(rss / 1024.0 / 1024.0)
+
+
 def train(args: argparse.Namespace) -> Path:
     device = _select_device()
     random.seed(args.seed)
@@ -260,7 +304,7 @@ def train(args: argparse.Namespace) -> Path:
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
-    replay: Deque[Transition] = deque(maxlen=max(1, args.replay_size))
+    replay = ReplayBuffer(max(1, args.replay_size), obs_shape)
 
     num_envs = env.num_envs
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
@@ -329,24 +373,22 @@ def train(args: argparse.Namespace) -> Path:
                 episode_done_flags[idx] = True
 
         for idx in range(num_envs):
-            replay.append(
-                Transition(
-                    state=_encode_obs_storage(obs[idx]),
-                    action=int(actions[idx]),
-                    reward=float(rewards[idx]),
-                    next_state=_encode_obs_storage(next_obs[idx]),
-                    done=bool(episode_done_flags[idx]),
-                    task_boundary=bool(task_done[idx]),
-                )
+            replay.add(
+                state=_encode_obs_storage(obs[idx]),
+                action=int(actions[idx]),
+                reward=float(rewards[idx]),
+                next_state=_encode_obs_storage(next_obs[idx]),
+                done=bool(episode_done_flags[idx]),
+                task_boundary=bool(task_done[idx]),
             )
 
         if len(replay) >= args.batch_size:
-            batch = random.sample(list(replay), args.batch_size)
-            states = _decode_obs_batch([t.state for t in batch], device)
-            batch_actions = torch.tensor([t.action for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
-            batch_rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-            next_states = _decode_obs_batch([t.next_state for t in batch], device)
-            dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
+            batch_states, batch_actions_np, batch_rewards_np, batch_next_states, batch_dones_np = replay.sample(args.batch_size)
+            states = _decode_obs_batch(batch_states, device)
+            batch_actions = torch.tensor(batch_actions_np, dtype=torch.int64, device=device).unsqueeze(1)
+            batch_rewards = torch.tensor(batch_rewards_np, dtype=torch.float32, device=device).unsqueeze(1)
+            next_states = _decode_obs_batch(batch_next_states, device)
+            dones = torch.tensor(batch_dones_np, dtype=torch.float32, device=device).unsqueeze(1)
 
             q_selected = q_net(states).gather(1, batch_actions)
             with torch.no_grad():
@@ -437,6 +479,12 @@ def train(args: argparse.Namespace) -> Path:
             loss=f"{avg_loss:.3f}" if loss_history else "n/a",
             tasks=tasks_completed,
         )
+        if args.log_rss_every > 0 and global_step % args.log_rss_every == 0:
+            print(
+                f"[mem] step={global_step} rss_gb={_rss_gb():.2f} "
+                f"replay={len(replay)} num_envs={num_envs}",
+                flush=True,
+            )
 
     progress.close()
     torch.save(q_net.state_dict(), output_path)
@@ -526,6 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output", type=Path, default=Path("paper1_blockworld_image_dqn.pt"))
+    parser.add_argument("--log-rss-every", type=int, default=1000)
     return parser
 
 

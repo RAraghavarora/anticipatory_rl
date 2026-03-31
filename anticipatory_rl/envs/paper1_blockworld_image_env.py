@@ -8,7 +8,6 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from gymnasium import Env, spaces
-from PIL import Image, ImageDraw
 
 from paper1_blockworld.world import (
     BLOCK_COLOR_MAP,
@@ -112,6 +111,9 @@ class Paper1BlockworldImageEnv(Env):
         self._pending_auto_success = False
         self._task_steps = 0
         self._py_rng = random.Random()
+        self._rgb_canvas = np.zeros((3, self.render_size, self.render_size), dtype=np.float32)
+        self._obs_canvas = np.zeros((8, self.render_size, self.render_size), dtype=np.float32)
+        self._rebuild_static_canvas()
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
         super().reset(seed=seed)
@@ -124,6 +126,7 @@ class Paper1BlockworldImageEnv(Env):
         self.task_library = self._select_task_library(options)
         self.current_task = self._select_current_task(options)
         self._task_steps = 0
+        self._rebuild_static_canvas()
         self._update_pending_auto_success()
         return self._obs(), self._info()
 
@@ -284,18 +287,60 @@ class Paper1BlockworldImageEnv(Env):
         self._pending_auto_success = self._task_already_satisfied()
 
     def _obs(self) -> np.ndarray:
-        frame = self._render_top_view()
-        height, width, _ = frame.shape
-        obs = np.zeros((8, height, width), dtype=np.float32)
-        obs[:3] = frame.transpose(2, 0, 1)
+        height = self.render_size
+        width = self.render_size
+        obs = self._obs_canvas
+        obs.fill(0.0)
+        obs[:3] = self._rgb_canvas
+
+        block_size = int(self.tile_px * 0.6)
+        block_offset = max(1, (self.tile_px - block_size) // 2)
+        for block, coord in sorted(self.state.placements.items()):
+            x0, y0, _, _ = self._tile_bounds(coord)
+            bx0 = x0 + block_offset
+            by0 = y0 + block_offset
+            bx1 = bx0 + block_size
+            by1 = by0 + block_size
+            rgb = self._rgb_triplet(BLOCK_COLOR_MAP[block])
+            obs[0, by0:by1, bx0:bx1] = rgb[0]
+            obs[1, by0:by1, bx0:bx1] = rgb[1]
+            obs[2, by0:by1, bx0:bx1] = rgb[2]
+            self._draw_outline(obs[:3], bx0, by0, bx1, by1, self._rgb_triplet(BLOCK_OUTLINE_RGB))
+
+        ax, ay = self.state.robot
+        x0, y0, x1, y1 = self._tile_bounds((ax, ay))
+        cx = (x0 + x1) // 2
+        cy = (y0 + y1) // 2
+        robot_half = max(2, self.tile_px // 4)
+        rx0 = max(0, cx - robot_half)
+        ry0 = max(0, cy - robot_half)
+        rx1 = min(width, cx + robot_half)
+        ry1 = min(height, cy + robot_half)
+        robot_rgb = self._rgb_triplet(ROBOT_RGB)
+        obs[0, ry0:ry1, rx0:rx1] = robot_rgb[0]
+        obs[1, ry0:ry1, rx0:rx1] = robot_rgb[1]
+        obs[2, ry0:ry1, rx0:rx1] = robot_rgb[2]
+        self._draw_outline(obs[:3], rx0, ry0, rx1, ry1, self._rgb_triplet(ROBOT_OUTLINE_RGB))
+
+        if self.state.holding is not None:
+            held_rgb = self._rgb_triplet(BLOCK_COLOR_MAP[self.state.holding])
+            held_half = max(1, self.tile_px // 8)
+            hx0 = max(0, cx - held_half)
+            hy0 = max(0, cy - held_half)
+            hx1 = min(width, cx + held_half)
+            hy1 = min(height, cy + held_half)
+            obs[0, hy0:hy1, hx0:hx1] = held_rgb[0]
+            obs[1, hy0:hy1, hx0:hx1] = held_rgb[1]
+            obs[2, hy0:hy1, hx0:hx1] = held_rgb[2]
+
         assignments = self.current_task.assignments
-        obs[3] = self._target_block_mask(assignments[0][0], height, width)
-        obs[4] = self._target_region_mask(assignments[0][1], height, width)
+        self._fill_target_block_mask(obs[3], assignments[0][0])
+        self._fill_target_region_mask(obs[4], assignments[0][1])
         if len(assignments) > 1:
-            obs[5] = self._target_block_mask(assignments[1][0], height, width)
-            obs[6] = self._target_region_mask(assignments[1][1], height, width)
+            self._fill_target_block_mask(obs[5], assignments[1][0])
+            self._fill_target_region_mask(obs[6], assignments[1][1])
             obs[7].fill(1.0)
-        return obs
+        return obs.copy()
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
         can_pick = self.state.holding is None and self.state.block_at(self.state.robot) is not None
@@ -325,81 +370,71 @@ class Paper1BlockworldImageEnv(Env):
         y1 = y0 + self.tile_px
         return x0, y0, x1, y1
 
-    def _render_top_view(self) -> np.ndarray:
-        size = self.render_size
-        img = Image.new("RGB", (size, size), BACKGROUND_RGB)
-        draw = ImageDraw.Draw(img)
-        margin = self.margin_px
-
-        draw.rectangle(
-            [margin, margin, size - margin - 1, size - margin - 1],
-            fill=GRID_RGB,
-        )
-
-        for region_name, coord in self.config.region_coords.items():
-            x0, y0, x1, y1 = self._tile_bounds(coord)
-            color = COLOR_RGB[region_color(region_name)]
-            draw.rectangle([x0, y0, x1 - 1, y1 - 1], fill=color, outline=BLOCK_OUTLINE_RGB)
-
-        block_size = int(self.tile_px * 0.6)
-        block_offset = max(1, (self.tile_px - block_size) // 2)
-        for block, coord in sorted(self.state.placements.items()):
-            x0, y0, _, _ = self._tile_bounds(coord)
-            x0 += block_offset
-            y0 += block_offset
-            x1 = x0 + block_size
-            y1 = y0 + block_size
-            draw.rectangle(
-                [x0, y0, x1, y1],
-                fill=COLOR_RGB[BLOCK_COLOR_MAP[block]],
-                outline=BLOCK_OUTLINE_RGB,
-                width=2,
-            )
-
-        ax, ay = self.state.robot
-        x0, y0, x1, y1 = self._tile_bounds((ax, ay))
-        cx = (x0 + x1) // 2
-        cy = (y0 + y1) // 2
-        half = self.tile_px // 2
-        triangle = [
-            (cx, cy - half // 2),
-            (cx - half // 2, cy + half // 2),
-            (cx + half // 2, cy + half // 2),
-        ]
-        draw.polygon(triangle, fill=ROBOT_RGB, outline=ROBOT_OUTLINE_RGB)
-
-        if self.state.holding is not None:
-            held_rgb = COLOR_RGB[BLOCK_COLOR_MAP[self.state.holding]]
-            held_size = max(2, self.tile_px // 3)
-            draw.rectangle(
-                [
-                    cx - held_size // 2,
-                    cy - held_size // 2,
-                    cx + held_size // 2,
-                    cy + held_size // 2,
-                ],
-                outline=held_rgb,
-                width=3,
-            )
-
-        return np.asarray(img, dtype=np.float32) / 255.0
-
-    def _target_block_mask(self, block: str, height: int, width: int) -> np.ndarray:
-        mask = np.zeros((height, width), dtype=np.float32)
+    def _fill_target_block_mask(self, mask: np.ndarray, block: str) -> None:
         if self.state.holding == block:
             coord = self.state.robot
         else:
             coord = self.state.placements.get(block)
         if coord is None:
-            return mask
+            return
         x0, y0, x1, y1 = self._tile_bounds(coord)
         mask[y0:y1, x0:x1] = 1.0
-        return mask
 
-    def _target_region_mask(self, region: str, height: int, width: int) -> np.ndarray:
-        mask = np.zeros((height, width), dtype=np.float32)
+    def _fill_target_region_mask(self, mask: np.ndarray, region: str) -> None:
         coord = self.config.region_coords[region]
         x0, y0, x1, y1 = self._tile_bounds(coord)
         mask[y0:y1, x0:x1] = 1.0
-        return mask
 
+    def _rebuild_static_canvas(self) -> None:
+        rgb = self._rgb_canvas
+        rgb[0].fill(BACKGROUND_RGB[0] / 255.0)
+        rgb[1].fill(BACKGROUND_RGB[1] / 255.0)
+        rgb[2].fill(BACKGROUND_RGB[2] / 255.0)
+
+        margin = self.margin_px
+        x0 = margin
+        y0 = margin
+        x1 = self.render_size - margin
+        y1 = self.render_size - margin
+        grid_rgb = self._rgb_triplet(GRID_RGB)
+        rgb[0, y0:y1, x0:x1] = grid_rgb[0]
+        rgb[1, y0:y1, x0:x1] = grid_rgb[1]
+        rgb[2, y0:y1, x0:x1] = grid_rgb[2]
+
+        for region_name, coord in self.config.region_coords.items():
+            rx0, ry0, rx1, ry1 = self._tile_bounds(coord)
+            region_rgb = self._rgb_triplet(COLOR_RGB[region_color(region_name)])
+            rgb[0, ry0:ry1, rx0:rx1] = region_rgb[0]
+            rgb[1, ry0:ry1, rx0:rx1] = region_rgb[1]
+            rgb[2, ry0:ry1, rx0:rx1] = region_rgb[2]
+            self._draw_outline(rgb, rx0, ry0, rx1, ry1, self._rgb_triplet(BLOCK_OUTLINE_RGB))
+
+    @staticmethod
+    def _rgb_triplet(rgb: Tuple[int, int, int] | str) -> Tuple[float, float, float]:
+        if isinstance(rgb, str):
+            rgb = COLOR_RGB[rgb]
+        return rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0
+
+    @staticmethod
+    def _draw_outline(
+        rgb: np.ndarray,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        color: Tuple[float, float, float],
+    ) -> None:
+        if x1 <= x0 or y1 <= y0:
+            return
+        rgb[0, y0:y1, x0] = color[0]
+        rgb[1, y0:y1, x0] = color[1]
+        rgb[2, y0:y1, x0] = color[2]
+        rgb[0, y0:y1, x1 - 1] = color[0]
+        rgb[1, y0:y1, x1 - 1] = color[1]
+        rgb[2, y0:y1, x1 - 1] = color[2]
+        rgb[0, y0, x0:x1] = color[0]
+        rgb[1, y0, x0:x1] = color[1]
+        rgb[2, y0, x0:x1] = color[2]
+        rgb[0, y1 - 1, x0:x1] = color[0]
+        rgb[1, y1 - 1, x0:x1] = color[1]
+        rgb[2, y1 - 1, x0:x1] = color[2]
