@@ -30,6 +30,7 @@ python -m anticipatory_rl.agents.paper1_blockworld_image_dqn_infer \
   --num-sequences 100 \
   --tasks-per-reset 10 \
   --total-steps 50000 \
+  --render-tile-px 12 \
   --max-task-steps 64 \
   --seed 0
 

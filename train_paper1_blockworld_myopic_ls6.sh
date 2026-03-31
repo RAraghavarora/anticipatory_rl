@@ -31,13 +31,14 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 srun python -m anticipatory_rl.agents.paper1_blockworld_image_dqn \
   --run-label myopic_blockworld \
   --total-steps 500000 \
-  --replay-size 50000 \
+  --replay-size 10000 \
   --batch-size 64 \
   --hidden-dim 256 \
   --lr 3e-4 \
   --gamma 0.99 \
   --tau 0.01 \
   --num-envs 8 \
+  --render-tile-px 12 \
   --tasks-per-reset 1 \
   --env-reset-tasks 10 \
   --episode-step-limit 4000 \
