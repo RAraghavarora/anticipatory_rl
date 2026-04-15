@@ -25,14 +25,14 @@ def test_reset_invariants() -> None:
     obs, info = env.reset(seed=7)
     assert obs.shape == env.observation_space.shape
     assert obs.dtype == np.float32
-    assert len(env.task_library) == 24
+    assert len(env.task_library) == 20
     assert len(env.state.placements) == len(env.config.all_blocks)
     assert len(set(env.state.placements.values())) == len(env.state.placements)
     assert all(coord in env.config.region_cells for coord in env.state.placements.values())
     for task in env.task_library:
         assert 1 <= len(task.assignments) <= 2
         for block, region in task.assignments:
-            assert not block.startswith("w")
+            assert block in env.config.nonwhite_blocks
             assert region in env.config.region_coords
             assert not region.startswith("white")
     assert info["task_size"] in {1, 2}
@@ -142,6 +142,7 @@ def test_non_task_clutter_move_does_not_break_satisfied_task() -> None:
     env = make_env()
     config = canonical_config()
     task = Task((("a", "red"),))
+    white_region = config.white_regions[0]
     env.reset(
         seed=0,
         options={
@@ -155,7 +156,7 @@ def test_non_task_clutter_move_does_not_break_satisfied_task() -> None:
         },
     )
     assert env._task_already_satisfied() is True  # noqa: SLF001
-    env.state.placements["f"] = config.region_coords["white_north"]
+    env.state.placements["f"] = config.region_coords[white_region]
     assert env._task_already_satisfied() is True  # noqa: SLF001
 
 

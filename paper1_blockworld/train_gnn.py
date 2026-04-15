@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-val-envs", type=int, default=0)
     parser.add_argument("--num-test-envs", type=int, default=150)
     parser.add_argument("--states-per-env", type=int, default=200)
-    parser.add_argument("--tasks-per-environment", type=int, default=24)
+    parser.add_argument("--tasks-per-environment", type=int, default=20)
     parser.add_argument(
         "--future-task-sample",
         default="all",

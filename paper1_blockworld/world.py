@@ -1,45 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
-import itertools
+from typing import Dict, List, Sequence, Tuple
 import random
 
 
 Coord = Tuple[int, int]
 
 
-NONWHITE_REGIONS: Tuple[str, ...] = (
+COLORED_REGIONS: Tuple[str, ...] = (
     "red",
     "blue",
     "green",
-    "yellow",
-    "orange",
-    "purple",
-    "violet",
     "cyan",
+    "pink",
+    "orange",
+    "brown",
 )
 WHITE_REGIONS: Tuple[str, ...] = (
-    "white_north",
-    "white_south",
-    "white_west",
-    "white_east",
+    "white_1",
+    "white_2",
+    "white_3",
 )
-NONWHITE_BLOCKS: Tuple[str, ...] = ("a", "b", "c", "d", "e", "f", "g")
-WHITE_BLOCKS: Tuple[str, ...] = ("w1", "w2", "w3", "w4")
-BLOCK_COLOR_MAP: Dict[str, str] = {
-    "a": "red",
-    "b": "blue",
-    "c": "green",
-    "d": "yellow",
-    "e": "orange",
-    "f": "purple",
-    "g": "violet",
-    "w1": "white",
-    "w2": "white",
-    "w3": "white",
-    "w4": "white",
-}
+BLOCK_NAMES: Tuple[str, ...] = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
 @dataclass(frozen=True)
@@ -71,16 +54,17 @@ class WorldConfig:
     2D Blocksworld configuration.
     '''
     
-    width: int = 7
-    height: int = 7
+    width: int = 10
+    height: int = 10
     move_cost: int = 25
     pick_cost: int = 100
     place_cost: int = 100
     region_layout: Tuple[Tuple[str, Coord], ...] | None = None
+    block_colors: Tuple[Tuple[str, str], ...] | None = None
 
     @property
     def robot_start(self) -> Coord:
-        return (3, 3)
+        return (self.width // 2, self.height // 2)
 
     @property
     def region_coords(self) -> Dict[str, Coord]:
@@ -88,52 +72,85 @@ class WorldConfig:
             return dict(self.region_layout)
         return {
             "red": (1, 1),
-            "blue": (3, 1),
-            "green": (5, 1),
-            "yellow": (1, 3),
-            "orange": (5, 3),
-            "purple": (1, 5),
-            "violet": (3, 5),
-            "cyan": (5, 5),
-            "white_north": (3, 0),
-            "white_south": (3, 6),
-            "white_west": (0, 3),
-            "white_east": (6, 3),
+            "blue": (4, 1),
+            "green": (7, 1),
+            "cyan": (1, 4),
+            "pink": (4, 4),
+            "orange": (7, 4),
+            "brown": (1, 7),
+            "white_1": (4, 7),
+            "white_2": (7, 7),
+            "white_3": (8, 3),
         }
 
     @classmethod
     def sample(cls, rng: random.Random) -> "WorldConfig":
-        slots = [
-            (1, 1),
-            (3, 1),
-            (5, 1),
-            (1, 3),
-            (5, 3),
-            (1, 5),
-            (3, 5),
-            (5, 5),
-            (3, 0),
-            (3, 6),
-            (0, 3),
-            (6, 3),
-            (0, 1),
-            (6, 1),
-            (0, 5),
-            (6, 5),
-        ]
-        chosen = rng.sample(slots, k=len(NONWHITE_REGIONS) + len(WHITE_REGIONS))
-        names = list(NONWHITE_REGIONS + WHITE_REGIONS)
-        rng.shuffle(names)
-        layout = tuple(sorted(zip(names, chosen)))
-        return cls(region_layout=layout)
+        slots = [(x, y) for y in range(cls.height) for x in range(cls.width)]
+        chosen = rng.sample(slots, k=len(COLORED_REGIONS) + len(WHITE_REGIONS))
+        region_names = list(COLORED_REGIONS + WHITE_REGIONS)
+        rng.shuffle(region_names)
+        layout = tuple(sorted(zip(region_names, chosen)))
+
+        colored_blocks = set(rng.sample(BLOCK_NAMES, k=5))
+        color_pool = rng.sample(COLORED_REGIONS, k=len(colored_blocks))
+        block_colors = []
+        for block in BLOCK_NAMES:
+            if block in colored_blocks:
+                color = color_pool.pop()
+            else:
+                color = "white"
+            block_colors.append((block, color))
+        return cls(
+            region_layout=layout,
+            block_colors=tuple(block_colors),
+        )
+
+    @property
+    def block_color_map(self) -> Dict[str, str]:
+        if self.block_colors is not None:
+            return dict(self.block_colors)
+        return {
+            "a": "red",
+            "b": "blue",
+            "c": "green",
+            "d": "cyan",
+            "e": "pink",
+            "f": "white",
+            "g": "white",
+            "h": "white",
+        }
+
+    @property
+    def nonwhite_blocks(self) -> Tuple[str, ...]:
+        return tuple(
+            block
+            for block in BLOCK_NAMES
+            if self.block_color_map[block] != "white"
+        )
+
+    @property
+    def white_blocks(self) -> Tuple[str, ...]:
+        return tuple(
+            block
+            for block in BLOCK_NAMES
+            if self.block_color_map[block] == "white"
+        )
+
+    @property
+    def nonwhite_regions(self) -> Tuple[str, ...]:
+        return COLORED_REGIONS
+
+    @property
+    def white_regions(self) -> Tuple[str, ...]:
+        return WHITE_REGIONS
 
     @property
     def all_blocks(self) -> Tuple[str, ...]:
-        return NONWHITE_BLOCKS + WHITE_BLOCKS
+        return BLOCK_NAMES
 
     @property
     def all_regions(self) -> Tuple[str, ...]:
-        return NONWHITE_REGIONS + WHITE_REGIONS
+        return COLORED_REGIONS + WHITE_REGIONS
 
     @property
     def region_cells(self) -> Tuple[Coord, ...]:
@@ -150,6 +167,9 @@ class WorldConfig:
 
     def region_location(self, region: str) -> str:
         return self.location_name(self.region_coords[region])
+
+    def block_color(self, block: str) -> str:
+        return self.block_color_map[block]
 
 
 @dataclass
@@ -217,7 +237,7 @@ class WorldGenerator:
             for block, coord in zip(self.config.all_blocks, region_cells)
         }
         return WorldState(
-            robot=self.config.robot_start,
+            robot=(rng.randrange(self.config.width), rng.randrange(self.config.height)),
             placements=placements,
             holding=None,
         )
@@ -225,33 +245,27 @@ class WorldGenerator:
     def sample_task_library(
         self,
         rng: random.Random,
-        count: int = 24,
+        count: int = 20,
     ) -> List[Task]:
-        """
-        For every non-white block and non-white region, create a task of single and pairwise object-region assignment.
-        Then pick top `count` tasks with unique goal assignments.
-        """
-        single_tasks = [
-            Task(((block, region),))
-            for block in NONWHITE_BLOCKS
-            for region in NONWHITE_REGIONS
-        ]
-        pair_tasks = [
-            Task(tuple(zip(blocks, regions)))
-            for blocks in itertools.combinations(NONWHITE_BLOCKS, 2)
-            for regions in itertools.permutations(NONWHITE_REGIONS, 2)
-        ]
-        candidates = single_tasks + pair_tasks
-        rng.shuffle(candidates)
         chosen: List[Task] = []
         seen = set()
-        for task in candidates:
-            if task.assignments in seen:
+        max_attempts = max(200, count * 20)
+        attempts = 0
+        while len(chosen) < count and attempts < max_attempts:
+            attempts += 1
+            task_size = rng.choice((1, 2))
+            blocks = tuple(rng.sample(self.config.nonwhite_blocks, k=task_size))
+            regions = tuple(rng.sample(self.config.nonwhite_regions, k=task_size))
+            task = Task(tuple(zip(blocks, regions)))
+            frozen = tuple(sorted(task.assignments))
+            if frozen in seen:
                 continue
-            seen.add(task.assignments)
+            seen.add(frozen)
             chosen.append(task)
-            if len(chosen) >= count:
-                break
+        if len(chosen) != count:
+            raise RuntimeError(
+                f"Unable to sample {count} unique tasks from the current environment."
+            )
         return chosen
 
     def sample_task_sequence(
@@ -268,7 +282,7 @@ class WorldGenerator:
         task: Task,
     ) -> List[Coord]:
         cells: List[Coord] = []
-        for name in WHITE_REGIONS:
+        for name in self.config.white_regions:
             coord = self.config.region_coords[name]
             occupant = state.block_at(coord)
             if occupant is None or occupant in task.blocks:
@@ -287,9 +301,8 @@ class WorldGenerator:
             deduped.append(cell)
         return deduped
 
-
-def block_color(block: str) -> str:
-    return BLOCK_COLOR_MAP[block]
+def block_color(block: str, config: WorldConfig) -> str:
+    return config.block_color(block)
 
 
 def region_color(region: str) -> str:

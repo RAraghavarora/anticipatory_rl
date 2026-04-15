@@ -554,7 +554,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--num-envs", type=int, default=1)
-    parser.add_argument("--task-library-size", type=int, default=24)
+    parser.add_argument("--task-library-size", type=int, default=20)
     parser.add_argument("--max-task-steps", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=12.0)
     parser.add_argument("--step-penalty", type=float, default=1.0)

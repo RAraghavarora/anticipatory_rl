@@ -18,11 +18,10 @@ COLORS = (
     "red",
     "blue",
     "green",
-    "yellow",
-    "orange",
-    "purple",
-    "violet",
     "cyan",
+    "pink",
+    "orange",
+    "brown",
 )
 TYPE_INDEX = {name: idx for idx, name in enumerate(NODE_TYPES)}
 COLOR_INDEX = {name: idx for idx, name in enumerate(COLORS)}
@@ -98,7 +97,7 @@ def encode_state_as_graph(
             node_idx,
             len(NODE_TYPES),
             len(COLORS),
-            COLOR_INDEX[block_color(block)],
+            COLOR_INDEX[block_color(block, config)],
         )
         coord = state.placements.get(block)
         set_coord(node_idx, coord)

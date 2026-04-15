@@ -65,11 +65,11 @@ echo "Dataset workers: ${DATASET_WORKERS}"
 echo "PYTHONUNBUFFERED=${PYTHONUNBUFFERED}"
 
 srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
-  --num-train-envs 250 \
+  --num-train-envs 50 \
   --num-val-envs 0 \
-  --num-test-envs 0 \
-  --states-per-env 200 \
-  --tasks-per-environment 24 \
+  --num-test-envs 10 \
+  --states-per-env 100 \
+  --tasks-per-environment 20 \
   --future-task-sample all \
   --epochs 10 \
   --batch-size 8 \

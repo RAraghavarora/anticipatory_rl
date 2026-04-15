@@ -2,8 +2,8 @@
 
 This directory contains a self-contained reproduction of the small 2D Blockworld setting from `paper1.pdf`:
 
-- 2D grid world with colored goal regions and white parking regions
-- named colored blocks plus white clutter blocks
+- `10x10` 2D grid world with `7` colored goal regions and `3` white parking regions
+- `8` named blocks (`a`-`h`) with per-environment color assignments: `5` colored and `3` white
 - uniform task distribution over one-block and two-block placement tasks
 - Fast Downward planning
 - graph encoder and a PyTorch Geometric GraphSAGE anticipatory-cost regressor
@@ -14,7 +14,7 @@ This directory contains a self-contained reproduction of the small 2D Blockworld
 This code recreates the **environment structure** and the **evaluation protocol** from the paper:
 
 - procedurally generated 2D blockworlds
-- 20-25 uniformly sampled tasks per environment
+- 20 uniformly sampled tasks per environment
 - 10-task sequences
 - 32 environments and 100 sequences per environment by default
 
@@ -77,7 +77,7 @@ conda run -n thesis accelerate launch --multi_gpu --num_processes 4 \
   --num-val-envs 0 \
   --num-test-envs 150 \
   --states-per-env 200 \
-  --tasks-per-environment 24 \
+  --tasks-per-environment 20 \
   --future-task-sample all \
   --epochs 10 \
   --batch-size 8 \
@@ -101,7 +101,7 @@ conda run -n thesis python -m paper1_blockworld.reproduce_paper1 \
   --num-envs 32 \
   --num-sequences 100 \
   --sequence-length 10 \
-  --tasks-per-environment 24 \
+  --tasks-per-environment 20 \
   --preparation-iterations 200 \
   --future-task-sample 8 \
   --estimator oracle
@@ -122,6 +122,12 @@ The paper leaves some implementation details implicit. This reproduction makes t
 - preparation uses hill-climbing over sampled tasks, as described in the paper
 
 These assumptions are documented so the code is inspectable and easy to adjust.
+
+- regions are sampled as `10` single-capacity placement locations in a `10x10` grid
+- white regions act as legal parking locations
+- objects are sampled onto regions only, never onto arbitrary floor cells
+- each environment assigns `5` colored object labels and `3` white object labels from `a`-`h`
+- the task library is fixed at `20` unique tasks per environment by default
 
 ## Notes On The Learned Estimator
 

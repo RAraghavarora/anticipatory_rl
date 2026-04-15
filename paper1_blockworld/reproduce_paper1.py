@@ -189,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-envs", type=int, default=32)
     parser.add_argument("--num-sequences", type=int, default=100)
     parser.add_argument("--sequence-length", type=int, default=10)
-    parser.add_argument("--tasks-per-environment", type=int, default=24)
+    parser.add_argument("--tasks-per-environment", type=int, default=20)
     parser.add_argument("--preparation-iterations", type=int, default=200)
     parser.add_argument(
         "--future-task-sample",
@@ -255,7 +255,7 @@ def main() -> None:
         args.num_envs = 32
         args.num_sequences = 100
         args.sequence_length = 10
-        args.tasks_per_environment = 24
+        args.tasks_per_environment = 20
         args.preparation_iterations = 200
 
     metrics = {name: BaselineMetrics() for name in BASELINES}

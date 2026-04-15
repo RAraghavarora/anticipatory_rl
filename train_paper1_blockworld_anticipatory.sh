@@ -37,7 +37,7 @@ python -m anticipatory_rl.agents.paper1_blockworld_image_dqn \
   --tasks-per-reset 10 \
   --env-reset-tasks 10 \
   --episode-step-limit 4000 \
-  --task-library-size 24 \
+  --task-library-size 20 \
   --max-task-steps 64 \
   --success-reward 12 \
   --step-penalty 1.0 \

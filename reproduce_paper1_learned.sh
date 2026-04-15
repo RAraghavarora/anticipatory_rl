@@ -44,7 +44,7 @@ fi
 
 python -m paper1_blockworld.reproduce_paper1 \
   --paper-settings \
-  --tasks-per-environment 24 \
+  --tasks-per-environment 20 \
   --preparation-iterations 200 \
   --candidate-goal-limit 24 \
   --estimator learned \

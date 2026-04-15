@@ -10,9 +10,7 @@ import numpy as np
 from gymnasium import Env, spaces
 
 from paper1_blockworld.world import (
-    BLOCK_COLOR_MAP,
     Coord,
-    NONWHITE_REGIONS,
     Task,
     WorldConfig,
     WorldGenerator,
@@ -31,11 +29,10 @@ COLOR_RGB: Dict[str, Tuple[int, int, int]] = {
     "red": (220, 70, 70),
     "blue": (70, 110, 220),
     "green": (80, 180, 90),
-    "yellow": (230, 200, 80),
-    "orange": (235, 145, 60),
-    "purple": (150, 90, 200),
-    "violet": (130, 85, 215),
     "cyan": (80, 200, 205),
+    "pink": (225, 80, 195),
+    "orange": (235, 145, 60),
+    "brown": (160, 95, 55),
     "white": (250, 250, 250),
 }
 
@@ -69,7 +66,7 @@ class Paper1BlockworldImageEnv(Env):
         self,
         *,
         base_config: WorldConfig | None = None,
-        task_library_size: int = 24,
+        task_library_size: int = 20,
         max_task_steps: int = 64,
         success_reward: float = 12.0,
         step_penalty: float = 1.0,
@@ -301,7 +298,7 @@ class Paper1BlockworldImageEnv(Env):
             by0 = y0 + block_offset
             bx1 = bx0 + block_size
             by1 = by0 + block_size
-            rgb = self._rgb_triplet(BLOCK_COLOR_MAP[block])
+            rgb = self._rgb_triplet(self.config.block_color(block))
             obs[0, by0:by1, bx0:bx1] = rgb[0]
             obs[1, by0:by1, bx0:bx1] = rgb[1]
             obs[2, by0:by1, bx0:bx1] = rgb[2]
@@ -323,7 +320,7 @@ class Paper1BlockworldImageEnv(Env):
         self._draw_outline(obs[:3], rx0, ry0, rx1, ry1, self._rgb_triplet(ROBOT_OUTLINE_RGB))
 
         if self.state.holding is not None:
-            held_rgb = self._rgb_triplet(BLOCK_COLOR_MAP[self.state.holding])
+            held_rgb = self._rgb_triplet(self.config.block_color(self.state.holding))
             held_half = max(1, self.tile_px // 8)
             hx0 = max(0, cx - held_half)
             hy0 = max(0, cy - held_half)
