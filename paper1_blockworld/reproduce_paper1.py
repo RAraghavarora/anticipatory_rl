@@ -54,12 +54,14 @@ class AnticipatoryExperiment:
         estimator: FutureCostEstimator,
         candidate_goal_limit: int,
         preparation_iterations: int,
+        verbose: bool = False,
     ) -> None:
         self.config = config
         self.planner = planner
         self.estimator = estimator
         self.candidate_goal_limit = candidate_goal_limit
         self.preparation_iterations = preparation_iterations
+        self.verbose = verbose
 
     def estimate_future_cost(
         self,
@@ -76,13 +78,21 @@ class AnticipatoryExperiment:
     ) -> WorldState:
         current = initial_state.clone()
         current_value = self.estimate_future_cost(current, task_library)
-        for _ in range(self.preparation_iterations):
+        for iteration in range(self.preparation_iterations):
             sampled_task = rng.choice(task_library)
             plan = self.solve_anticipatory(current, sampled_task, task_library)
             plan_value = self.estimate_future_cost(plan.final_state, task_library)
             if plan_value < current_value:
                 current = plan.final_state
                 current_value = plan_value
+            if self.verbose:
+                print(
+                    f"  [prep {iteration + 1}/{self.preparation_iterations}] "
+                    f"task={sampled_task.describe()} "
+                    f"plan_cost={plan.cost:.1f} future={plan_value:.1f} "
+                    f"best_future={current_value:.1f}",
+                    flush=True,
+                )
         return current
 
     def solve_myopic(
@@ -240,6 +250,11 @@ def parse_future_task_sample(raw: str) -> int | None:
     return max(1, int(raw))
 
 
+def log_progress(enabled: bool, message: str) -> None:
+    if enabled:
+        print(message, flush=True)
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -251,6 +266,7 @@ def main() -> None:
         args.preparation_iterations = 2
         args.future_task_sample = "2"
         args.candidate_goal_limit = 4
+    verbose = bool(args.smoke_test)
     if args.paper_settings:
         args.num_envs = 32
         args.num_sequences = 100
@@ -262,10 +278,20 @@ def main() -> None:
     master_rng = random.Random(args.seed)
 
     for env_idx in range(args.num_envs):
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] sampling environment",
+        )
         env_rng = random.Random(master_rng.randint(0, 10**9))
         config = WorldConfig.sample(env_rng)
         generator = WorldGenerator(config)
         planner = FastDownwardBlockworldPlanner(config)
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] "
+            f"regions={len(config.all_regions)} blocks={len(config.all_blocks)} "
+            f"colored_blocks={len(config.nonwhite_blocks)} white_blocks={len(config.white_blocks)}",
+        )
         if args.estimator == "learned":
             if args.gnn_checkpoint is None:
                 raise ValueError("--gnn-checkpoint is required when --estimator learned.")
@@ -286,19 +312,49 @@ def main() -> None:
             estimator=estimator,
             candidate_goal_limit=args.candidate_goal_limit,
             preparation_iterations=args.preparation_iterations,
+            verbose=verbose,
+        )
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] sampling initial state and task library",
         )
         initial_state = generator.sample_initial_state(env_rng)
         task_library = generator.sample_task_library(
             env_rng,
             count=args.tasks_per_environment,
         )
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] "
+            f"task_library_size={len(task_library)} "
+            f"example_task={task_library[0].describe()}",
+        )
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] preparing state",
+        )
         prepared_state = experiment.prepare_state(initial_state, task_library, env_rng)
+        log_progress(
+            verbose,
+            f"[env {env_idx + 1}/{args.num_envs}] preparation complete",
+        )
 
-        for _ in range(args.num_sequences):
+        for sequence_idx in range(args.num_sequences):
             sequence = generator.sample_task_sequence(
                 env_rng,
                 task_library,
                 args.sequence_length,
+            )
+            log_progress(
+                verbose,
+                f"[env {env_idx + 1}/{args.num_envs}] "
+                f"[sequence {sequence_idx + 1}/{args.num_sequences}] "
+                f"tasks={[task.describe() for task in sequence]}",
+            )
+            log_progress(
+                verbose,
+                f"[env {env_idx + 1}/{args.num_envs}] "
+                f"[sequence {sequence_idx + 1}/{args.num_sequences}] rollout myopic",
             )
             metrics["myopic"].add_sequence(
                 experiment.rollout_sequence(
@@ -308,6 +364,11 @@ def main() -> None:
                     anticipatory=False,
                 )
             )
+            log_progress(
+                verbose,
+                f"[env {env_idx + 1}/{args.num_envs}] "
+                f"[sequence {sequence_idx + 1}/{args.num_sequences}] rollout anticipatory",
+            )
             metrics["anticipatory"].add_sequence(
                 experiment.rollout_sequence(
                     initial_state,
@@ -316,6 +377,11 @@ def main() -> None:
                     anticipatory=True,
                 )
             )
+            log_progress(
+                verbose,
+                f"[env {env_idx + 1}/{args.num_envs}] "
+                f"[sequence {sequence_idx + 1}/{args.num_sequences}] rollout prep+myopic",
+            )
             metrics["prep_myopic"].add_sequence(
                 experiment.rollout_sequence(
                     prepared_state,
@@ -323,6 +389,11 @@ def main() -> None:
                     task_library,
                     anticipatory=False,
                 )
+            )
+            log_progress(
+                verbose,
+                f"[env {env_idx + 1}/{args.num_envs}] "
+                f"[sequence {sequence_idx + 1}/{args.num_sequences}] rollout prep+anticipatory",
             )
             metrics["prep_anticipatory"].add_sequence(
                 experiment.rollout_sequence(

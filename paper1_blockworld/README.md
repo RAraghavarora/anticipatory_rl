@@ -2,7 +2,7 @@
 
 This directory contains a self-contained reproduction of the small 2D Blockworld setting from `paper1.pdf`:
 
-- `10x10` 2D grid world with `7` colored goal regions and `3` white parking regions
+- `7x7` 2D grid world with `7` colored goal regions and `3` white parking regions
 - `8` named blocks (`a`-`h`) with per-environment color assignments: `5` colored and `3` white
 - uniform task distribution over one-block and two-block placement tasks
 - Fast Downward planning
@@ -123,7 +123,7 @@ The paper leaves some implementation details implicit. This reproduction makes t
 
 These assumptions are documented so the code is inspectable and easy to adjust.
 
-- regions are sampled as `10` single-capacity placement locations in a `10x10` grid
+- regions are sampled as `10` single-capacity placement locations in a `7x7` grid
 - white regions act as legal parking locations
 - objects are sampled onto regions only, never onto arbitrary floor cells
 - each environment assigns `5` colored object labels and `3` white object labels from `a`-`h`

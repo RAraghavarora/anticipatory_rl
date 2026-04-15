@@ -192,28 +192,41 @@ class FastDownwardBlockworldPlanner:
                 _, src, dst = args
                 if state.robot != self._coord_from_loc(src):
                     raise RuntimeError(f"Robot not at expected source {src}.")
-                state.robot = self._coord_from_loc(dst)
+                dst_coord = self._coord_from_loc(dst)
+                if state.block_at(dst_coord) is not None:
+                    raise RuntimeError(f"Cannot move into occupied location {dst}.")
+                state.robot = dst_coord
                 total_cost += self.config.move_cost
                 continue
             if name == "pick":
-                _, block, loc = args
-                coord = self._coord_from_loc(loc)
-                if state.robot != coord:
-                    raise RuntimeError(f"Robot not at pick location {loc}.")
+                _, robot_loc, block, block_loc = args
+                robot_coord = self._coord_from_loc(robot_loc)
+                coord = self._coord_from_loc(block_loc)
+                if state.robot != robot_coord:
+                    raise RuntimeError(f"Robot not at expected pick source {robot_loc}.")
+                if not self._is_adjacent(robot_coord, coord):
+                    raise RuntimeError(
+                        f"Robot at {robot_loc} is not adjacent to pick location {block_loc}."
+                    )
                 if state.holding is not None:
                     raise RuntimeError("Cannot pick while already holding a block.")
                 if state.placements.get(block) != coord:
-                    raise RuntimeError(f"Block {block} not at pick location {loc}.")
+                    raise RuntimeError(f"Block {block} not at pick location {block_loc}.")
                 del state.placements[block]
                 state.holding = block
                 moved_blocks.append(block)
                 total_cost += self.config.pick_cost
                 continue
             if name == "place":
-                _, block, loc, _region = args
+                _, robot_loc, block, loc, _region = args
+                robot_coord = self._coord_from_loc(robot_loc)
                 coord = self._coord_from_loc(loc)
-                if state.robot != coord:
-                    raise RuntimeError(f"Robot not at place location {loc}.")
+                if state.robot != robot_coord:
+                    raise RuntimeError(f"Robot not at expected place source {robot_loc}.")
+                if not self._is_adjacent(robot_coord, coord):
+                    raise RuntimeError(
+                        f"Robot at {robot_loc} is not adjacent to place location {loc}."
+                    )
                 if state.holding != block:
                     raise RuntimeError(f"Robot is not holding {block}.")
                 if state.block_at(coord) is not None:
@@ -236,3 +249,7 @@ class FastDownwardBlockworldPlanner:
     def _coord_from_loc(loc: str) -> Coord:
         _, x, y = loc.split("_")
         return int(x), int(y)
+
+    @staticmethod
+    def _is_adjacent(src: Coord, dst: Coord) -> bool:
+        return abs(src[0] - dst[0]) + abs(src[1] - dst[1]) == 1

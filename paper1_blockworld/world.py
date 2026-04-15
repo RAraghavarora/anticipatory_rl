@@ -54,8 +54,8 @@ class WorldConfig:
     2D Blocksworld configuration.
     '''
     
-    width: int = 10
-    height: int = 10
+    width: int = 7
+    height: int = 7
     move_cost: int = 25
     pick_cost: int = 100
     place_cost: int = 100
@@ -72,15 +72,15 @@ class WorldConfig:
             return dict(self.region_layout)
         return {
             "red": (1, 1),
-            "blue": (4, 1),
-            "green": (7, 1),
-            "cyan": (1, 4),
-            "pink": (4, 4),
-            "orange": (7, 4),
-            "brown": (1, 7),
-            "white_1": (4, 7),
-            "white_2": (7, 7),
-            "white_3": (8, 3),
+            "blue": (3, 1),
+            "green": (5, 1),
+            "cyan": (1, 3),
+            "pink": (3, 3),
+            "orange": (5, 3),
+            "brown": (1, 5),
+            "white_1": (3, 5),
+            "white_2": (5, 5),
+            "white_3": (5, 6),
         }
 
     @classmethod
@@ -236,8 +236,14 @@ class WorldGenerator:
             block: coord
             for block, coord in zip(self.config.all_blocks, region_cells)
         }
+        free_cells = [
+            (x, y)
+            for y in range(self.config.height)
+            for x in range(self.config.width)
+            if (x, y) not in placements.values()
+        ]
         return WorldState(
-            robot=(rng.randrange(self.config.width), rng.randrange(self.config.height)),
+            robot=rng.choice(free_cells),
             placements=placements,
             holding=None,
         )

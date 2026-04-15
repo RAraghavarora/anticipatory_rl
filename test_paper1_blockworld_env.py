@@ -59,6 +59,27 @@ def test_boundary_move_penalized_noop() -> None:
     assert env.state.robot == (0, 0)
 
 
+def test_move_into_occupied_cell_penalized_noop() -> None:
+    env = make_env()
+    config = canonical_config()
+    obs, _ = env.reset(
+        seed=0,
+        options={
+            "world_config": config,
+            "placements": {"a": (1, 0)},
+            "robot_pos": (0, 0),
+            "task_library": [Task((("a", "red"),))],
+            "task": Task((("a", "red"),)),
+        },
+    )
+    assert obs.shape[0] == 8
+    _, reward, success, horizon, _ = env.step(env.MOVE_RIGHT)
+    assert reward == -6.0
+    assert not success
+    assert not horizon
+    assert env.state.robot == (0, 0)
+
+
 def test_pick_and_place_dynamics() -> None:
     env = make_env()
     config = canonical_config()
@@ -67,8 +88,11 @@ def test_pick_and_place_dynamics() -> None:
         seed=0,
         options={
             "world_config": config,
-            "placements": {"a": config.region_coords["red"]},
-            "robot_pos": config.region_coords["red"],
+            "placements": {
+                "a": config.region_coords["red"],
+                "c": config.region_coords["green"],
+            },
+            "robot_pos": (1, 0),
             "task_library": [task],
             "task": task,
         },
@@ -82,7 +106,7 @@ def test_pick_and_place_dynamics() -> None:
     assert "a" not in env.state.placements
     assert not info["can_pick"]
 
-    env.state.robot = config.region_coords["blue"]
+    env.state.robot = (3, 0)
     _, reward, success, horizon, info = env.step(env.PLACE)
     assert reward == env.success_reward
     assert success
@@ -101,8 +125,11 @@ def test_place_rejects_occupied_region() -> None:
         options={
             "world_config": config,
             "state": WorldState(
-                robot=config.region_coords["blue"],
-                placements={"b": config.region_coords["blue"]},
+                robot=(3, 0),
+                placements={
+                    "b": config.region_coords["blue"],
+                    "c": config.region_coords["green"],
+                },
                 holding="a",
             ),
             "task_library": [task],

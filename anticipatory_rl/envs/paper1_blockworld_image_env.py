@@ -245,15 +245,19 @@ class Paper1BlockworldImageEnv(Env):
         nx = int(np.clip(ax + dx, 0, self.config.width - 1))
         ny = int(np.clip(ay + dy, 0, self.config.height - 1))
         blocked = nx == ax and ny == ay
+        if not blocked and self.state.block_at((nx, ny)) is not None:
+            blocked = True
+            nx, ny = ax, ay
         self.state.robot = (nx, ny)
         return -self.invalid_action_penalty if blocked else 0.0
 
     def _handle_pick(self) -> str | None:
         if self.state.holding is not None:
             return None
-        block = self.state.block_at(self.state.robot)
-        if block is None:
+        adjacent_blocks = self._adjacent_blocks()
+        if len(adjacent_blocks) != 1:
             return None
+        block = adjacent_blocks[0]
         del self.state.placements[block]
         self.state.holding = block
         return block
@@ -261,12 +265,14 @@ class Paper1BlockworldImageEnv(Env):
     def _handle_place(self) -> bool:
         if self.state.holding is None:
             return False
-        if not self._coord_is_region(self.state.robot):
+        target_coords = self._adjacent_empty_regions()
+        if len(target_coords) != 1:
             return False
-        if self.state.block_at(self.state.robot) is not None:
+        coord = target_coords[0]
+        if not self._coord_is_region(coord):
             return False
         block = self.state.holding
-        self.state.placements[block] = self.state.robot
+        self.state.placements[block] = coord
         self.state.holding = None
         return True
 
@@ -340,12 +346,8 @@ class Paper1BlockworldImageEnv(Env):
         return obs.copy()
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
-        can_pick = self.state.holding is None and self.state.block_at(self.state.robot) is not None
-        can_place = (
-            self.state.holding is not None
-            and self._coord_is_region(self.state.robot)
-            and self.state.block_at(self.state.robot) is None
-        )
+        can_pick = self.state.holding is None and len(self._adjacent_blocks()) == 1
+        can_place = self.state.holding is not None and len(self._adjacent_empty_regions()) == 1
         info = BlockworldInfo(
             robot=self.state.robot,
             placements=dict(self.state.placements),
@@ -358,6 +360,34 @@ class Paper1BlockworldImageEnv(Env):
             next_auto_satisfied=self._pending_auto_success,
         )
         return info.__dict__
+
+    def _adjacent_coords(self, coord: Coord | None = None) -> List[Coord]:
+        x, y = self.state.robot if coord is None else coord
+        coords: List[Coord] = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx = x + dx
+            ny = y + dy
+            if 0 <= nx < self.config.width and 0 <= ny < self.config.height:
+                coords.append((nx, ny))
+        return coords
+
+    def _adjacent_blocks(self) -> List[str]:
+        blocks: List[str] = []
+        for coord in self._adjacent_coords():
+            block = self.state.block_at(coord)
+            if block is not None:
+                blocks.append(block)
+        return blocks
+
+    def _adjacent_empty_regions(self) -> List[Coord]:
+        coords: List[Coord] = []
+        for coord in self._adjacent_coords():
+            if not self._coord_is_region(coord):
+                continue
+            if self.state.block_at(coord) is not None:
+                continue
+            coords.append(coord)
+        return coords
 
     def _tile_bounds(self, coord: Coord) -> Tuple[int, int, int, int]:
         x, y = coord

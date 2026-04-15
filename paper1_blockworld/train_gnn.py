@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing as mp
+import numpy as np
 import os
 from pathlib import Path
 import random
@@ -95,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Optional path to save the generated regression dataset metadata.",
+    )
+    parser.add_argument(
+        "--export-dataset-npz",
+        type=Path,
+        default=None,
+        help="Optional path to export the graph dataset and anticipatory targets as a .npz archive.",
     )
     parser.add_argument(
         "--smoke-test",
@@ -546,6 +553,64 @@ def evaluate_model(
     return float(mean(abs_errors)) if abs_errors else 0.0
 
 
+def flatten_examples_for_npz(
+    examples: Sequence[GraphRegressionExample],
+) -> Dict[str, np.ndarray]:
+    if not examples:
+        return {
+            "node_features": np.zeros((0, graph_feature_dim()), dtype=np.float32),
+            "edge_index": np.zeros((2, 0), dtype=np.int64),
+            "targets": np.zeros((0,), dtype=np.float32),
+            "graph_node_offsets": np.zeros((1,), dtype=np.int64),
+            "graph_edge_offsets": np.zeros((1,), dtype=np.int64),
+        }
+
+    node_features_parts: List[np.ndarray] = []
+    edge_index_parts: List[np.ndarray] = []
+    targets: List[float] = []
+    graph_node_offsets = [0]
+    graph_edge_offsets = [0]
+    node_offset = 0
+    edge_offset = 0
+
+    for example in examples:
+        graph = example.graph
+        node_features_np = graph.node_features.cpu().numpy().astype(np.float32, copy=False)
+        edge_index_np = graph.edge_index.cpu().numpy().astype(np.int64, copy=False)
+
+        node_features_parts.append(node_features_np)
+        edge_index_parts.append(edge_index_np + node_offset)
+        targets.append(float(example.target))
+
+        node_offset += int(node_features_np.shape[0])
+        edge_offset += int(edge_index_np.shape[1])
+        graph_node_offsets.append(node_offset)
+        graph_edge_offsets.append(edge_offset)
+
+    return {
+        "node_features": np.concatenate(node_features_parts, axis=0),
+        "edge_index": np.concatenate(edge_index_parts, axis=1),
+        "targets": np.asarray(targets, dtype=np.float32),
+        "graph_node_offsets": np.asarray(graph_node_offsets, dtype=np.int64),
+        "graph_edge_offsets": np.asarray(graph_edge_offsets, dtype=np.int64),
+    }
+
+
+def export_dataset_bundle_npz(
+    path: Path,
+    dataset_bundle: Dict[str, Any],
+) -> None:
+    payload: Dict[str, np.ndarray] = {}
+    for split_name in ("train", "val", "test"):
+        split_examples = dataset_bundle[f"{split_name}_examples"]
+        flattened = flatten_examples_for_npz(split_examples)
+        for key, value in flattened.items():
+            payload[f"{split_name}_{key}"] = value
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **payload)
+
+
 def main() -> None:
     args = build_parser().parse_args()
     if args.smoke_test:
@@ -731,6 +796,9 @@ def main() -> None:
         if args.save_dataset is not None:
             args.save_dataset.parent.mkdir(parents=True, exist_ok=True)
             args.save_dataset.write_text(json.dumps(summary["dataset"], indent=2), encoding="utf-8")
+        if args.export_dataset_npz is not None:
+            export_dataset_bundle_npz(args.export_dataset_npz, dataset_bundle)
+            print(f"Exported dataset archive to {args.export_dataset_npz}", flush=True)
 
         print(f"\nSaved checkpoint to {checkpoint_path}", flush=True)
         print(f"Validation MAE: {best_val:.3f}", flush=True)

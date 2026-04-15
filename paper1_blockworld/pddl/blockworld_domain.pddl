@@ -23,30 +23,33 @@
     :parameters (?bot - robot ?from - location ?to - location)
     :precondition (and
       (at ?bot ?from)
-      (adjacent ?from ?to))
+      (adjacent ?from ?to)
+      (clear ?to))
     :effect (and
       (at ?bot ?to)
       (not (at ?bot ?from))
       (increase (total-cost) 25)))
 
   (:action pick
-    :parameters (?bot - robot ?b - block ?loc - location)
+    :parameters (?bot - robot ?robotloc - location ?b - block ?blockloc - location)
     :precondition (and
-      (at ?bot ?loc)
-      (on ?b ?loc)
+      (at ?bot ?robotloc)
+      (adjacent ?robotloc ?blockloc)
+      (on ?b ?blockloc)
       (handempty ?bot))
     :effect (and
       (holding ?bot ?b)
       (not (handempty ?bot))
-      (clear ?loc)
-      (not (on ?b ?loc))
+      (clear ?blockloc)
+      (not (on ?b ?blockloc))
       (increase (total-cost) 100)))
 
   (:action place
-    :parameters (?bot - robot ?b - block ?loc - location ?region - region)
+    :parameters (?bot - robot ?robotloc - location ?b - block ?loc - location ?region - region)
     :precondition (and
       (holding ?bot ?b)
-      (at ?bot ?loc)
+      (at ?bot ?robotloc)
+      (adjacent ?robotloc ?loc)
       (clear ?loc)
       (belongs ?loc ?region))
     :effect (and
