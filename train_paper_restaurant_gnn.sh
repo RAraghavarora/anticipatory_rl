@@ -4,7 +4,7 @@
 #================================================
 # SBATCH
 #================================================
-#SBATCH --job-name=paper1_gnn
+#SBATCH --job-name=paper_rest_gnn
 #SBATCH --account=bger-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -20,20 +20,21 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p slurm_logs
-mkdir -p paper1_blockworld/checkpoints
+mkdir -p paper_restaurant/checkpoints
 
 DATASET_WORKERS=${SLURM_CPUS_PER_TASK:-1}
 
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
-echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
-echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
-if [ -f "/u/rarora1/ant_env/bin/activate" ]; then
-  source /u/rarora1/ant_env/bin/activate
+if command -v conda >/dev/null 2>&1; then
+  eval "$(conda shell.bash hook)"
+elif [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
+  source "${HOME}/miniconda3/etc/profile.d/conda.sh"
 else
-  echo "Missing virtual environment activate script: /u/rarora1/ant_env/bin/activate" >&2
+  echo "Could not find conda initialization script." >&2
   exit 1
 fi
+conda activate thesis
 export PYTHONUNBUFFERED=1
 
 if [[ "${SLURM_GPUS_ON_NODE:-}" =~ ^[0-9]+$ ]]; then
@@ -57,25 +58,21 @@ if [ "${NUM_GPUS}" -gt 1 ]; then
   ACCELERATE_ARGS+=(--multi_gpu)
 fi
 
-echo "Accelerate: num_processes=${NUM_GPUS} main_process_port=${MASTER_PORT}"
-echo "Dataset workers: ${DATASET_WORKERS}"
-echo "PYTHONUNBUFFERED=${PYTHONUNBUFFERED}"
-
-srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
-  --num-train-envs 50 \
-  --num-val-envs 0 \
-  --num-test-envs 10 \
-  --states-per-env 100 \
-  --tasks-per-environment 20 \
+srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper_restaurant.train_gnn \
+  --num-train-envs 96 \
+  --num-val-envs 16 \
+  --states-per-env 64 \
+  --tasks-per-environment 72 \
   --future-task-sample all \
   --epochs 10 \
   --batch-size 8 \
   --lr 0.01 \
-  --hidden-dim 128 \
-  --num-layers 3 \
+  --hidden-dim 256 \
+  --num-layers 4 \
+  --heads 4 \
   --dataset-workers "${DATASET_WORKERS}" \
   --device cuda \
-  --output-dir paper1_blockworld/checkpoints \
+  --output-dir paper_restaurant/checkpoints \
   --seed 0
 
 echo "Job finished at $(date -Is)"

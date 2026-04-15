@@ -118,12 +118,13 @@ class RestaurantState:
 class RestaurantSymbolicEnv(Env):
     """Symbolic continuing-task restaurant benchmark with macro actions."""
 
-    metadata = {"render.modes": []}
+    metadata = {"render_modes": ["rgb_array", "ansi"]}
 
     def __init__(
         self,
         *,
         config_path: str | Path | None = None,
+        render_mode: str | None = None,
         max_task_steps: int = 24,
         success_reward: float = 15.0,
         invalid_action_penalty: float = 6.0,
@@ -222,6 +223,9 @@ class RestaurantSymbolicEnv(Env):
         self.brew_cost = float(brew_cost)
         self.fruit_cost = float(fruit_cost)
         self._rng = np.random.default_rng(rng_seed)
+        if render_mode not in {None, "rgb_array", "ansi"}:
+            raise ValueError(f"Unsupported render_mode: {render_mode}")
+        self.render_mode = render_mode
 
         self.object_names = tuple(name for name, _ in self.object_specs)
         self.object_name_index = {name: idx for idx, name in enumerate(self.object_names)}
@@ -365,6 +369,14 @@ class RestaurantSymbolicEnv(Env):
         labels.extend(f"place:{name}" for name in LOCATIONS)
         labels.extend(["wash_held", "fill_water_held", "make_coffee_held", "fill_fruit_held"])
         return labels
+
+    def render(self):
+        mode = self.render_mode or "rgb_array"
+        if mode == "ansi":
+            return self._render_ansi()
+        if mode == "rgb_array":
+            return self._render_rgb_array()
+        raise ValueError(f"Unsupported render mode: {mode}")
 
     # ------------------------------------------------------------------
     # Internal task process
@@ -776,6 +788,246 @@ class RestaurantSymbolicEnv(Env):
             mask[idx] = 1.0 if self._is_action_valid(idx) else 0.0
         return mask
 
+    def _render_ansi(self) -> str:
+        lines = [
+            f"Task: {self.task.task_type}"
+            + (
+                f" @ {self.task.target_location}"
+                if self.task.target_location is not None
+                else f" [{self.task.target_kind}]"
+            ),
+            f"Agent: {self.state.agent_location}",
+            f"Holding: {self.state.holding or 'none'}",
+            f"Task source: {self._task_source}",
+            f"Active service location: {self._active_service_location or 'none'}",
+            "Objects:",
+        ]
+        for location in LOCATIONS:
+            objs = [
+                self._format_object_label(obj)
+                for obj in self.state.objects.values()
+                if obj.location == location
+            ]
+            marker = " <agent>" if self.state.agent_location == location else ""
+            lines.append(f"  - {location}:{marker} {', '.join(objs) if objs else '(empty)'}")
+        if self.state.holding is not None:
+            lines.append(
+                "  - __held__: "
+                + self._format_object_label(self.state.objects[self.state.holding])
+            )
+        return "\n".join(lines)
+
+    def _render_rgb_array(self) -> np.ndarray:
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from matplotlib.patches import Circle, FancyBboxPatch, Rectangle
+
+        fig = Figure(figsize=(12.5, 7.5), constrained_layout=True)
+        FigureCanvasAgg(fig)
+        gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1.0])
+        ax = fig.add_subplot(gs[0, 0])
+        side = fig.add_subplot(gs[0, 1])
+
+        ax.set_facecolor("#f7f6f3")
+        side.set_facecolor("#fffdf8")
+
+        min_x = min(coord[0] for coord in LOCATION_COORDS.values())
+        max_x = max(coord[0] for coord in LOCATION_COORDS.values())
+        min_y = min(coord[1] for coord in LOCATION_COORDS.values())
+        max_y = max(coord[1] for coord in LOCATION_COORDS.values())
+
+        for location, (gx, gy) in LOCATION_COORDS.items():
+            x = float(gx)
+            y = float(max_y - gy)
+            is_target = self.task.target_location == location
+            is_agent = self.state.agent_location == location
+            face = self._location_face_color(location)
+            edge = "#d97706" if is_target else "#50525b"
+            rect = FancyBboxPatch(
+                (x, y),
+                0.95,
+                0.95,
+                boxstyle="round,pad=0.02,rounding_size=0.06",
+                facecolor=face,
+                edgecolor=edge,
+                linewidth=2.8 if is_target else 1.6,
+            )
+            ax.add_patch(rect)
+            ax.text(
+                x + 0.475,
+                y + 0.77,
+                location.replace("_", "\n"),
+                ha="center",
+                va="center",
+                fontsize=10,
+                fontweight="600",
+                color="#262626",
+            )
+            cap = self.location_capacity.get(location, 99)
+            ax.text(
+                x + 0.86,
+                y + 0.12,
+                f"cap {cap}",
+                ha="right",
+                va="bottom",
+                fontsize=8,
+                color="#5c6066",
+            )
+            if is_agent:
+                agent = Circle(
+                    (x + 0.12, y + 0.84),
+                    0.08,
+                    facecolor="#b91c1c",
+                    edgecolor="#450a0a",
+                    linewidth=1.2,
+                )
+                ax.add_patch(agent)
+
+            objects_here = [
+                obj for obj in self.state.objects.values() if obj.location == location
+            ]
+            slot_count = max(cap, max(1, len(objects_here)))
+            for idx, obj in enumerate(objects_here):
+                chip_h = 0.16
+                top_margin = 0.18
+                usable_h = 0.68
+                if slot_count <= 1:
+                    cy = y + 0.42
+                else:
+                    cy = y + top_margin + idx * min(chip_h + 0.04, usable_h / slot_count)
+                chip = FancyBboxPatch(
+                    (x + 0.12, cy),
+                    0.72,
+                    chip_h,
+                    boxstyle="round,pad=0.01,rounding_size=0.03",
+                    facecolor=self._object_fill_color(obj.kind),
+                    edgecolor="#111827" if obj.dirty else "#374151",
+                    linewidth=2.0 if obj.dirty else 1.2,
+                    linestyle="--" if obj.dirty else "-",
+                )
+                ax.add_patch(chip)
+                ax.text(
+                    x + 0.16,
+                    cy + chip_h / 2.0,
+                    self._object_short_label(obj),
+                    ha="left",
+                    va="center",
+                    fontsize=8.5,
+                    fontweight="600",
+                    color="#111827",
+                )
+
+        ax.set_xlim(min_x - 0.15, max_x + 1.15)
+        ax.set_ylim(min_y - 0.15, max_y + 1.15)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        ax.set_title("Restaurant State", fontsize=16, fontweight="700", color="#1f2937")
+
+        side.axis("off")
+        y = 0.96
+        side.text(0.03, y, "Task", fontsize=16, fontweight="700", color="#1f2937", transform=side.transAxes)
+        y -= 0.07
+        side.text(
+            0.03,
+            y,
+            self._task_summary_line(),
+            fontsize=12,
+            color="#374151",
+            transform=side.transAxes,
+        )
+        y -= 0.06
+        side.text(
+            0.03,
+            y,
+            f"Task source: {self._task_source}",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+        y -= 0.05
+        side.text(
+            0.03,
+            y,
+            f"Auto-satisfied next: {'yes' if self._pending_auto_success else 'no'}",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+        y -= 0.05
+        side.text(
+            0.03,
+            y,
+            f"Active table: {self._active_service_location or 'none'}",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+
+        y -= 0.10
+        side.text(0.03, y, "Agent", fontsize=16, fontweight="700", color="#1f2937", transform=side.transAxes)
+        y -= 0.07
+        side.text(
+            0.03,
+            y,
+            f"Location: {self.state.agent_location}",
+            fontsize=11,
+            color="#374151",
+            transform=side.transAxes,
+        )
+        y -= 0.05
+        side.text(
+            0.03,
+            y,
+            f"Holding: {self._format_holding_label()}",
+            fontsize=11,
+            color="#374151",
+            transform=side.transAxes,
+        )
+
+        y -= 0.10
+        side.text(0.03, y, "Legend", fontsize=16, fontweight="700", color="#1f2937", transform=side.transAxes)
+        y -= 0.07
+        legend_rows = [
+            ("Mug", self._object_fill_color("mug")),
+            ("Glass", self._object_fill_color("glass")),
+            ("Bowl", self._object_fill_color("bowl")),
+        ]
+        for label, color in legend_rows:
+            chip = Rectangle((0.03, y - 0.015), 0.05, 0.03, transform=side.transAxes, facecolor=color, edgecolor="#374151")
+            side.add_patch(chip)
+            side.text(0.10, y, label, fontsize=10.5, color="#374151", va="center", transform=side.transAxes)
+            y -= 0.055
+        side.text(
+            0.03,
+            y,
+            "Dashed border = dirty",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+        y -= 0.05
+        side.text(
+            0.03,
+            y,
+            "Chip suffix: [E/W/C/F]",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+        y -= 0.045
+        side.text(
+            0.03,
+            y,
+            "Target location = amber border",
+            fontsize=10.5,
+            color="#4b5563",
+            transform=side.transAxes,
+        )
+
+        fig.canvas.draw()
+        image = np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
+        return image
+
     def _is_action_valid(self, action: int) -> bool:
         held = self.state.holding
         if action < self._place_offset:
@@ -815,6 +1067,56 @@ class RestaurantSymbolicEnv(Env):
         sx, sy = LOCATION_COORDS[src]
         dx, dy = LOCATION_COORDS[dst]
         return self.travel_cost_scale * float(abs(sx - dx) + abs(sy - dy))
+
+    def _location_face_color(self, location: str) -> str:
+        palette = {
+            "kitchen_counter": "#e7dcc6",
+            "coffee_machine": "#d7d2cb",
+            "water_station": "#d9ecff",
+            "fruit_station": "#fce7b2",
+            "dish_rack": "#dbe7f1",
+            "sink": "#cfe5ef",
+            "pass_counter": "#f0dbc7",
+            "table_left": "#edd7cf",
+            "bus_tub": "#d7d4eb",
+            "table_right": "#edd7cf",
+        }
+        return palette.get(location, "#ececec")
+
+    def _object_fill_color(self, kind: str) -> str:
+        return {
+            "mug": "#f59e0b",
+            "glass": "#60a5fa",
+            "bowl": "#34d399",
+        }.get(kind, "#d1d5db")
+
+    def _content_short_code(self, contents: str) -> str:
+        return {
+            "empty": "E",
+            "water": "W",
+            "coffee": "C",
+            "fruit": "F",
+        }.get(contents, "?")
+
+    def _object_short_label(self, obj: RestaurantObjectState) -> str:
+        base = obj.name.replace("_", " ")
+        return f"{base} [{self._content_short_code(obj.contents)}]"
+
+    def _format_object_label(self, obj: RestaurantObjectState) -> str:
+        dirty = ", dirty" if obj.dirty else ", clean"
+        return f"{obj.name}<{obj.kind}, {obj.contents}{dirty}>"
+
+    def _task_summary_line(self) -> str:
+        if self.task.target_location is not None:
+            return f"{self.task.task_type} @ {self.task.target_location}"
+        if self.task.target_kind is not None:
+            return f"{self.task.task_type} [{self.task.target_kind}]"
+        return self.task.task_type
+
+    def _format_holding_label(self) -> str:
+        if self.state.holding is None:
+            return "none"
+        return self._format_object_label(self.state.objects[self.state.holding])
 
     def _weighted_choice(
         self,

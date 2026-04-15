@@ -1,0 +1,53 @@
+\begin{thebibliography}{10}
+
+\bibitem{dhakal2023anticipatory}
+Roshan Dhakal, Md~Ridwan~Hossain Talukder, and Gregory~J. Stein.
+\newblock Anticipatory planning: Improving long-lived planning by estimating expected cost of future tasks.
+\newblock In {\em 2023 IEEE International Conference on Robotics and Automation (ICRA)}, pages 11538--11545, 2023.
+
+\bibitem{dhakal2024tamp}
+Roshan Dhakal, Duc~M. Nguyen, Tom Silver, Xuesu Xiao, and Gregory~J. Stein.
+\newblock Anticipatory task and motion planning.
+\newblock {\em arXiv preprint arXiv:2407.13694}, 2024.
+
+\bibitem{talukder2024large}
+Md~Ridwan~Hossain Talukder, Raihan~Islam Arnob, and Gregory~J. Stein.
+\newblock Anticipatory planning for performant long-lived robot in large-scale home-like environments.
+\newblock {\em arXiv preprint arXiv:2411.12837}, 2024.
+
+\bibitem{arora2024anticipate}
+Raghav Arora, Shivam Singh, Karthik Swaminathan, Ahana Datta, Snehasis Banerjee, Brojeshwar Bhowmick, Krishna~Murthy Jatavallabhula, Mohan Sridharan, and K.~Madhava Krishna.
+\newblock Anticipate \& act: Integrating {LLMs} and classical planning for efficient task execution in household environments.
+\newblock In {\em 2024 IEEE International Conference on Robotics and Automation (ICRA)}, pages 14038--14045, 2024.
+
+\bibitem{singh2024anticipate}
+Shivam Singh, Karthik Swaminathan, Raghav Arora, Ramandeep Singh, Ahana Datta, Dipanjan Das, Snehasis Banerjee, Mohan Sridharan, and K.~Madhava Krishna.
+\newblock Anticipate \& collab: Data-driven task anticipation and knowledge-driven planning for human-robot collaboration.
+\newblock {\em arXiv preprint arXiv:2404.03587}, 2024.
+
+\bibitem{schaul2015uvfa}
+Tom Schaul, Dan Horgan, Karol Gregor, and David Silver.
+\newblock Universal value function approximators.
+\newblock In {\em Proceedings of the 32nd International Conference on Machine Learning}, pages 1312--1320, 2015.
+
+\bibitem{barreto2017successor}
+Andre Barreto, Will Dabney, Remi Munos, Jonathan~J. Hunt, Tom Schaul, Hado van Hasselt, and David Silver.
+\newblock Successor features for transfer in reinforcement learning.
+\newblock {\em Advances in Neural Information Processing Systems}, 30, 2017.
+
+\bibitem{krakovna2020avoiding}
+Victoria Krakovna, Laurent Orseau, Richard Ngo, Miljan Martic, and Shane Legg.
+\newblock Avoiding side effects by considering future tasks.
+\newblock {\em Advances in Neural Information Processing Systems}, 33:19064--19074, 2020.
+
+\bibitem{khetarpal2022continual}
+Khimya Khetarpal, Matthew Riemer, Irina Rish, and Doina Precup.
+\newblock Towards continual reinforcement learning: A review and perspectives.
+\newblock {\em Journal of Artificial Intelligence Research}, 75:1401--1476, 2022.
+
+\bibitem{mnih2015dqn}
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei~A. Rusu, Joel Veness, Marc~G. Bellemare, Alex Graves, Martin Riedmiller, Andreas~K. Fidjeland, Georg Ostrovski, Stig Petersen, Charles Beattie, Amir Sadik, Ioannis Antonoglou, Helen King, Dharshan Kumaran, Daan Wierstra, Shane Legg, and Demis Hassabis.
+\newblock Human-level control through deep reinforcement learning.
+\newblock {\em Nature}, 518(7540):529--533, 2015.
+
+\end{thebibliography}
