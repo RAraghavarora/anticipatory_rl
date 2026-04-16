@@ -18,10 +18,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from anticipatory_rl.envs.paper1_blockworld_image_env import (
     Paper1BlockworldImageEnv,
+    WorldState,
 )
+from paper1_blockworld.motion import LazyPRMMotionPlanner
 
 
 class ConvQNetwork(nn.Module):
@@ -183,18 +186,66 @@ def _paper_step_cost(
         Paper1BlockworldImageEnv.MOVE_LEFT,
         Paper1BlockworldImageEnv.MOVE_RIGHT,
     }:
-        return float(
-            env.config.move_cost
-            if tuple(pre_info["robot"]) != tuple(post_info["robot"])
-            else env.invalid_action_penalty
-        )
+        moved = tuple(pre_info["robot"]) != tuple(post_info["robot"])
+        if not moved:
+            return 0.0
+        return float(_prm_move_cost(env, pre_info, post_info))
     if action == Paper1BlockworldImageEnv.PICK:
         picked = pre_info.get("holding") is None and post_info.get("holding") is not None
-        return float(env.config.pick_cost if picked else env.invalid_action_penalty)
+        return float(env.config.pick_cost if picked else 0.0)
     if action == Paper1BlockworldImageEnv.PLACE:
         placed = pre_info.get("holding") is not None and post_info.get("holding") is None
-        return float(env.config.place_cost if placed else env.invalid_action_penalty)
+        return float(env.config.place_cost if placed else 0.0)
     return 0.0
+
+
+def _prm_move_cost(
+    env: Paper1BlockworldImageEnv,
+    pre_info: Dict[str, Any],
+    post_info: Dict[str, Any],
+) -> int:
+    start = tuple(pre_info["robot"])
+    goal = tuple(post_info["robot"])
+    if start == goal:
+        return 0
+    placements = {
+        str(block): tuple(coord)
+        for block, coord in dict(pre_info.get("placements", {})).items()
+    }
+    holding = pre_info.get("holding")
+    signature = (holding, tuple(sorted(placements.items())))
+    cache = getattr(env, "_paper_prm_cache", None)
+    if cache is None or cache.get("signature") != signature:
+        state = WorldState(robot=start, placements=placements, holding=holding)
+        planner = LazyPRMMotionPlanner(env.config, state)
+        cache = {"signature": signature, "planner": planner}
+        setattr(env, "_paper_prm_cache", cache)
+    planner = cache["planner"]
+    path = planner.shortest_path(start, goal)
+    if path is None:
+        return int(env.config.move_cost)
+    return int(path.cost)
+
+
+def _is_invalid_action(
+    pre_info: Dict[str, Any],
+    post_info: Dict[str, Any],
+    action: int,
+) -> bool:
+    if action in {
+        Paper1BlockworldImageEnv.MOVE_UP,
+        Paper1BlockworldImageEnv.MOVE_DOWN,
+        Paper1BlockworldImageEnv.MOVE_LEFT,
+        Paper1BlockworldImageEnv.MOVE_RIGHT,
+    }:
+        return tuple(pre_info["robot"]) == tuple(post_info["robot"])
+    if action == Paper1BlockworldImageEnv.PICK:
+        picked = pre_info.get("holding") is None and post_info.get("holding") is not None
+        return not picked
+    if action == Paper1BlockworldImageEnv.PLACE:
+        placed = pre_info.get("holding") is not None and post_info.get("holding") is None
+        return not placed
+    return False
 
 
 def _moving_average(series: List[float], window: int) -> np.ndarray | None:
@@ -296,6 +347,12 @@ def train(args: argparse.Namespace) -> Path:
     output_path = run_dir / args.output.name
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
 
+    tb_writer = None
+    if args.tb_log_interval > 0 or args.tb_task_interval > 0:
+        tb_log_dir = args.tb_log_dir or (run_dir / "tb")
+        tb_log_dir.mkdir(parents=True, exist_ok=True)
+        tb_writer = SummaryWriter(log_dir=str(tb_log_dir))
+
     obs, infos = env.reset(seed=args.seed)
     infos = list(infos)
     obs_shape = obs.shape[1:]
@@ -319,11 +376,20 @@ def train(args: argparse.Namespace) -> Path:
 
     total_tasks = 0
     tasks_completed = 0
+    total_invalid_actions = 0
+    total_horizon_tasks = 0
+    total_action_steps = 0
     episode_index = 0
     recent_returns: Deque[float] = deque(maxlen=100)
     recent_success: Deque[int] = deque(maxlen=100)
     recent_costs: Deque[float] = deque(maxlen=100)
     recent_auto: Deque[int] = deque(maxlen=100)
+    recent_task_steps: Deque[int] = deque(maxlen=args.tb_task_window)
+    recent_step_rewards: Deque[float] = deque(maxlen=args.tb_step_window)
+    recent_step_costs: Deque[float] = deque(maxlen=args.tb_step_window)
+    recent_invalid: Deque[float] = deque(maxlen=args.tb_step_window)
+    recent_horizon: Deque[float] = deque(maxlen=args.tb_step_window)
+    recent_random: Deque[float] = deque(maxlen=args.tb_step_window)
     loss_history: List[float] = []
     task_records: List[Dict[str, Any]] = []
     return_history: List[float] = []
@@ -345,6 +411,9 @@ def train(args: argparse.Namespace) -> Path:
         next_obs, rewards, success, horizon, next_infos = env.step(actions)
         task_done = success | horizon
 
+        invalid_flags = np.zeros(num_envs, dtype=np.float32)
+        step_paper_costs = np.zeros(num_envs, dtype=np.float32)
+
         episode_done_flags = np.zeros(num_envs, dtype=bool)
         env_reset_flags = np.zeros(num_envs, dtype=bool)
         bootstrap_done_flags = np.zeros(num_envs, dtype=bool)
@@ -352,7 +421,7 @@ def train(args: argparse.Namespace) -> Path:
         for idx in range(num_envs):
             task_return[idx] += float(rewards[idx])
             task_steps[idx] += 1
-            task_cost[idx] += float(
+            step_cost = float(
                 _paper_step_cost(
                     env.envs[idx],
                     pre_infos[idx],
@@ -361,7 +430,10 @@ def train(args: argparse.Namespace) -> Path:
                     auto_before=bool(current_task_auto[idx]),
                 )
             )
+            step_paper_costs[idx] = step_cost
+            task_cost[idx] += step_cost
             steps_since_reset[idx] += 1
+            invalid_flags[idx] = 1.0 if _is_invalid_action(pre_infos[idx], next_infos[idx], int(actions[idx])) else 0.0
             if bool(task_done[idx]):
                 tasks_since_reset[idx] += 1
                 env_tasks_since_reset[idx] += 1
@@ -376,6 +448,14 @@ def train(args: argparse.Namespace) -> Path:
                 bootstrap_done_flags[idx] = True
             elif episode_done_flags[idx] and bool(success[idx]):
                 bootstrap_done_flags[idx] = True
+
+        recent_step_rewards.append(float(np.mean(rewards)))
+        recent_step_costs.append(float(np.mean(step_paper_costs)))
+        recent_invalid.append(float(np.mean(invalid_flags)))
+        recent_horizon.append(float(np.mean(horizon)))
+        recent_random.append(float(np.mean(random_mask)))
+        total_invalid_actions += int(np.sum(invalid_flags))
+        total_action_steps += int(num_envs)
 
         for idx in range(num_envs):
             replay.add(
@@ -423,8 +503,17 @@ def train(args: argparse.Namespace) -> Path:
                 was_success = bool(success[idx])
                 if was_success:
                     tasks_completed += 1
+                if bool(horizon[idx]):
+                    total_horizon_tasks += 1
                 pos = int(tasks_since_reset[idx] - 1)
                 snapshot = pre_infos[idx]
+                if tb_writer is not None and args.tb_task_interval > 0 and total_tasks % args.tb_task_interval == 0:
+                    tb_writer.add_scalar("task/return", float(task_return[idx]), total_tasks)
+                    tb_writer.add_scalar("task/steps", float(task_steps[idx]), total_tasks)
+                    tb_writer.add_scalar("task/paper_cost", float(task_cost[idx]), total_tasks)
+                    tb_writer.add_scalar("task/success", 1.0 if was_success else 0.0, total_tasks)
+                    tb_writer.add_scalar("task/horizon", 1.0 if horizon[idx] else 0.0, total_tasks)
+                    tb_writer.add_scalar("task/auto_satisfied", 1.0 if current_task_auto[idx] else 0.0, total_tasks)
                 task_records.append(
                     {
                         "task_number": total_tasks,
@@ -442,6 +531,7 @@ def train(args: argparse.Namespace) -> Path:
                 return_history.append(float(task_return[idx]))
                 cost_history.append(float(task_cost[idx]))
                 task_length_history.append(int(task_steps[idx]))
+                recent_task_steps.append(int(task_steps[idx]))
                 recent_returns.append(float(task_return[idx]))
                 recent_success.append(1 if was_success else 0)
                 recent_costs.append(float(task_cost[idx]))
@@ -484,6 +574,29 @@ def train(args: argparse.Namespace) -> Path:
             loss=f"{avg_loss:.3f}" if loss_history else "n/a",
             tasks=tasks_completed,
         )
+        if tb_writer is not None and args.tb_log_interval > 0 and global_step % args.tb_log_interval == 0:
+            q_mean = float(q_values.mean().item()) if "q_values" in locals() else 0.0
+            q_min = float(q_values.min().item()) if "q_values" in locals() else 0.0
+            q_max = float(q_values.max().item()) if "q_values" in locals() else 0.0
+            q_std = float(q_values.std().item()) if "q_values" in locals() else 0.0
+            tb_writer.add_scalar("train/epsilon", float(epsilon), global_step)
+            tb_writer.add_scalar("train/loss", float(avg_loss), global_step)
+            tb_writer.add_scalar("train/replay_size", float(len(replay)), global_step)
+            tb_writer.add_scalar("train/reward_step", float(np.mean(recent_step_rewards)) if recent_step_rewards else 0.0, global_step)
+            tb_writer.add_scalar("train/paper_cost_step", float(np.mean(recent_step_costs)) if recent_step_costs else 0.0, global_step)
+            tb_writer.add_scalar("train/invalid_action_rate", float(np.mean(recent_invalid)) if recent_invalid else 0.0, global_step)
+            tb_writer.add_scalar("train/horizon_rate", float(np.mean(recent_horizon)) if recent_horizon else 0.0, global_step)
+            tb_writer.add_scalar("train/random_action_rate", float(np.mean(recent_random)) if recent_random else 0.0, global_step)
+            tb_writer.add_scalar("train/success_rate", float(avg_success), global_step)
+            tb_writer.add_scalar("train/auto_rate", float(avg_auto), global_step)
+            tb_writer.add_scalar("train/avg_task_return", float(avg_return), global_step)
+            tb_writer.add_scalar("train/avg_task_cost", float(avg_cost), global_step)
+            tb_writer.add_scalar("train/avg_task_steps", float(np.mean(recent_task_steps)) if recent_task_steps else 0.0, global_step)
+            tb_writer.add_scalar("train/q_mean", q_mean, global_step)
+            tb_writer.add_scalar("train/q_min", q_min, global_step)
+            tb_writer.add_scalar("train/q_max", q_max, global_step)
+            tb_writer.add_scalar("train/q_std", q_std, global_step)
+            tb_writer.add_scalar("train/tasks_completed", float(tasks_completed), global_step)
         if args.log_rss_every > 0 and global_step % args.log_rss_every == 0:
             print(
                 f"[mem] step={global_step} rss_gb={_rss_gb():.2f} "
@@ -492,6 +605,9 @@ def train(args: argparse.Namespace) -> Path:
             )
 
     progress.close()
+    if tb_writer is not None:
+        tb_writer.flush()
+        tb_writer.close()
     torch.save(q_net.state_dict(), output_path)
     print(f"Saved DQN weights to {output_path}")
 
@@ -517,6 +633,8 @@ def train(args: argparse.Namespace) -> Path:
         "tasks_attempted": int(total_tasks),
         "tasks_completed": int(tasks_completed),
         "success_rate": float(tasks_completed / max(1, total_tasks)),
+        "invalid_action_rate": float(total_invalid_actions / max(1, total_action_steps)),
+        "horizon_rate": float(total_horizon_tasks / max(1, total_tasks)),
         "avg_task_return": float(np.mean(return_history)) if return_history else 0.0,
         "avg_task_steps": float(np.mean(task_length_history)) if task_length_history else 0.0,
         "avg_task_cost": float(np.mean(cost_history)) if cost_history else 0.0,
@@ -583,6 +701,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tasks-per-reset", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--env-reset-tasks", type=int, default=None)
     parser.add_argument("--episode-step-limit", type=int, default=0)
+    parser.add_argument("--tb-log-dir", type=Path, default=None)
+    parser.add_argument("--tb-log-interval", type=int, default=1000)
+    parser.add_argument("--tb-task-interval", type=int, default=1)
+    parser.add_argument("--tb-step-window", type=int, default=1000)
+    parser.add_argument("--tb-task-window", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output", type=Path, default=Path("paper1_blockworld_image_dqn.pt"))

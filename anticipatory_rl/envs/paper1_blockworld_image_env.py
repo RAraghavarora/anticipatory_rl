@@ -180,11 +180,37 @@ class WorldConfig:
     def region_cells(self) -> Tuple[Coord, ...]:
         return tuple(coord for tiles in self.region_tiles.values() for coord in tiles)
 
+    @property
+    def all_cells(self) -> Tuple[Coord, ...]:
+        return tuple(
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+        )
+
+    @property
+    def manipulation_cells(self) -> Tuple[Coord, ...]:
+        cells = set()
+        for tile in self.region_cells:
+            for neighbor in self.neighbors(tile):
+                cells.add(neighbor)
+        return tuple(sorted(cells))
+
     def region_for_coord(self, coord: Coord) -> str | None:
         for region, coords in self.region_tiles.items():
             if coord in coords:
                 return region
         return None
+
+    def neighbors(self, coord: Coord) -> Tuple[Coord, ...]:
+        x, y = coord
+        neighbors: List[Coord] = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx = x + dx
+            ny = y + dy
+            if 0 <= nx < self.width and 0 <= ny < self.height:
+                neighbors.append((nx, ny))
+        return tuple(neighbors)
 
     def block_color(self, block: str) -> str:
         return self.block_color_map[block]

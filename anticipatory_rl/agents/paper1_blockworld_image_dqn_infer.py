@@ -15,9 +15,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from anticipatory_rl.agents.paper1_blockworld_image_dqn import ConvQNetwork
-from anticipatory_rl.envs.paper1_blockworld_image_env import Paper1BlockworldImageEnv, Task
+from anticipatory_rl.envs.paper1_blockworld_image_env import (
+    Paper1BlockworldImageEnv,
+    Task,
+    WorldState,
+)
+from paper1_blockworld.motion import LazyPRMMotionPlanner
 
 
 def _select_device() -> torch.device:
@@ -75,6 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-penalty", type=float, default=1.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=5.0)
     parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
+    parser.add_argument("--tb-log-dir", type=Path, default=None)
     parser.add_argument("--render-tile-px", type=int, default=24)
     parser.add_argument("--render-margin-px", type=int, default=None)
     parser.add_argument(
@@ -146,18 +153,45 @@ def _paper_step_cost(
         Paper1BlockworldImageEnv.MOVE_LEFT,
         Paper1BlockworldImageEnv.MOVE_RIGHT,
     }:
-        return float(
-            env.config.move_cost
-            if tuple(pre_info["robot"]) != tuple(post_info["robot"])
-            else env.invalid_action_penalty
-        )
+        moved = tuple(pre_info["robot"]) != tuple(post_info["robot"])
+        if not moved:
+            return 0.0
+        return float(_prm_move_cost(env, pre_info, post_info))
     if action == Paper1BlockworldImageEnv.PICK:
         picked = pre_info.get("holding") is None and post_info.get("holding") is not None
-        return float(env.config.pick_cost if picked else env.invalid_action_penalty)
+        return float(env.config.pick_cost if picked else 0.0)
     if action == Paper1BlockworldImageEnv.PLACE:
         placed = pre_info.get("holding") is not None and post_info.get("holding") is None
-        return float(env.config.place_cost if placed else env.invalid_action_penalty)
+        return float(env.config.place_cost if placed else 0.0)
     return 0.0
+
+
+def _prm_move_cost(
+    env: Paper1BlockworldImageEnv,
+    pre_info: Dict[str, Any],
+    post_info: Dict[str, Any],
+) -> int:
+    start = tuple(pre_info["robot"])
+    goal = tuple(post_info["robot"])
+    if start == goal:
+        return 0
+    placements = {
+        str(block): tuple(coord)
+        for block, coord in dict(pre_info.get("placements", {})).items()
+    }
+    holding = pre_info.get("holding")
+    signature = (holding, tuple(sorted(placements.items())))
+    cache = getattr(env, "_paper_prm_cache", None)
+    if cache is None or cache.get("signature") != signature:
+        state = WorldState(robot=start, placements=placements, holding=holding)
+        planner = LazyPRMMotionPlanner(env.config, state)
+        cache = {"signature": signature, "planner": planner}
+        setattr(env, "_paper_prm_cache", cache)
+    planner = cache["planner"]
+    path = planner.shortest_path(start, goal)
+    if path is None:
+        return int(env.config.move_cost)
+    return int(path.cost)
 
 
 def _summarize_task_index_metrics(task_records: List[Dict[str, Any]], sequence_len: int) -> Dict[str, Dict[str, float]]:
@@ -247,6 +281,13 @@ def evaluate(
     device: torch.device,
     output_dir: Path,
 ) -> Dict[str, Any]:
+    tb_writer = None
+    if args.tb_log_dir is not None:
+        tb_log_dir = args.tb_log_dir / run_label
+    else:
+        tb_log_dir = output_dir / "tb"
+    tb_log_dir.mkdir(parents=True, exist_ok=True)
+    tb_writer = SummaryWriter(log_dir=str(tb_log_dir))
     env = make_env(args)
     model = _load_model(state_path, args, device)
     action_gen = torch.Generator(device="cpu")
@@ -256,6 +297,7 @@ def evaluate(
     total_steps = 0
     total_tasks = 0
     successes = 0
+    horizon_tasks = 0
     task_return = 0.0
     task_steps = 0
     task_cost = 0.0
@@ -305,6 +347,8 @@ def evaluate(
                     progress.update(1)
                     if success:
                         successes += 1
+                    if horizon:
+                        horizon_tasks += 1
                     task_records.append(
                         {
                             "task_number": total_tasks,
@@ -345,12 +389,30 @@ def evaluate(
         "avg_task_cost": float(np.mean([row["paper_cost"] for row in task_records])) if task_records else 0.0,
         "avg_total_sequence_cost": float(np.mean(sequence_costs)) if sequence_costs else 0.0,
         "auto_rate": float(np.mean([1.0 if row["auto_satisfied"] else 0.0 for row in task_records])) if task_records else 0.0,
+        "horizon_rate": float(horizon_tasks / max(1, total_tasks)),
         "reward_per_step": float(total_reward / max(1, total_steps)),
         "discounted_return": float(discounted_return),
         "total_steps": int(total_steps),
         "num_sequences_completed": int(sequence_count),
         **task_index_metrics,
     }
+    if tb_writer is not None:
+        step = int(total_tasks)
+        tb_writer.add_scalar("eval/success_rate", stats["success_rate"], step)
+        tb_writer.add_scalar("eval/avg_task_steps", stats["avg_task_steps"], step)
+        tb_writer.add_scalar("eval/avg_task_return", stats["avg_task_return"], step)
+        tb_writer.add_scalar("eval/avg_task_cost", stats["avg_task_cost"], step)
+        tb_writer.add_scalar("eval/avg_total_sequence_cost", stats["avg_total_sequence_cost"], step)
+        tb_writer.add_scalar("eval/auto_rate", stats["auto_rate"], step)
+        tb_writer.add_scalar("eval/horizon_rate", stats["horizon_rate"], step)
+        tb_writer.add_scalar("eval/reward_per_step", stats["reward_per_step"], step)
+        tb_writer.add_scalar("eval/discounted_return", stats["discounted_return"], step)
+        for idx, value in stats["cost_by_task_index"].items():
+            tb_writer.add_scalar(f"eval/cost_by_task_index/{idx}", value, step)
+        for idx, value in stats["auto_rate_by_task_index"].items():
+            tb_writer.add_scalar(f"eval/auto_rate_by_task_index/{idx}", value, step)
+        tb_writer.flush()
+        tb_writer.close()
     report = {
         "run_label": run_label,
         "checkpoint": str(state_path),
