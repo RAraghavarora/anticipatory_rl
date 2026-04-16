@@ -17,8 +17,7 @@ import torch
 from tqdm import tqdm
 
 from anticipatory_rl.agents.paper1_blockworld_image_dqn import ConvQNetwork
-from anticipatory_rl.envs.paper1_blockworld_image_env import Paper1BlockworldImageEnv
-from paper1_blockworld.world import Task
+from anticipatory_rl.envs.paper1_blockworld_image_env import Paper1BlockworldImageEnv, Task
 
 
 def _select_device() -> torch.device:

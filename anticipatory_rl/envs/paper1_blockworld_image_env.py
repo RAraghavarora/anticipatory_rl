@@ -4,20 +4,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import random
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from gymnasium import Env, spaces
 
-from paper1_blockworld.world import (
-    Coord,
-    Task,
-    WorldConfig,
-    WorldGenerator,
-    WorldState,
-    region_color,
-)
 
+Coord = Tuple[int, int]
+
+COLORED_REGIONS: Tuple[str, ...] = (
+    "red",
+    "blue",
+    "green",
+    "orange",
+    "teal",
+    "purple",
+    "yellow",
+)
+WHITE_REGIONS: Tuple[str, ...] = (
+    "white_1",
+    "white_2",
+    "white_3",
+)
+BLOCK_NAMES: Tuple[str, ...] = ("a", "b", "c", "d", "e", "f", "g", "h")
+COLORED_BLOCK_COLORS: Tuple[str, ...] = (
+    "red",
+    "blue",
+    "green",
+    "orange",
+    "teal",
+)
 
 BACKGROUND_RGB = (236, 236, 236)
 GRID_RGB = (215, 215, 215)
@@ -29,12 +45,294 @@ COLOR_RGB: Dict[str, Tuple[int, int, int]] = {
     "red": (220, 70, 70),
     "blue": (70, 110, 220),
     "green": (80, 180, 90),
+    "orange": (235, 145, 60),
+    "teal": (45, 160, 175),
+    "purple": (155, 90, 210),
+    "yellow": (235, 200, 70),
     "cyan": (80, 200, 205),
     "pink": (225, 80, 195),
-    "orange": (235, 145, 60),
     "brown": (160, 95, 55),
     "white": (250, 250, 250),
 }
+
+DEFAULT_REGION_ANCHORS: Tuple[Coord, ...] = (
+    (0, 0),
+    (2, 0),
+    (4, 0),
+    (6, 0),
+    (8, 0),
+    (0, 2),
+    (2, 2),
+    (4, 2),
+    (6, 2),
+    (8, 2),
+)
+
+
+def region_color(region: str) -> str:
+    if region.startswith("white"):
+        return "white"
+    return region
+
+
+@dataclass(frozen=True)
+class Task:
+    assignments: Tuple[Tuple[str, str], ...]
+
+    @property
+    def blocks(self) -> Tuple[str, ...]:
+        return tuple(block for block, _ in self.assignments)
+
+    @property
+    def target_regions(self) -> Tuple[str, ...]:
+        return tuple(region for _, region in self.assignments)
+
+
+@dataclass(frozen=True)
+class WorldConfig:
+    width: int = 10
+    height: int = 10
+    region_size: int = 2
+    move_cost: int = 25
+    pick_cost: int = 100
+    place_cost: int = 100
+    region_layout: Tuple[Tuple[str, Coord], ...] | None = None
+    block_colors: Tuple[Tuple[str, str], ...] | None = None
+
+    @property
+    def robot_start(self) -> Coord:
+        return (self.width // 2, self.height // 2)
+
+    @property
+    def all_regions(self) -> Tuple[str, ...]:
+        if self.region_layout is not None:
+            return tuple(region for region, _ in self.region_layout)
+        return COLORED_REGIONS + WHITE_REGIONS
+
+    @property
+    def nonwhite_regions(self) -> Tuple[str, ...]:
+        if self.region_layout is not None:
+            return tuple(region for region in self.all_regions if not region.startswith("white"))
+        return COLORED_REGIONS
+
+    @property
+    def white_regions(self) -> Tuple[str, ...]:
+        if self.region_layout is not None:
+            return tuple(region for region in self.all_regions if region.startswith("white"))
+        return WHITE_REGIONS
+
+    @property
+    def all_blocks(self) -> Tuple[str, ...]:
+        return BLOCK_NAMES
+
+    @property
+    def block_color_map(self) -> Dict[str, str]:
+        if self.block_colors is not None:
+            return dict(self.block_colors)
+        mapping: Dict[str, str] = {}
+        for idx, block in enumerate(BLOCK_NAMES):
+            if idx < len(COLORED_BLOCK_COLORS):
+                mapping[block] = COLORED_BLOCK_COLORS[idx]
+            else:
+                mapping[block] = "white"
+        return mapping
+
+    @property
+    def nonwhite_blocks(self) -> Tuple[str, ...]:
+        return tuple(
+            block
+            for block in BLOCK_NAMES
+            if self.block_color_map[block] != "white"
+        )
+
+    @property
+    def white_blocks(self) -> Tuple[str, ...]:
+        return tuple(
+            block
+            for block in BLOCK_NAMES
+            if self.block_color_map[block] == "white"
+        )
+
+    @property
+    def region_anchors(self) -> Dict[str, Coord]:
+        if self.region_layout is not None:
+            return dict(self.region_layout)
+        return dict(zip(self.all_regions, DEFAULT_REGION_ANCHORS))
+
+    @property
+    def region_coords(self) -> Dict[str, Coord]:
+        return self.region_anchors
+
+    @property
+    def region_tiles(self) -> Dict[str, Tuple[Coord, ...]]:
+        tiles: Dict[str, Tuple[Coord, ...]] = {}
+        for region, anchor in self.region_anchors.items():
+            ax, ay = anchor
+            coords = tuple(
+                (ax + dx, ay + dy)
+                for dx in range(self.region_size)
+                for dy in range(self.region_size)
+            )
+            tiles[region] = coords
+        return tiles
+
+    @property
+    def region_cells(self) -> Tuple[Coord, ...]:
+        return tuple(coord for tiles in self.region_tiles.values() for coord in tiles)
+
+    def region_for_coord(self, coord: Coord) -> str | None:
+        for region, coords in self.region_tiles.items():
+            if coord in coords:
+                return region
+        return None
+
+    def block_color(self, block: str) -> str:
+        return self.block_color_map[block]
+
+    @classmethod
+    def sample(cls, rng: random.Random) -> "WorldConfig":
+        anchors = _sample_region_anchors(
+            rng,
+            width=cls.width,
+            height=cls.height,
+            region_size=cls.region_size,
+            count=len(COLORED_REGIONS) + len(WHITE_REGIONS),
+        )
+        rng.shuffle(anchors)
+        region_layout = tuple(zip(COLORED_REGIONS + WHITE_REGIONS, anchors))
+
+        colored_blocks = set(rng.sample(BLOCK_NAMES, k=len(COLORED_BLOCK_COLORS)))
+        color_pool = list(COLORED_BLOCK_COLORS)
+        rng.shuffle(color_pool)
+        block_colors: List[Tuple[str, str]] = []
+        for block in BLOCK_NAMES:
+            if block in colored_blocks:
+                block_colors.append((block, color_pool.pop()))
+            else:
+                block_colors.append((block, "white"))
+        return cls(
+            region_layout=region_layout,
+            block_colors=tuple(block_colors),
+        )
+
+
+@dataclass
+class WorldState:
+    robot: Coord
+    placements: Dict[str, Coord]
+    holding: str | None = None
+
+    def clone(self) -> "WorldState":
+        return WorldState(
+            robot=self.robot,
+            placements=dict(self.placements),
+            holding=self.holding,
+        )
+
+    def block_at(self, coord: Coord) -> str | None:
+        for block, placement in self.placements.items():
+            if placement == coord:
+                return block
+        return None
+
+    def is_task_satisfied(self, task: Task, config: WorldConfig) -> bool:
+        for block, region in task.assignments:
+            if self.placements.get(block) not in config.region_tiles[region]:
+                return False
+        return self.holding is None
+
+
+class WorldGenerator:
+    def __init__(self, config: WorldConfig | None = None) -> None:
+        self.config = config or WorldConfig()
+
+    def sample_initial_state(self, rng: random.Random) -> WorldState:
+        regions = list(self.config.all_regions)
+        rng.shuffle(regions)
+        placements: Dict[str, Coord] = {}
+        for block, region in zip(self.config.all_blocks, regions):
+            coord = rng.choice(list(self.config.region_tiles[region]))
+            placements[block] = coord
+        free_cells = [
+            (x, y)
+            for y in range(self.config.height)
+            for x in range(self.config.width)
+            if (x, y) not in placements.values()
+        ]
+        return WorldState(
+            robot=rng.choice(free_cells),
+            placements=placements,
+            holding=None,
+        )
+
+    def sample_task_library(
+        self,
+        rng: random.Random,
+        count: int = 20,
+    ) -> List[Task]:
+        chosen: List[Task] = []
+        seen = set()
+        max_attempts = max(200, count * 20)
+        attempts = 0
+        while len(chosen) < count and attempts < max_attempts:
+            attempts += 1
+            task_size = rng.choice((1, 2))
+            blocks = tuple(rng.sample(self.config.nonwhite_blocks, k=task_size))
+            regions = tuple(rng.sample(self.config.nonwhite_regions, k=task_size))
+            task = Task(tuple(zip(blocks, regions)))
+            frozen = tuple(sorted(task.assignments))
+            if frozen in seen:
+                continue
+            seen.add(frozen)
+            chosen.append(task)
+        if len(chosen) != count:
+            raise RuntimeError(
+                f"Unable to sample {count} unique tasks from the current environment."
+            )
+        return chosen
+
+    def sample_task_sequence(
+        self,
+        rng: random.Random,
+        task_library: Sequence[Task],
+        length: int,
+    ) -> List[Task]:
+        return [rng.choice(task_library) for _ in range(length)]
+
+
+def _sample_region_anchors(
+    rng: random.Random,
+    *,
+    width: int,
+    height: int,
+    region_size: int,
+    count: int,
+) -> List[Coord]:
+    anchors = [
+        (x, y)
+        for y in range(height - region_size + 1)
+        for x in range(width - region_size + 1)
+    ]
+    for _ in range(2000):
+        rng.shuffle(anchors)
+        chosen: List[Coord] = []
+        occupied: set[Coord] = set()
+        for anchor in anchors:
+            tiles = set(_tiles_for_anchor(anchor, region_size))
+            if occupied & tiles:
+                continue
+            chosen.append(anchor)
+            occupied |= tiles
+            if len(chosen) == count:
+                return chosen
+    raise RuntimeError("Failed to sample non-overlapping region anchors.")
+
+
+def _tiles_for_anchor(anchor: Coord, region_size: int) -> Iterable[Coord]:
+    ax, ay = anchor
+    for dx in range(region_size):
+        for dy in range(region_size):
+            yield (ax + dx, ay + dy)
 
 
 @dataclass
@@ -176,30 +474,80 @@ class Paper1BlockworldImageEnv(Env):
 
     def _select_config(self, options: Mapping[str, object]) -> WorldConfig:
         override = options.get("world_config")
-        if isinstance(override, WorldConfig):
-            return override
+        coerced = self._coerce_world_config(override)
+        if coerced is not None:
+            return coerced
         if self.procedural_layout:
             return WorldConfig.sample(self._py_rng)
         return self.base_config
 
     def _select_state(self, options: Mapping[str, object]) -> WorldState:
         state_override = options.get("state")
-        if isinstance(state_override, WorldState):
-            state = state_override.clone()
-        else:
+        state = self._coerce_world_state(state_override)
+        if state is None:
             state = self.generator.sample_initial_state(self._py_rng)
         placements_override = options.get("placements")
         if placements_override is not None:
-            state.placements = {
-                str(block): self._validate_coord(tuple(coord))
-                for block, coord in dict(placements_override).items()
-            }
+            placements: Dict[str, Coord] = {}
+            for block, coord in dict(placements_override).items():
+                coord_tuple = self._validate_coord(tuple(coord))
+                placements[str(block)] = coord_tuple
+            self._validate_region_capacity(placements)
+            state.placements = placements
         robot_override = options.get("robot_pos")
         if robot_override is not None:
             state.robot = self._validate_coord(tuple(robot_override))
         holding_override = options.get("holding", state.holding)
         state.holding = None if holding_override is None else str(holding_override)
         return state
+
+    def _coerce_world_config(self, raw_config: object) -> WorldConfig | None:
+        if raw_config is None:
+            return None
+        if isinstance(raw_config, WorldConfig):
+            return raw_config
+        required = {
+            "width",
+            "height",
+            "move_cost",
+            "pick_cost",
+            "place_cost",
+        }
+        if not all(hasattr(raw_config, name) for name in required):
+            return None
+        region_layout = getattr(raw_config, "region_layout", None)
+        if region_layout is None and hasattr(raw_config, "region_coords"):
+            region_layout = tuple(getattr(raw_config, "region_coords").items())
+        block_colors = getattr(raw_config, "block_colors", None)
+        if block_colors is None and hasattr(raw_config, "block_color_map"):
+            block_colors = tuple(getattr(raw_config, "block_color_map").items())
+        region_size = getattr(raw_config, "region_size", 1)
+        return WorldConfig(
+            width=int(getattr(raw_config, "width")),
+            height=int(getattr(raw_config, "height")),
+            region_size=int(region_size),
+            move_cost=int(getattr(raw_config, "move_cost")),
+            pick_cost=int(getattr(raw_config, "pick_cost")),
+            place_cost=int(getattr(raw_config, "place_cost")),
+            region_layout=tuple(region_layout) if region_layout is not None else None,
+            block_colors=tuple(block_colors) if block_colors is not None else None,
+        )
+
+    def _coerce_world_state(self, raw_state: object) -> WorldState | None:
+        if raw_state is None:
+            return None
+        if isinstance(raw_state, WorldState):
+            return raw_state.clone()
+        if not all(hasattr(raw_state, name) for name in ("robot", "placements", "holding")):
+            return None
+        placements = dict(getattr(raw_state, "placements"))
+        robot = tuple(getattr(raw_state, "robot"))
+        holding = getattr(raw_state, "holding")
+        return WorldState(
+            robot=self._validate_coord(robot),
+            placements={str(block): tuple(coord) for block, coord in placements.items()},
+            holding=None if holding is None else str(holding),
+        )
 
     def _select_task_library(self, options: Mapping[str, object]) -> List[Task]:
         library_override = options.get("task_library")
@@ -222,17 +570,25 @@ class Paper1BlockworldImageEnv(Env):
     def _coerce_task(self, raw_task: object) -> Task:
         if isinstance(raw_task, Task):
             return raw_task
-        if isinstance(raw_task, Sequence):
-            assignments: List[Tuple[str, str]] = []
-            for item in raw_task:
-                if not isinstance(item, Sequence) or len(item) != 2:
-                    raise ValueError(f"Invalid task assignment: {item!r}")
-                block, region = item
-                assignments.append((str(block), str(region)))
-            if not assignments:
-                raise ValueError("Task override must contain at least one assignment.")
+        assignments = self._extract_assignments(raw_task)
+        if assignments is not None:
             return Task(tuple(assignments))
         raise TypeError(f"Unsupported task representation: {type(raw_task)!r}")
+
+    def _extract_assignments(self, raw_task: object) -> List[Tuple[str, str]] | None:
+        if hasattr(raw_task, "assignments"):
+            raw_task = getattr(raw_task, "assignments")
+        if not isinstance(raw_task, Sequence):
+            return None
+        assignments: List[Tuple[str, str]] = []
+        for item in raw_task:
+            if not isinstance(item, Sequence) or len(item) != 2:
+                raise ValueError(f"Invalid task assignment: {item!r}")
+            block, region = item
+            assignments.append((str(block), str(region)))
+        if not assignments:
+            raise ValueError("Task override must contain at least one assignment.")
+        return assignments
 
     def _validate_coord(self, coord: Sequence[int]) -> Coord:
         x, y = int(coord[0]), int(coord[1])
@@ -265,11 +621,8 @@ class Paper1BlockworldImageEnv(Env):
     def _handle_place(self) -> bool:
         if self.state.holding is None:
             return False
-        target_coords = self._adjacent_empty_regions()
-        if len(target_coords) != 1:
-            return False
-        coord = target_coords[0]
-        if not self._coord_is_region(coord):
+        coord = self._adjacent_place_coord()
+        if coord is None:
             return False
         block = self.state.holding
         self.state.placements[block] = coord
@@ -320,10 +673,17 @@ class Paper1BlockworldImageEnv(Env):
         rx1 = min(width, cx + robot_half)
         ry1 = min(height, cy + robot_half)
         robot_rgb = self._rgb_triplet(ROBOT_RGB)
-        obs[0, ry0:ry1, rx0:rx1] = robot_rgb[0]
-        obs[1, ry0:ry1, rx0:rx1] = robot_rgb[1]
-        obs[2, ry0:ry1, rx0:rx1] = robot_rgb[2]
-        self._draw_outline(obs[:3], rx0, ry0, rx1, ry1, self._rgb_triplet(ROBOT_OUTLINE_RGB))
+        height_px = max(1, ry1 - ry0)
+        for y in range(ry0, ry1):
+            frac = (y - ry0 + 1) / height_px
+            half_width = max(1, int(frac * (rx1 - rx0) / 2))
+            x0 = max(0, cx - half_width)
+            x1 = min(width, cx + half_width)
+            if x1 <= x0:
+                continue
+            obs[0, y, x0:x1] = robot_rgb[0]
+            obs[1, y, x0:x1] = robot_rgb[1]
+            obs[2, y, x0:x1] = robot_rgb[2]
 
         if self.state.holding is not None:
             held_rgb = self._rgb_triplet(self.config.block_color(self.state.holding))
@@ -347,7 +707,7 @@ class Paper1BlockworldImageEnv(Env):
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
         can_pick = self.state.holding is None and len(self._adjacent_blocks()) == 1
-        can_place = self.state.holding is not None and len(self._adjacent_empty_regions()) == 1
+        can_place = self._adjacent_place_coord() is not None
         info = BlockworldInfo(
             robot=self.state.robot,
             placements=dict(self.state.placements),
@@ -379,7 +739,7 @@ class Paper1BlockworldImageEnv(Env):
                 blocks.append(block)
         return blocks
 
-    def _adjacent_empty_regions(self) -> List[Coord]:
+    def _adjacent_region_tiles(self) -> List[Coord]:
         coords: List[Coord] = []
         for coord in self._adjacent_coords():
             if not self._coord_is_region(coord):
@@ -388,6 +748,38 @@ class Paper1BlockworldImageEnv(Env):
                 continue
             coords.append(coord)
         return coords
+
+    def _adjacent_place_coord(self) -> Coord | None:
+        if self.state.holding is None:
+            return None
+        tiles = self._adjacent_region_tiles()
+        if not tiles:
+            return None
+        regions = {self.config.region_for_coord(coord) for coord in tiles}
+        regions.discard(None)
+        if len(regions) != 1:
+            return None
+        region = next(iter(regions))
+        if self._region_occupied(region):
+            return None
+        return min(tiles)
+
+    def _region_occupied(self, region: str, *, placements: Mapping[str, Coord] | None = None) -> bool:
+        placements = placements or self.state.placements
+        region_tiles = set(self.config.region_tiles[region])
+        return any(coord in region_tiles for coord in placements.values())
+
+    def _validate_region_capacity(self, placements: Mapping[str, Coord]) -> None:
+        seen: Dict[str, str] = {}
+        for block, coord in placements.items():
+            region = self.config.region_for_coord(coord)
+            if region is None:
+                continue
+            if region in seen:
+                raise ValueError(
+                    f"Region {region} already occupied by {seen[region]} when placing {block}."
+                )
+            seen[region] = block
 
     def _tile_bounds(self, coord: Coord) -> Tuple[int, int, int, int]:
         x, y = coord
@@ -408,9 +800,9 @@ class Paper1BlockworldImageEnv(Env):
         mask[y0:y1, x0:x1] = 1.0
 
     def _fill_target_region_mask(self, mask: np.ndarray, region: str) -> None:
-        coord = self.config.region_coords[region]
-        x0, y0, x1, y1 = self._tile_bounds(coord)
-        mask[y0:y1, x0:x1] = 1.0
+        for coord in self.config.region_tiles[region]:
+            x0, y0, x1, y1 = self._tile_bounds(coord)
+            mask[y0:y1, x0:x1] = 1.0
 
     def _rebuild_static_canvas(self) -> None:
         rgb = self._rgb_canvas
@@ -428,13 +820,16 @@ class Paper1BlockworldImageEnv(Env):
         rgb[1, y0:y1, x0:x1] = grid_rgb[1]
         rgb[2, y0:y1, x0:x1] = grid_rgb[2]
 
-        for region_name, coord in self.config.region_coords.items():
-            rx0, ry0, rx1, ry1 = self._tile_bounds(coord)
+        for region_name, coords in self.config.region_tiles.items():
             region_rgb = self._rgb_triplet(COLOR_RGB[region_color(region_name)])
-            rgb[0, ry0:ry1, rx0:rx1] = region_rgb[0]
-            rgb[1, ry0:ry1, rx0:rx1] = region_rgb[1]
-            rgb[2, ry0:ry1, rx0:rx1] = region_rgb[2]
-            self._draw_outline(rgb, rx0, ry0, rx1, ry1, self._rgb_triplet(BLOCK_OUTLINE_RGB))
+            for coord in coords:
+                rx0, ry0, rx1, ry1 = self._tile_bounds(coord)
+                rgb[0, ry0:ry1, rx0:rx1] = region_rgb[0]
+                rgb[1, ry0:ry1, rx0:rx1] = region_rgb[1]
+                rgb[2, ry0:ry1, rx0:rx1] = region_rgb[2]
+            for coord in coords:
+                rx0, ry0, rx1, ry1 = self._tile_bounds(coord)
+                self._draw_outline(rgb, rx0, ry0, rx1, ry1, self._rgb_triplet(BLOCK_OUTLINE_RGB))
 
     @staticmethod
     def _rgb_triplet(rgb: Tuple[int, int, int] | str) -> Tuple[float, float, float]:
