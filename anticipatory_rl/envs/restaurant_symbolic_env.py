@@ -74,7 +74,6 @@ TASK_TYPE_INDEX = {name: idx for idx, name in enumerate(TASK_TYPES)}
 def _default_objects() -> Tuple[Tuple[str, str], ...]:
     return (
         ("mug_red", "mug"),
-        ("mug_blue", "mug"),
         ("glass_tall", "glass"),
         ("glass_short", "glass"),
         ("bowl_small", "bowl"),

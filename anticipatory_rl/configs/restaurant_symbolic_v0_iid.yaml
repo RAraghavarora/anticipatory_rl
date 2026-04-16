@@ -1,0 +1,53 @@
+object_specs:
+  - name: mug_red
+    kind: mug
+  - name: glass_tall
+    kind: glass
+  - name: glass_short
+    kind: glass
+  - name: bowl_small
+    kind: bowl
+  - name: bowl_large
+    kind: bowl
+
+task_distribution:
+  serve_water: 0.35
+  make_coffee: 0.25
+  serve_fruit_bowl: 0.15
+  clear_containers: 0.15
+  wash_objects: 0.10
+
+service_location_distribution:
+  pass_counter: 0.34
+  table_left: 0.33
+  table_right: 0.33
+
+wash_kind_distribution:
+  mug: 0.40
+  glass: 0.30
+  bowl: 0.30
+
+reset_location_distribution:
+  mug:
+    kitchen_counter: 0.40
+    dish_rack: 0.25
+    sink: 0.05
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
+  glass:
+    kitchen_counter: 0.15
+    dish_rack: 0.45
+    sink: 0.05
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
+    bus_tub: 0.05
+  bowl:
+    kitchen_counter: 0.20
+    dish_rack: 0.35
+    sink: 0.05
+    fruit_station: 0.10
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
