@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence, Tuple
 import random
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 Coord = Tuple[int, int]
+Point = Tuple[float, float]
 
 
 COLORED_REGIONS: Tuple[str, ...] = (
@@ -23,6 +24,55 @@ WHITE_REGIONS: Tuple[str, ...] = (
     "white_3",
 )
 BLOCK_NAMES: Tuple[str, ...] = ("a", "b", "c", "d", "e", "f", "g", "h")
+DEFAULT_REGION_ANCHORS: Tuple[Coord, ...] = (
+    (0, 0),
+    (3, 0),
+    (6, 0),
+    (8, 1),
+    (0, 3),
+    (3, 4),
+    (7, 4),
+    (0, 7),
+    (4, 8),
+    (8, 7),
+)
+
+
+def _tiles_for_anchor(anchor: Coord, region_size: int) -> Tuple[Coord, ...]:
+    ax, ay = anchor
+    return tuple(
+        (ax + dx, ay + dy)
+        for dy in range(region_size)
+        for dx in range(region_size)
+    )
+
+
+def _sample_region_anchors(
+    rng: random.Random,
+    *,
+    width: int,
+    height: int,
+    region_size: int,
+    count: int,
+) -> List[Coord]:
+    anchors = [
+        (x, y)
+        for y in range(height - region_size + 1)
+        for x in range(width - region_size + 1)
+    ]
+    for _ in range(4000):
+        rng.shuffle(anchors)
+        chosen: List[Coord] = []
+        occupied: set[Coord] = set()
+        for anchor in anchors:
+            tiles = set(_tiles_for_anchor(anchor, region_size))
+            if occupied & tiles:
+                continue
+            chosen.append(anchor)
+            occupied |= tiles
+            if len(chosen) == count:
+                return chosen
+    raise RuntimeError("Failed to sample non-overlapping region anchors.")
 
 
 @dataclass(frozen=True)
@@ -37,25 +87,28 @@ class Task:
     def target_regions(self) -> Tuple[str, ...]:
         return tuple(region for _, region in self.assignments)
 
-    def goal_positions(self, config: "WorldConfig") -> Dict[str, Coord]:
+    def goal_regions(self) -> Dict[str, str]:
+        return dict(self.assignments)
+
+    def goal_tiles(self, config: "WorldConfig") -> Dict[str, Tuple[Coord, ...]]:
         return {
-            block: config.region_coords[region]
+            block: config.region_tiles[region]
             for block, region in self.assignments
         }
 
     def describe(self) -> str:
-        parts = [f"{block}->{region}" for block, region in self.assignments]
-        return ", ".join(parts)
+        return ", ".join(f"{block}->{region}" for block, region in self.assignments)
 
 
 @dataclass(frozen=True)
 class WorldConfig:
-    '''
-    2D Blocksworld configuration.
-    '''
-    
-    width: int = 7
-    height: int = 7
+    """
+    Planner/training-side 2D Blockworld with geometric regions.
+    """
+
+    width: int = 10
+    height: int = 10
+    region_size: int = 2
     move_cost: int = 25
     pick_cost: int = 100
     place_cost: int = 100
@@ -67,58 +120,31 @@ class WorldConfig:
         return (self.width // 2, self.height // 2)
 
     @property
-    def region_coords(self) -> Dict[str, Coord]:
+    def all_regions(self) -> Tuple[str, ...]:
         if self.region_layout is not None:
-            return dict(self.region_layout)
-        return {
-            "red": (1, 1),
-            "blue": (3, 1),
-            "green": (5, 1),
-            "cyan": (1, 3),
-            "pink": (3, 3),
-            "orange": (5, 3),
-            "brown": (1, 5),
-            "white_1": (3, 5),
-            "white_2": (5, 5),
-            "white_3": (5, 6),
-        }
+            return tuple(region for region, _ in self.region_layout)
+        return COLORED_REGIONS + WHITE_REGIONS
 
-    @classmethod
-    def sample(cls, rng: random.Random) -> "WorldConfig":
-        slots = [(x, y) for y in range(cls.height) for x in range(cls.width)]
-        chosen = rng.sample(slots, k=len(COLORED_REGIONS) + len(WHITE_REGIONS))
-        region_names = list(COLORED_REGIONS + WHITE_REGIONS)
-        rng.shuffle(region_names)
-        layout = tuple(sorted(zip(region_names, chosen)))
+    @property
+    def nonwhite_regions(self) -> Tuple[str, ...]:
+        return tuple(region for region in self.all_regions if not region.startswith("white"))
 
-        colored_blocks = set(rng.sample(BLOCK_NAMES, k=5))
-        color_pool = rng.sample(COLORED_REGIONS, k=len(colored_blocks))
-        block_colors = []
-        for block in BLOCK_NAMES:
-            if block in colored_blocks:
-                color = color_pool.pop()
-            else:
-                color = "white"
-            block_colors.append((block, color))
-        return cls(
-            region_layout=layout,
-            block_colors=tuple(block_colors),
-        )
+    @property
+    def white_regions(self) -> Tuple[str, ...]:
+        return tuple(region for region in self.all_regions if region.startswith("white"))
+
+    @property
+    def all_blocks(self) -> Tuple[str, ...]:
+        return BLOCK_NAMES
 
     @property
     def block_color_map(self) -> Dict[str, str]:
         if self.block_colors is not None:
             return dict(self.block_colors)
-        return {
-            "a": "red",
-            "b": "blue",
-            "c": "green",
-            "d": "cyan",
-            "e": "pink",
-            "f": "white",
-            "g": "white",
-            "h": "white",
-        }
+        mapping: Dict[str, str] = {}
+        for idx, block in enumerate(BLOCK_NAMES):
+            mapping[block] = COLORED_REGIONS[idx] if idx < 5 else "white"
+        return mapping
 
     @property
     def nonwhite_blocks(self) -> Tuple[str, ...]:
@@ -137,36 +163,123 @@ class WorldConfig:
         )
 
     @property
-    def nonwhite_regions(self) -> Tuple[str, ...]:
-        return COLORED_REGIONS
+    def region_anchors(self) -> Dict[str, Coord]:
+        if self.region_layout is not None:
+            return dict(self.region_layout)
+        return dict(zip(self.all_regions, DEFAULT_REGION_ANCHORS))
 
     @property
-    def white_regions(self) -> Tuple[str, ...]:
-        return WHITE_REGIONS
+    def region_coords(self) -> Dict[str, Coord]:
+        return self.region_anchors
 
     @property
-    def all_blocks(self) -> Tuple[str, ...]:
-        return BLOCK_NAMES
-
-    @property
-    def all_regions(self) -> Tuple[str, ...]:
-        return COLORED_REGIONS + WHITE_REGIONS
+    def region_tiles(self) -> Dict[str, Tuple[Coord, ...]]:
+        return {
+            region: _tiles_for_anchor(anchor, self.region_size)
+            for region, anchor in self.region_anchors.items()
+        }
 
     @property
     def region_cells(self) -> Tuple[Coord, ...]:
-        return tuple(self.region_coords.values())
+        return tuple(coord for tiles in self.region_tiles.values() for coord in tiles)
+
+    @property
+    def floor_cells(self) -> Tuple[Coord, ...]:
+        region_cells = set(self.region_cells)
+        return tuple(
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if (x, y) not in region_cells
+        )
+
+    @property
+    def manipulation_cells(self) -> Tuple[Coord, ...]:
+        region_cells = set(self.region_cells)
+        cells = set()
+        for tile in self.region_cells:
+            for neighbor in self.neighbors(tile):
+                if neighbor not in region_cells:
+                    cells.add(neighbor)
+        return tuple(sorted(cells))
+
+    @classmethod
+    def sample(cls, rng: random.Random) -> "WorldConfig":
+        for _ in range(1000):
+            anchors = _sample_region_anchors(
+                rng,
+                width=cls.width,
+                height=cls.height,
+                region_size=cls.region_size,
+                count=len(COLORED_REGIONS) + len(WHITE_REGIONS),
+            )
+            rng.shuffle(anchors)
+            region_layout = tuple(zip(COLORED_REGIONS + WHITE_REGIONS, anchors))
+
+            colored_blocks = set(rng.sample(BLOCK_NAMES, k=5))
+            color_pool = list(COLORED_REGIONS)
+            rng.shuffle(color_pool)
+            block_colors: List[Tuple[str, str]] = []
+            for block in BLOCK_NAMES:
+                if block in colored_blocks:
+                    block_colors.append((block, color_pool.pop()))
+                else:
+                    block_colors.append((block, "white"))
+            config = cls(
+                region_layout=region_layout,
+                block_colors=tuple(block_colors),
+            )
+            if all(config.placeable_tiles_for_region(region) for region in config.all_regions):
+                return config
+        raise RuntimeError("Failed to sample a region layout with accessible tiles.")
 
     def region_for_coord(self, coord: Coord) -> str | None:
-        for name, region_coord in self.region_coords.items():
-            if region_coord == coord:
-                return name
+        for region, coords in self.region_tiles.items():
+            if coord in coords:
+                return region
         return None
+
+    def region_centroid(self, region: str) -> Point:
+        ax, ay = self.region_anchors[region]
+        offset = (self.region_size - 1) / 2.0
+        return (ax + offset, ay + offset)
+
+    def tiles_for_region(self, region: str) -> Tuple[Coord, ...]:
+        return self.region_tiles[region]
+
+    def access_cells_for_tile(self, coord: Coord) -> Tuple[Coord, ...]:
+        region_cells = set(self.region_cells)
+        return tuple(
+            neighbor
+            for neighbor in self.neighbors(coord)
+            if neighbor not in region_cells
+        )
+
+    def access_cells_for_region(self, region: str) -> Tuple[Coord, ...]:
+        cells = set()
+        for tile in self.region_tiles[region]:
+            cells.update(self.access_cells_for_tile(tile))
+        return tuple(sorted(cells))
+
+    def placeable_tiles_for_region(self, region: str) -> Tuple[Coord, ...]:
+        return tuple(
+            tile
+            for tile in self.region_tiles[region]
+            if self.access_cells_for_tile(tile)
+        )
+
+    def neighbors(self, coord: Coord) -> Tuple[Coord, ...]:
+        x, y = coord
+        neighbors: List[Coord] = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx = x + dx
+            ny = y + dy
+            if 0 <= nx < self.width and 0 <= ny < self.height:
+                neighbors.append((nx, ny))
+        return tuple(neighbors)
 
     def location_name(self, coord: Coord) -> str:
         return f"loc_{coord[0]}_{coord[1]}"
-
-    def region_location(self, region: str) -> str:
-        return self.location_name(self.region_coords[region])
 
     def block_color(self, block: str) -> str:
         return self.block_color_map[block]
@@ -198,18 +311,33 @@ class WorldState:
                 return block
         return None
 
+    def region_of_block(self, block: str, config: WorldConfig) -> str | None:
+        placement = self.placements.get(block)
+        if placement is None:
+            return None
+        return config.region_for_coord(placement)
+
+    def occupied_regions(self, config: WorldConfig) -> Dict[str, str]:
+        occupied: Dict[str, str] = {}
+        for block, coord in self.placements.items():
+            region = config.region_for_coord(coord)
+            if region is None:
+                continue
+            occupied[region] = block
+        return occupied
+
     def is_task_satisfied(self, task: Task, config: WorldConfig) -> bool:
         for block, region in task.assignments:
-            if self.placements.get(block) != config.region_coords[region]:
+            if self.placements.get(block) not in config.region_tiles[region]:
                 return False
         return self.holding is None
 
     def render(self, config: WorldConfig) -> str:
         grid = [["." for _ in range(config.width)] for _ in range(config.height)]
-        for region, coord in config.region_coords.items():
-            x, y = coord
-            token = region[0].upper() if not region.startswith("white") else "W"
-            grid[y][x] = token.lower()
+        for region, tiles in config.region_tiles.items():
+            token = region[0].lower() if not region.startswith("white") else "w"
+            for x, y in tiles:
+                grid[y][x] = token
         for block, coord in self.placements.items():
             x, y = coord
             grid[y][x] = block.upper()
@@ -222,28 +350,27 @@ class WorldState:
 
 
 class WorldGenerator:
-    """
-    Given a config with regions and a task, generate a 2D blockworld state.
-    """
-    
     def __init__(self, config: WorldConfig | None = None) -> None:
         self.config = config or WorldConfig()
 
     def sample_initial_state(self, rng: random.Random) -> WorldState:
-        region_cells = list(self.config.region_cells)
-        rng.shuffle(region_cells)
-        placements = {
-            block: coord
-            for block, coord in zip(self.config.all_blocks, region_cells)
-        }
-        free_cells = [
-            (x, y)
-            for y in range(self.config.height)
-            for x in range(self.config.width)
-            if (x, y) not in placements.values()
+        regions = list(self.config.all_regions)
+        rng.shuffle(regions)
+        placements: Dict[str, Coord] = {}
+        for block, region in zip(self.config.all_blocks, regions):
+            placeable_tiles = self.config.placeable_tiles_for_region(region)
+            if not placeable_tiles:
+                raise RuntimeError(f"Region {region} has no manipulable placement tile.")
+            placements[block] = rng.choice(placeable_tiles)
+        free_floor = [
+            coord
+            for coord in self.config.floor_cells
+            if coord not in placements.values()
         ]
+        if not free_floor:
+            raise RuntimeError("No free floor cell available for robot start.")
         return WorldState(
-            robot=rng.choice(free_cells),
+            robot=rng.choice(free_floor),
             placements=placements,
             holding=None,
         )
@@ -287,25 +414,30 @@ class WorldGenerator:
         state: WorldState,
         task: Task,
     ) -> List[Coord]:
-        cells: List[Coord] = []
-        for name in self.config.white_regions:
-            coord = self.config.region_coords[name]
-            occupant = state.block_at(coord)
+        occupied_regions = state.occupied_regions(self.config)
+        candidate_regions: List[str] = []
+        for region in self.config.white_regions:
+            occupant = occupied_regions.get(region)
             if occupant is None or occupant in task.blocks:
-                cells.append(coord)
+                candidate_regions.append(region)
         for block in task.blocks:
-            cells.append(state.placements[block])
-        deduped: List[Coord] = []
-        seen = set()
-        task_targets = set(task.goal_positions(self.config).values())
-        for cell in cells:
-            if cell in task_targets:
+            region = state.region_of_block(block, self.config)
+            if region is not None:
+                candidate_regions.append(region)
+
+        blocked_goal_regions = set(task.target_regions)
+        cells: List[Coord] = []
+        seen: set[Coord] = set()
+        for region in candidate_regions:
+            if region in blocked_goal_regions:
                 continue
-            if cell in seen:
-                continue
-            seen.add(cell)
-            deduped.append(cell)
-        return deduped
+            for coord in self.config.placeable_tiles_for_region(region):
+                if coord in seen:
+                    continue
+                seen.add(coord)
+                cells.append(coord)
+        return cells
+
 
 def block_color(block: str, config: WorldConfig) -> str:
     return config.block_color(block)

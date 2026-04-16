@@ -155,40 +155,60 @@ class AnticipatoryExperiment:
         task: Task,
         base_result: PlanResult,
     ) -> List[Dict[str, Tuple[int, int]]]:
-        task_goal_positions = task.goal_positions(self.config)
         extra_blocks = [
             block
             for block in base_result.moved_blocks
             if block not in task.blocks
         ]
-        if not extra_blocks:
-            return []
+        goal_regions = task.goal_regions()
+        task_blocks = list(task.blocks)
+        task_tile_options: List[List[Tuple[int, int]]] = []
+        for block in task_blocks:
+            region = goal_regions[block]
+            base_tile = base_result.final_state.placements[block]
+            ordered_tiles = [base_tile]
+            for tile in self.config.placeable_tiles_for_region(region):
+                if tile != base_tile:
+                    ordered_tiles.append(tile)
+            task_tile_options.append(ordered_tiles)
 
-        parking_cells = WorldGenerator(self.config).candidate_parking_cells(state, task)
-        base_extra_positions = [
-            base_result.final_state.placements[block]
-            for block in extra_blocks
-            if block in base_result.final_state.placements
-        ]
-        for cell in base_extra_positions:
-            if cell not in parking_cells and cell not in task_goal_positions.values():
-                parking_cells.append(cell)
+        parking_regions: List[str] = []
+        for coord in WorldGenerator(self.config).candidate_parking_cells(state, task):
+            region = self.config.region_for_coord(coord)
+            if region is not None and region not in parking_regions:
+                parking_regions.append(region)
 
-        if len(parking_cells) < len(extra_blocks):
-            return []
+        if len(parking_regions) < len(extra_blocks):
+            extra_blocks = []
 
         candidates: List[Dict[str, Tuple[int, int]]] = []
         seen = set()
-        for cells in itertools.permutations(parking_cells, len(extra_blocks)):
-            placements = dict(task_goal_positions)
-            placements.update(zip(extra_blocks, cells))
-            frozen = tuple(sorted(placements.items()))
-            if frozen in seen:
-                continue
-            seen.add(frozen)
-            candidates.append(placements)
-            if len(candidates) >= self.candidate_goal_limit:
-                break
+        extra_region_assignments = (
+            itertools.permutations(parking_regions, len(extra_blocks))
+            if extra_blocks
+            else [()]
+        )
+        for task_tiles in itertools.product(*task_tile_options):
+            task_placements = dict(zip(task_blocks, task_tiles))
+            for extra_regions in extra_region_assignments:
+                extra_tile_options = [
+                    self.config.placeable_tiles_for_region(region)
+                    for region in extra_regions
+                ]
+                for extra_tiles in itertools.product(*extra_tile_options):
+                    placements = dict(task_placements)
+                    placements.update(zip(extra_blocks, extra_tiles))
+                    frozen = tuple(sorted(placements.items()))
+                    if frozen in seen:
+                        continue
+                    try:
+                        self.planner._validate_goal_placements(placements)
+                    except ValueError:
+                        continue
+                    seen.add(frozen)
+                    candidates.append(placements)
+                    if len(candidates) >= self.candidate_goal_limit:
+                        return candidates
         return candidates
 
 

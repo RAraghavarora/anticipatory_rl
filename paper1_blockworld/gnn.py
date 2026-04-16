@@ -60,7 +60,7 @@ def encode_state_as_graph(
     def add_one_hot(row: int, offset: int, size: int, index: int) -> None:
         features[row, offset + index] = 1.0
 
-    def set_coord(row: int, coord: tuple[int, int] | None) -> None:
+    def set_coord(row: int, coord: tuple[float, float] | None) -> None:
         if coord is None:
             return
         x, y = coord
@@ -85,7 +85,7 @@ def encode_state_as_graph(
             len(COLORS),
             COLOR_INDEX[region_color(region)],
         )
-        coord = config.region_coords[region]
+        coord = config.region_centroid(region)
         set_coord(node_idx, coord)
         add_edge(env_idx, node_idx)
         add_edge(node_idx, env_idx)
