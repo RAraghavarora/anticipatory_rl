@@ -161,6 +161,12 @@ def _build_environment_examples(
                 target = estimator.estimate(state, task_library)
                 env_targets.append(target)
         except PlanningFailure:
+            print(
+                f"[dataset env {env_idx + 1}/{num_envs}] "
+                f"rejected sampled layout/state on attempt {attempt + 1}/{max_attempts} "
+                f"because the planner found no feasible path or task plan; resampling environment",
+                flush=True,
+            )
             continue
         mean_target = float(mean(env_targets)) if env_targets else 0.0
         return env_idx, config, states, env_targets, mean_target
