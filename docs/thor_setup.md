@@ -15,7 +15,7 @@ The first `Controller` instantiation will download the Unity builds (~500 MB) 
 ## 2. Smoke test (built-in iTHOR scenes)
 
 ```bash
-python test_thor_env.py --scene FloorPlan1 --episodes 2 --max-steps 150
+python scripts/test_thor_env.py --scene FloorPlan1 --episodes 2 --max-steps 150
 ```
 
 The script:
@@ -41,7 +41,7 @@ Stop with `Ctrl+C`.
 If you already have ProcTHOR JSONs on disk (for example under `data/procthor/*.json`), point the demo script to them:
 
 ```bash
-python test_thor_env.py --house-glob 'data/procthor/*.json' --episodes 1
+python scripts/test_thor_env.py --house-glob 'data/procthor/*.json' --episodes 1
 ```
 
 The wrapper automatically deserializes each JSON and calls `controller.reset(scene="Procedural", house=house_json)`.
@@ -82,4 +82,4 @@ Wrap it with the existing `SimpleGridWrapper` (or a similar Gym wrapper) if you 
 * `--width/--height`: control the observation resolution (default 400×300).
 * `--house-json/--house-glob`: use ProcTHOR assets instead of stock iTHOR layouts.
 
-Refer back to `test_thor_env.py` for a complete list of switches.
+Refer back to `scripts/test_thor_env.py` for a complete list of switches.
