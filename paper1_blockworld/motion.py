@@ -20,10 +20,10 @@ class MotionPath:
 
 class LazyPRMMotionPlanner:
     """
-    Small in-repo Lazy PRM over free floor-cell centers.
+    Small in-repo Lazy PRM over unoccupied cell centers.
 
-    Regions and occupied object tiles are obstacles. Interest poses are the
-    current robot cell plus floor cells adjacent to region tiles.
+    Empty region tiles are traversable. Occupied object tiles are obstacles.
+    Interest poses are the current robot cell plus cells adjacent to region tiles.
     """
 
     def __init__(
@@ -36,7 +36,7 @@ class LazyPRMMotionPlanner:
         self.config = config
         self.state = state
         self.k_neighbors = max(4, k_neighbors)
-        self.blocked_tiles = set(config.region_cells) | set(state.placements.values())
+        self.blocked_tiles = set(state.placements.values())
         self.sample_nodes = tuple(sorted(self._build_sample_nodes()))
         self._candidate_edges = self._build_candidate_edges()
         self._edge_validity: Dict[Tuple[Coord, Coord], bool] = {}
@@ -109,7 +109,8 @@ class LazyPRMMotionPlanner:
         return MotionPath(length=best_distance[goal], waypoints=tuple(waypoints))
 
     def _build_sample_nodes(self) -> Iterable[Coord]:
-        traversable = set(self.config.floor_cells)
+        traversable = set(self.config.all_cells)
+        traversable -= self.blocked_tiles
         traversable.discard(self.state.robot)  # added back explicitly to preserve ordering
         yield self.state.robot
         for coord in sorted(traversable):

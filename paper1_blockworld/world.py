@@ -194,20 +194,26 @@ class WorldConfig:
         )
 
     @property
+    def all_cells(self) -> Tuple[Coord, ...]:
+        return tuple(
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+        )
+
+    @property
     def manipulation_cells(self) -> Tuple[Coord, ...]:
-        region_cells = set(self.region_cells)
         cells = set()
         for tile in self.region_cells:
             for neighbor in self.neighbors(tile):
-                if neighbor not in region_cells:
-                    cells.add(neighbor)
+                cells.add(neighbor)
         return tuple(sorted(cells))
 
     def is_floor_connected(self) -> bool:
-        floor_cells = set(self.floor_cells)
-        if not floor_cells:
+        cells = set(self.all_cells)
+        if not cells:
             return False
-        frontier = [next(iter(floor_cells))]
+        frontier = [next(iter(cells))]
         visited: set[Coord] = set()
         while frontier:
             current = frontier.pop()
@@ -215,9 +221,9 @@ class WorldConfig:
                 continue
             visited.add(current)
             for neighbor in self.neighbors(current):
-                if neighbor in floor_cells and neighbor not in visited:
+                if neighbor in cells and neighbor not in visited:
                     frontier.append(neighbor)
-        return visited == floor_cells
+        return visited == cells
 
     @classmethod
     def sample(cls, rng: random.Random) -> "WorldConfig":
@@ -267,11 +273,9 @@ class WorldConfig:
         return self.region_tiles[region]
 
     def access_cells_for_tile(self, coord: Coord) -> Tuple[Coord, ...]:
-        region_cells = set(self.region_cells)
         return tuple(
             neighbor
             for neighbor in self.neighbors(coord)
-            if neighbor not in region_cells
         )
 
     def access_cells_for_region(self, region: str) -> Tuple[Coord, ...]:

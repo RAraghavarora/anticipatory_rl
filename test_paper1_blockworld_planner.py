@@ -82,11 +82,20 @@ def test_prm_scaling_matches_path_length() -> None:
     assert path.cost == 25
 
 
-def test_prm_reports_no_path_across_full_barrier() -> None:
+def test_prm_can_cross_empty_regions() -> None:
     config = make_barrier_config()
     state = WorldState(robot=(2, 9), placements={}, holding=None)
     prm = LazyPRMMotionPlanner(config, state)
-    assert prm.shortest_path((2, 9), (8, 9)) is None
+    path = prm.shortest_path((2, 9), (8, 9))
+    assert path is not None
+    assert path.length > 0.0
+
+
+def test_prm_treats_occupied_object_tile_as_obstacle() -> None:
+    config = WorldConfig()
+    state = WorldState(robot=(2, 2), placements={"a": (2, 3)}, holding=None)
+    prm = LazyPRMMotionPlanner(config, state)
+    assert prm.shortest_path((2, 2), (2, 3)) is None
 
 
 def test_planner_rejects_two_blocks_in_same_region_goal() -> None:
