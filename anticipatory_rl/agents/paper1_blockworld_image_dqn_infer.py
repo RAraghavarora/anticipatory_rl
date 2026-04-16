@@ -57,7 +57,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--myopic-weights", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--num-sequences", type=int, default=100)
-    parser.add_argument("--tasks-per-reset", type=int, default=10)
+    parser.add_argument(
+        "--tasks-per-episode",
+        type=int,
+        default=None,
+        help="Number of tasks per sequence/episode (alias: --tasks-per-reset).",
+    )
+    parser.add_argument("--tasks-per-reset", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--total-steps", type=int, default=50_000)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -260,11 +266,15 @@ def evaluate(
     sequence_costs: List[float] = []
 
     sequence_count = 0
-    progress = tqdm(total=args.num_sequences * args.tasks_per_reset, desc=f"Inference [{run_label}]", unit="task")
+    progress = tqdm(
+        total=args.num_sequences * args.tasks_per_episode,
+        desc=f"Inference [{run_label}]",
+        unit="task",
+    )
     while sequence_count < args.num_sequences and total_steps < args.total_steps:
         reset_seed = args.seed + 100_003 * sequence_count
         obs, info = env.reset(seed=reset_seed)
-        sequence_tasks = [task_rng.choice(env.task_library) for _ in range(args.tasks_per_reset)]
+        sequence_tasks = [task_rng.choice(env.task_library) for _ in range(args.tasks_per_episode)]
         obs, info = _apply_task(env, sequence_tasks[0])
         current_task_auto = bool(info.get("next_auto_satisfied", False))
         sequence_running_cost = 0.0
@@ -325,7 +335,7 @@ def evaluate(
         sequence_count += 1
 
     progress.close()
-    task_index_metrics = _summarize_task_index_metrics(task_records, args.tasks_per_reset)
+    task_index_metrics = _summarize_task_index_metrics(task_records, args.tasks_per_episode)
     stats = {
         "tasks_attempted": int(total_tasks),
         "successes": int(successes),
@@ -377,7 +387,8 @@ def run_compare(args: argparse.Namespace) -> None:
         "action_policy": _action_policy_label(float(args.softmax_temperature)),
         "seed": int(args.seed),
         "num_sequences": int(args.num_sequences),
-        "tasks_per_reset": int(args.tasks_per_reset),
+        "tasks_per_episode": int(args.tasks_per_episode),
+        "tasks_per_reset": int(args.tasks_per_episode),
         "anticipatory": ant_report,
         "myopic": myo_report,
         "delta": {
@@ -416,6 +427,14 @@ def run_single(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.tasks_per_episode is None and args.tasks_per_reset is None:
+        args.tasks_per_episode = 10
+    elif args.tasks_per_episode is None:
+        args.tasks_per_episode = args.tasks_per_reset
+    elif args.tasks_per_reset is not None and args.tasks_per_reset != args.tasks_per_episode:
+        raise ValueError(
+            "--tasks-per-episode and --tasks-per-reset must match when both are provided."
+        )
     if args.compare_mode:
         run_compare(args)
     else:

@@ -147,7 +147,7 @@ def _select_device() -> torch.device:
 def _resolve_run_label(args: argparse.Namespace) -> str:
     if args.run_label is not None:
         return args.run_label
-    return "myopic_blockworld" if args.tasks_per_reset <= 1 else "anticipatory_blockworld"
+    return "myopic_blockworld" if args.tasks_per_episode <= 1 else "anticipatory_blockworld"
 
 
 def _encode_obs_storage(obs: np.ndarray) -> np.ndarray:
@@ -291,7 +291,7 @@ def train(args: argparse.Namespace) -> Path:
 
     env = VectorEnv(make_env, max(1, args.num_envs))
     run_label = _resolve_run_label(args)
-    run_dir = Path("runs") / f"{run_label}_paper1_blockworld_image_dqn_tpr{args.tasks_per_reset}"
+    run_dir = Path("runs") / f"{run_label}_paper1_blockworld_image_dqn_tpe{args.tasks_per_episode}"
     run_dir.mkdir(parents=True, exist_ok=True)
     output_path = run_dir / args.output.name
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
@@ -307,7 +307,7 @@ def train(args: argparse.Namespace) -> Path:
     replay = ReplayBuffer(max(1, args.replay_size), obs_shape)
 
     num_envs = env.num_envs
-    env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
+    env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
     global_step = 0
     steps_since_reset = np.zeros(num_envs, dtype=np.int64)
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
@@ -347,6 +347,7 @@ def train(args: argparse.Namespace) -> Path:
 
         episode_done_flags = np.zeros(num_envs, dtype=bool)
         env_reset_flags = np.zeros(num_envs, dtype=bool)
+        bootstrap_done_flags = np.zeros(num_envs, dtype=bool)
 
         for idx in range(num_envs):
             task_return[idx] += float(rewards[idx])
@@ -364,13 +365,17 @@ def train(args: argparse.Namespace) -> Path:
             if bool(task_done[idx]):
                 tasks_since_reset[idx] += 1
                 env_tasks_since_reset[idx] += 1
-                if args.tasks_per_reset > 0 and tasks_since_reset[idx] >= args.tasks_per_reset:
+                if args.tasks_per_episode > 0 and tasks_since_reset[idx] >= args.tasks_per_episode:
                     episode_done_flags[idx] = True
                 if env_reset_tasks is not None and env_reset_tasks > 0 and env_tasks_since_reset[idx] >= env_reset_tasks:
                     env_reset_flags[idx] = True
                     episode_done_flags[idx] = True
             if args.episode_step_limit > 0 and steps_since_reset[idx] >= args.episode_step_limit:
                 episode_done_flags[idx] = True
+            if env_reset_flags[idx]:
+                bootstrap_done_flags[idx] = True
+            elif episode_done_flags[idx] and bool(success[idx]):
+                bootstrap_done_flags[idx] = True
 
         for idx in range(num_envs):
             replay.add(
@@ -378,7 +383,7 @@ def train(args: argparse.Namespace) -> Path:
                 action=int(actions[idx]),
                 reward=float(rewards[idx]),
                 next_state=_encode_obs_storage(next_obs[idx]),
-                done=bool(episode_done_flags[idx]),
+                done=bool(bootstrap_done_flags[idx]),
                 task_boundary=bool(task_done[idx]),
             )
 
@@ -490,7 +495,7 @@ def train(args: argparse.Namespace) -> Path:
     torch.save(q_net.state_dict(), output_path)
     print(f"Saved DQN weights to {output_path}")
 
-    sequence_len = max(1, int(args.tasks_per_reset))
+    sequence_len = max(1, int(args.tasks_per_episode))
     pos_costs: Dict[int, List[float]] = {idx: [] for idx in range(sequence_len)}
     pos_auto: Dict[int, List[int]] = {idx: [] for idx in range(sequence_len)}
     full_sequence_costs: List[float] = []
@@ -527,7 +532,8 @@ def train(args: argparse.Namespace) -> Path:
             for idx, values in pos_auto.items()
         },
         "seed": int(args.seed),
-        "tasks_per_reset": int(args.tasks_per_reset),
+        "tasks_per_episode": int(args.tasks_per_episode),
+        "tasks_per_reset": int(args.tasks_per_episode),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "num_envs": int(args.num_envs),
     }
@@ -568,7 +574,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Use procedurally sampled region layouts on reset.",
     )
-    parser.add_argument("--tasks-per-reset", type=int, default=10)
+    parser.add_argument(
+        "--tasks-per-episode",
+        type=int,
+        default=None,
+        help="Number of tasks before marking an episode done (alias: --tasks-per-reset).",
+    )
+    parser.add_argument("--tasks-per-reset", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--env-reset-tasks", type=int, default=None)
     parser.add_argument("--episode-step-limit", type=int, default=0)
     parser.add_argument("--seed", type=int, default=0)
@@ -580,6 +592,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.tasks_per_episode is None and args.tasks_per_reset is None:
+        args.tasks_per_episode = 10
+    elif args.tasks_per_episode is None:
+        args.tasks_per_episode = args.tasks_per_reset
+    elif args.tasks_per_reset is not None and args.tasks_per_reset != args.tasks_per_episode:
+        raise ValueError(
+            "--tasks-per-episode and --tasks-per-reset must match when both are provided."
+        )
     train(args)
 
 
