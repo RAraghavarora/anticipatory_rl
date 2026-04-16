@@ -25,7 +25,7 @@ from .gnn import (
     graph_feature_dim,
     save_checkpoint,
 )
-from .planner import FastDownwardBlockworldPlanner
+from .planner import FastDownwardBlockworldPlanner, PlanningFailure
 from .world import Task, WorldConfig, WorldGenerator, WorldState
 
 
@@ -139,26 +139,35 @@ def _build_environment_examples(
     future_task_sample: int | None,
 ) -> Tuple[int, WorldConfig, List[WorldState], List[float], float]:
     env_rng = random.Random(env_seed)
-    config = WorldConfig.sample(env_rng)
-    generator = WorldGenerator(config)
-    planner = FastDownwardBlockworldPlanner(config)
-    states, task_library = collect_states_for_environment(
-        generator,
-        env_rng,
-        states_per_env=states_per_env,
-        tasks_per_environment=tasks_per_environment,
+    max_attempts = 25
+    for attempt in range(max_attempts):
+        config = WorldConfig.sample(env_rng)
+        generator = WorldGenerator(config)
+        planner = FastDownwardBlockworldPlanner(config)
+        states, task_library = collect_states_for_environment(
+            generator,
+            env_rng,
+            states_per_env=states_per_env,
+            tasks_per_environment=tasks_per_environment,
+        )
+        estimator = OracleFutureCostEstimator(
+            planner,
+            future_task_sample=future_task_sample,
+            estimator_seed=env_seed + attempt,
+        )
+        env_targets: List[float] = []
+        try:
+            for state in states:
+                target = estimator.estimate(state, task_library)
+                env_targets.append(target)
+        except PlanningFailure:
+            continue
+        mean_target = float(mean(env_targets)) if env_targets else 0.0
+        return env_idx, config, states, env_targets, mean_target
+    raise RuntimeError(
+        f"Failed to generate a solvable planner-labeled environment after {max_attempts} attempts "
+        f"(env_idx={env_idx}, env_seed={env_seed})."
     )
-    estimator = OracleFutureCostEstimator(
-        planner,
-        future_task_sample=future_task_sample,
-        estimator_seed=env_seed,
-    )
-    env_targets: List[float] = []
-    for state in states:
-        target = estimator.estimate(state, task_library)
-        env_targets.append(target)
-    mean_target = float(mean(env_targets)) if env_targets else 0.0
-    return env_idx, config, states, env_targets, mean_target
 
 
 def _build_environment_examples_from_args(

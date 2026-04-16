@@ -203,6 +203,22 @@ class WorldConfig:
                     cells.add(neighbor)
         return tuple(sorted(cells))
 
+    def is_floor_connected(self) -> bool:
+        floor_cells = set(self.floor_cells)
+        if not floor_cells:
+            return False
+        frontier = [next(iter(floor_cells))]
+        visited: set[Coord] = set()
+        while frontier:
+            current = frontier.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            for neighbor in self.neighbors(current):
+                if neighbor in floor_cells and neighbor not in visited:
+                    frontier.append(neighbor)
+        return visited == floor_cells
+
     @classmethod
     def sample(cls, rng: random.Random) -> "WorldConfig":
         for _ in range(1000):
@@ -229,7 +245,10 @@ class WorldConfig:
                 region_layout=region_layout,
                 block_colors=tuple(block_colors),
             )
-            if all(config.placeable_tiles_for_region(region) for region in config.all_regions):
+            if (
+                config.is_floor_connected()
+                and all(config.placeable_tiles_for_region(region) for region in config.all_regions)
+            ):
                 return config
         raise RuntimeError("Failed to sample a region layout with accessible tiles.")
 

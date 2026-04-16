@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import itertools
 from pathlib import Path
 import random
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 from .estimator import (
     FutureCostEstimator,
@@ -15,6 +15,11 @@ from .estimator import (
 )
 from .planner import FastDownwardBlockworldPlanner, PlanResult
 from .world import Task, WorldConfig, WorldGenerator, WorldState
+
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover - optional dependency
+    tqdm = None
 
 
 BASELINES = (
@@ -275,6 +280,17 @@ def log_progress(enabled: bool, message: str) -> None:
         print(message, flush=True)
 
 
+def maybe_tqdm(
+    iterable: Iterable[int],
+    *,
+    enabled: bool,
+    **kwargs: object,
+) -> Iterable[int]:
+    if enabled and tqdm is not None:
+        return tqdm(iterable, **kwargs)
+    return iterable
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -297,7 +313,18 @@ def main() -> None:
     metrics = {name: BaselineMetrics() for name in BASELINES}
     master_rng = random.Random(args.seed)
 
-    for env_idx in range(args.num_envs):
+    env_indices = maybe_tqdm(
+        range(args.num_envs),
+        enabled=not verbose,
+        desc="Paper1 Blockworld envs",
+        total=args.num_envs,
+    )
+    for env_idx in env_indices:
+        if not verbose:
+            print(
+                f"[env {env_idx + 1}/{args.num_envs}] sampling environment",
+                flush=True,
+            )
         log_progress(
             verbose,
             f"[env {env_idx + 1}/{args.num_envs}] sampling environment",
@@ -359,7 +386,14 @@ def main() -> None:
             f"[env {env_idx + 1}/{args.num_envs}] preparation complete",
         )
 
-        for sequence_idx in range(args.num_sequences):
+        sequence_indices = maybe_tqdm(
+            range(args.num_sequences),
+            enabled=not verbose,
+            desc=f"env {env_idx + 1}/{args.num_envs} sequences",
+            total=args.num_sequences,
+            leave=False,
+        )
+        for sequence_idx in sequence_indices:
             sequence = generator.sample_task_sequence(
                 env_rng,
                 task_library,
@@ -423,6 +457,11 @@ def main() -> None:
                     anticipatory=True,
                 )
             )
+            if not verbose and hasattr(sequence_indices, "set_postfix"):
+                sequence_indices.set_postfix(
+                    myopic=f"{metrics['myopic'].average_cost():.1f}",
+                    ap=f"{metrics['anticipatory'].average_cost():.1f}",
+                )
         print(
             f"[env {env_idx + 1}/{args.num_envs}] "
             f"myopic={metrics['myopic'].average_cost():.1f} "

@@ -39,6 +39,7 @@ def make_barrier_config() -> WorldConfig:
 def test_sampled_regions_do_not_overlap() -> None:
     rng = random.Random(0)
     config = WorldConfig.sample(rng)
+    assert config.is_floor_connected()
     occupied = set()
     for tiles in config.region_tiles.values():
         assert len(tiles) == 4

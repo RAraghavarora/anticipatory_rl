@@ -28,6 +28,10 @@ class ProblemContext:
     move_costs: Dict[Tuple[Coord, Coord], int]
 
 
+class PlanningFailure(RuntimeError):
+    pass
+
+
 class FastDownwardBlockworldPlanner:
     def __init__(
         self,
@@ -111,7 +115,7 @@ class FastDownwardBlockworldPlanner:
                 check=False,
             )
             if proc.returncode != 0:
-                raise RuntimeError(
+                raise PlanningFailure(
                     "Fast Downward failed.\n"
                     f"CMD: {' '.join(cmd)}\n"
                     f"STDOUT:\n{proc.stdout}\n"
