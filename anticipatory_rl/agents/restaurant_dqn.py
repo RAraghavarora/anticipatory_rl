@@ -8,7 +8,7 @@ import random
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Dict, List, Sequence
+from typing import Any, Deque, Dict, List, Sequence
 
 import numpy as np
 import torch
@@ -37,6 +37,18 @@ def _resolve_run_label(args: argparse.Namespace) -> str:
     if args.run_label is not None:
         return args.run_label
     return "myopic_restaurant" if args.tasks_per_reset <= 1 else "anticipatory_restaurant"
+
+
+def _load_layout_corpus(path: Path | None) -> List[Dict[str, Any]]:
+    if path is None:
+        return []
+    with path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if isinstance(payload, dict) and isinstance(payload.get("layouts"), list):
+        return [x for x in payload["layouts"] if isinstance(x, dict)]
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    raise ValueError(f"Unsupported layout corpus format in {path}")
 
 
 @dataclass
@@ -188,7 +200,28 @@ def train(args: argparse.Namespace) -> Path:
     output_path = run_dir / args.output_name
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
 
-    obs, info = env.reset(seed=args.seed)
+    layout_pool = _load_layout_corpus(args.layout_corpus)
+    if args.layout_id:
+        layout_pool = [x for x in layout_pool if str(x.get("layout_id")) == args.layout_id]
+        if not layout_pool:
+            raise ValueError(f"layout-id '{args.layout_id}' not found in {args.layout_corpus}")
+    layout_rng = np.random.default_rng(args.seed + 17_171)
+
+    def _reset_env(reset_seed: int, reset_index: int):
+        options: Dict[str, Any] = {}
+        if layout_pool:
+            if args.sample_layout_per_reset:
+                layout = layout_pool[int(layout_rng.integers(0, len(layout_pool)))]
+            else:
+                layout = layout_pool[reset_index % len(layout_pool)]
+            options["layout"] = layout
+            if args.task_library_per_layout and isinstance(layout.get("task_library"), list):
+                options["task_library"] = layout.get("task_library")
+        if options:
+            return env.reset(seed=reset_seed, options=options)
+        return env.reset(seed=reset_seed)
+
+    obs, info = _reset_env(args.seed, 0)
     obs_dim = int(np.asarray(obs).shape[0])
     action_dim = int(env.action_space.n)
     q_net = RestaurantQNetwork(obs_dim, action_dim, hidden_dim=args.hidden_dim).to(device)
@@ -198,9 +231,15 @@ def train(args: argparse.Namespace) -> Path:
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
     replay = ReplayBuffer(args.replay_size)
 
-    env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
+    if args.env_reset_tasks is not None:
+        env_reset_tasks = args.env_reset_tasks
+    elif args.task_sequence_length > 0:
+        env_reset_tasks = args.task_sequence_length
+    else:
+        env_reset_tasks = args.tasks_per_reset
 
     task_return = 0.0
+    task_paper2_cost = 0.0
     task_steps = 0
     total_tasks = 0
     tasks_completed = 0
@@ -227,10 +266,12 @@ def train(args: argparse.Namespace) -> Path:
         )
         current_task_snapshot = dict(info.get("task", {}))
         current_task_auto_snapshot = bool(current_task_auto_satisfied)
+        current_layout_snapshot = info.get("layout_id")
         valid_mask = np.asarray(info.get("valid_action_mask"), dtype=np.float32)
         action = _select_action(q_net, obs, valid_mask, epsilon, device)
         next_obs, reward, success, truncated, next_info = env.step(action)
         task_return += float(reward)
+        task_paper2_cost += float(next_info.get("paper2_cost_step", 0.0))
         task_steps += 1
         step_reward_history.append(float(reward))
 
@@ -304,22 +345,25 @@ def train(args: argparse.Namespace) -> Path:
                     "steps": int(task_steps),
                     "return": float(task_return),
                     "auto_satisfied": current_task_auto_snapshot,
+                    "paper2_cost": float(task_paper2_cost),
                     "task_type": current_task_snapshot.get("task_type"),
                     "target_location": current_task_snapshot.get("target_location"),
                     "target_kind": current_task_snapshot.get("target_kind"),
+                    "layout_id": current_layout_snapshot,
                     "task_type_after": task_info.get("task_type"),
                     "target_location_after": task_info.get("target_location"),
                     "target_kind_after": task_info.get("target_kind"),
                 }
             )
             task_return = 0.0
+            task_paper2_cost = 0.0
             task_steps = 0
             current_task_auto_satisfied = bool(next_info.get("next_auto_satisfied", False))
 
         if env_reset_flag or trunc_reset_flag:
             episode_index += 1
             reset_seed = args.seed + 100_003 * episode_index
-            obs, info = env.reset(seed=reset_seed)
+            obs, info = _reset_env(reset_seed, episode_index)
             current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
             env_tasks_since_reset = 0
         if episode_done_flag or trunc_reset_flag:
@@ -352,9 +396,14 @@ def train(args: argparse.Namespace) -> Path:
         "avg_task_steps": float(np.mean([r["steps"] for r in task_records])) if task_records else 0.0,
         "auto_rate": float(np.mean([1.0 if r["auto_satisfied"] else 0.0 for r in task_records])) if task_records else 0.0,
         "reward_per_step": float(np.mean(step_reward_history)) if step_reward_history else 0.0,
+        "paper2_cost_total": float(np.sum([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
+        "avg_task_paper2_cost": float(np.mean([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
         "mean_loss": float(np.mean(loss_history)) if loss_history else 0.0,
         "tasks_per_reset": int(args.tasks_per_reset),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
+        "task_sequence_length": int(args.task_sequence_length),
+        "layout_corpus": None if args.layout_corpus is None else str(args.layout_corpus),
+        "layout_mode": "sample_per_reset" if args.sample_layout_per_reset else "round_robin",
         "seed": int(args.seed),
     }
     with (run_dir / "train_summary.json").open("w", encoding="utf-8") as fh:
@@ -381,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--tasks-per-reset", type=int, default=1)
+    parser.add_argument("--task-sequence-length", type=int, default=0, help="Target tasks per sequence; used as env reset interval when env-reset-tasks is unset.")
     parser.add_argument(
         "--env-reset-tasks",
         type=int,
@@ -407,6 +457,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-path",
         type=Path,
         default=Path("anticipatory_rl/configs/restaurant_symbolic.yaml"),
+    )
+    parser.add_argument("--layout-corpus", type=Path, default=None, help="Optional JSON layout corpus with per-layout schemas.")
+    parser.add_argument("--layout-id", type=str, default="", help="Optional fixed layout_id from layout corpus.")
+    parser.add_argument("--sample-layout-per-reset", action="store_true", help="Sample a random layout each env reset.")
+    parser.add_argument(
+        "--task-library-per-layout",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use per-layout task_library when present.",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)

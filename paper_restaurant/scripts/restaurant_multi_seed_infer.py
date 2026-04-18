@@ -61,10 +61,16 @@ def _infer_cmd(
     anticipatory_weights: Path,
     myopic_weights: Path,
     config_path: str,
+    layout_corpus: str,
+    layout_id: str,
+    sample_layout_per_reset: bool,
+    task_library_per_layout: bool,
     output_dir: Path,
     seed: int,
     num_tasks: int,
     total_steps: int,
+    eval_layout_count: int,
+    task_sequence_length: int,
     hidden_dim: int,
     tasks_per_reset: int,
     max_task_steps: int,
@@ -79,7 +85,7 @@ def _infer_cmd(
     fruit_cost: float,
     gamma: float,
 ) -> List[str]:
-    return [
+    cmd = [
         sys.executable,
         "-m",
         "anticipatory_rl.agents.restaurant_dqn_infer",
@@ -91,6 +97,10 @@ def _infer_cmd(
         str(output_dir),
         "--config-path",
         str(config_path),
+        "--task-sequence-length",
+        str(int(task_sequence_length)),
+        "--eval-layout-count",
+        str(int(eval_layout_count)),
         "--num-tasks",
         str(int(num_tasks)),
         "--total-steps",
@@ -126,6 +136,14 @@ def _infer_cmd(
         "--softmax-temperature",
         "0.0",
     ]
+    if layout_corpus:
+        cmd.extend(["--layout-corpus", str(layout_corpus)])
+    if layout_id:
+        cmd.extend(["--layout-id", str(layout_id)])
+    if sample_layout_per_reset:
+        cmd.append("--sample-layout-per-reset")
+    cmd.extend(["--task-library-per-layout" if task_library_per_layout else "--no-task-library-per-layout"])
+    return cmd
 
 
 def _run_one_seed(
@@ -134,8 +152,14 @@ def _run_one_seed(
     anticipatory_weights: str,
     myopic_weights: str,
     config_path: str,
+    layout_corpus: str,
+    layout_id: str,
+    sample_layout_per_reset: bool,
+    task_library_per_layout: bool,
     num_tasks: int,
     total_steps: int,
+    eval_layout_count: int,
+    task_sequence_length: int,
     hidden_dim: int,
     tasks_per_reset: int,
     max_task_steps: int,
@@ -171,10 +195,16 @@ def _run_one_seed(
         anticipatory_weights=Path(anticipatory_weights),
         myopic_weights=Path(myopic_weights),
         config_path=config_path,
+        layout_corpus=layout_corpus,
+        layout_id=layout_id,
+        sample_layout_per_reset=sample_layout_per_reset,
+        task_library_per_layout=task_library_per_layout,
         output_dir=job.output_dir,
         seed=job.seed,
         num_tasks=num_tasks,
         total_steps=total_steps,
+        eval_layout_count=eval_layout_count,
+        task_sequence_length=task_sequence_length,
         hidden_dim=hidden_dim,
         tasks_per_reset=tasks_per_reset,
         max_task_steps=max_task_steps,
@@ -236,7 +266,15 @@ def _aggregate(comparison_paths: Iterable[Path]) -> Dict[str, Any]:
         row: Dict[str, Any] = {"seed": seed, "path": str(p)}
 
         for policy in ("anticipatory", "myopic"):
-            for metric in ("success_rate", "avg_task_steps", "avg_task_return", "reward_per_step", "auto_rate"):
+            for metric in (
+                "success_rate",
+                "avg_task_steps",
+                "avg_task_return",
+                "avg_task_paper2_cost",
+                "paper2_cost_total",
+                "reward_per_step",
+                "auto_rate",
+            ):
                 v = _safe_get(d, [policy, "stats", metric])
                 row[f"{policy}.{metric}"] = v
 
@@ -254,6 +292,8 @@ def _aggregate(comparison_paths: Iterable[Path]) -> Dict[str, Any]:
                 "delta_success_rate",
                 "delta_avg_steps",
                 "delta_avg_return",
+                "avg_task_paper2_cost",
+                "paper2_cost_total",
                 "delta_reward_per_step",
                 "delta_auto_rate",
             ):
@@ -291,6 +331,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--anticipatory-weights", type=str, required=True)
     p.add_argument("--myopic-weights", type=str, required=True)
     p.add_argument("--config-path", type=str, default="anticipatory_rl/configs/restaurant_symbolic.yaml")
+    p.add_argument("--layout-corpus", type=str, default="", help="Optional layout corpus JSON path.")
+    p.add_argument("--layout-id", type=str, default="", help="Optional fixed layout_id.")
+    p.add_argument("--sample-layout-per-reset", action="store_true")
+    p.add_argument(
+        "--task-library-per-layout",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use per-layout task library when present.",
+    )
     p.add_argument("--output-dir", type=str, required=True)
 
     seed = p.add_mutually_exclusive_group(required=True)
@@ -305,6 +354,8 @@ def parse_args() -> argparse.Namespace:
     # Eval parameters (kept aligned with restaurant_dqn_infer defaults)
     p.add_argument("--num-tasks", type=int, default=5000)
     p.add_argument("--total-steps", type=int, default=200000)
+    p.add_argument("--eval-layout-count", type=int, default=0)
+    p.add_argument("--task-sequence-length", type=int, default=40)
     p.add_argument("--hidden-dim", type=int, default=256)
     p.add_argument("--tasks-per-reset", type=int, default=200)
     p.add_argument("--max-task-steps", type=int, default=24)
@@ -358,8 +409,14 @@ def main() -> None:
                 anticipatory_weights=args.anticipatory_weights,
                 myopic_weights=args.myopic_weights,
                 config_path=args.config_path,
+                layout_corpus=args.layout_corpus,
+                layout_id=args.layout_id,
+                sample_layout_per_reset=bool(args.sample_layout_per_reset),
+                task_library_per_layout=bool(args.task_library_per_layout),
                 num_tasks=args.num_tasks,
                 total_steps=args.total_steps,
+                eval_layout_count=args.eval_layout_count,
+                task_sequence_length=args.task_sequence_length,
                 hidden_dim=args.hidden_dim,
                 tasks_per_reset=args.tasks_per_reset,
                 max_task_steps=args.max_task_steps,

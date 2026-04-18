@@ -51,6 +51,18 @@ def _action_policy_label(temperature: float) -> str:
     return "argmax (greedy)" if temperature <= 0.0 else f"softmax (tau={float(temperature):g})"
 
 
+def _load_layout_corpus(path: Optional[Path]) -> List[Dict[str, Any]]:
+    if path is None:
+        return []
+    with path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if isinstance(payload, dict) and isinstance(payload.get("layouts"), list):
+        return [x for x in payload["layouts"] if isinstance(x, dict)]
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    raise ValueError(f"Unsupported layout corpus format in {path}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run inference for restaurant DQN checkpoints; compare anticipatory vs myopic if both are provided."
@@ -66,6 +78,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--softmax-temperature", type=float, default=0.0)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
+    parser.add_argument("--task-sequence-length", type=int, default=40)
+    parser.add_argument("--eval-layout-count", type=int, default=0, help="When >0, evaluate this many layout sequences.")
     parser.add_argument("--max-task-steps", type=int, default=24)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
@@ -80,6 +94,15 @@ def parse_args() -> argparse.Namespace:
         "--config-path",
         type=Path,
         default=Path("anticipatory_rl/configs/restaurant_symbolic.yaml"),
+    )
+    parser.add_argument("--layout-corpus", type=Path, default=None, help="Optional JSON layout corpus.")
+    parser.add_argument("--layout-id", type=str, default="", help="Evaluate only one layout_id from corpus.")
+    parser.add_argument("--sample-layout-per-reset", action="store_true", help="Sample random layout each sequence reset.")
+    parser.add_argument(
+        "--task-library-per-layout",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use per-layout task_library when available.",
     )
     args = parser.parse_args()
 
@@ -116,12 +139,17 @@ def make_env(args: argparse.Namespace) -> RestaurantSymbolicEnv:
     )
 
 
-def _load_model(state_path: Path, args: argparse.Namespace, device: torch.device) -> RestaurantQNetwork:
-    env = make_env(args)
-    obs, _ = env.reset(seed=args.seed)
+def _load_model(
+    state_path: Path,
+    args: argparse.Namespace,
+    device: torch.device,
+    *,
+    input_dim: int,
+    action_dim: int,
+) -> RestaurantQNetwork:
     model = RestaurantQNetwork(
-        input_dim=int(np.asarray(obs).shape[0]),
-        action_dim=int(env.action_space.n),
+        input_dim=int(input_dim),
+        action_dim=int(action_dim),
         hidden_dim=args.hidden_dim,
     ).to(device)
     state_dict = torch.load(state_path, map_location=device)
@@ -143,6 +171,7 @@ def _summarize_by_task_type(task_records: List[Dict[str, Any]]) -> Dict[str, Dic
             "auto_rate": float(np.mean([1.0 if r["auto_satisfied"] else 0.0 for r in rows])),
             "avg_steps": float(np.mean([r["steps"] for r in rows])),
             "avg_return": float(np.mean([r["return"] for r in rows])),
+            "avg_paper2_cost": float(np.mean([r.get("paper2_cost", 0.0) for r in rows])),
             "avg_steps_when_success": float(np.mean([r["steps"] for r in succ])) if succ else 0.0,
         }
     return summary
@@ -159,6 +188,8 @@ def _print_report(report: Dict[str, Any], run_label: str) -> None:
     print(f"  Avg steps / task            : {stats['avg_task_steps']:.2f}")
     print(f"  Avg task return             : {stats['avg_task_return']:.3f}")
     print(f"  Reward / step               : {stats['reward_per_step']:.3f}")
+    print(f"  Avg paper2 cost / task      : {stats['avg_task_paper2_cost']:.3f}")
+    print(f"  paper2 cumulative cost      : {stats['paper2_cost_total']:.3f}")
     print(f"  Discounted return           : {stats['discounted_return']:.3f}")
     print(f"  Tasks attempted             : {stats['tasks_attempted']}")
     print(f"  Primitive steps             : {stats['total_steps']}")
@@ -168,7 +199,7 @@ def _print_report(report: Dict[str, Any], run_label: str) -> None:
         print(
             f"    {task_type:<18} n={int(vals['count']):5d} "
             f"success={vals['success_rate']:.1%} auto={vals['auto_rate']:.1%} "
-            f"steps={vals['avg_steps']:.2f} ret={vals['avg_return']:.2f}"
+            f"steps={vals['avg_steps']:.2f} ret={vals['avg_return']:.2f} p2={vals['avg_paper2_cost']:.2f}"
         )
 
 
@@ -226,8 +257,42 @@ def evaluate(
     output_dir: Path,
 ) -> Dict[str, Any]:
     env = make_env(args)
-    obs, info = env.reset(seed=args.seed)
-    model = _load_model(state_path, args, device)
+    layout_pool = _load_layout_corpus(args.layout_corpus)
+    if args.layout_id:
+        layout_pool = [x for x in layout_pool if str(x.get("layout_id")) == args.layout_id]
+        if not layout_pool:
+            raise ValueError(f"layout-id '{args.layout_id}' not found in {args.layout_corpus}")
+    layout_rng = np.random.default_rng(args.seed + 42_001)
+
+    target_tasks = int(args.num_tasks)
+    if args.eval_layout_count > 0:
+        target_tasks = int(args.eval_layout_count) * max(1, int(args.task_sequence_length))
+
+    sequence_index = 0
+    sequence_task_count = 0
+
+    def _reset_env(reset_seed: int, seq_index: int):
+        options: Dict[str, Any] = {}
+        if layout_pool:
+            if args.sample_layout_per_reset:
+                layout = layout_pool[int(layout_rng.integers(0, len(layout_pool)))]
+            else:
+                layout = layout_pool[seq_index % len(layout_pool)]
+            options["layout"] = layout
+            if args.task_library_per_layout and isinstance(layout.get("task_library"), list):
+                options["task_library"] = layout.get("task_library")
+        if options:
+            return env.reset(seed=reset_seed, options=options)
+        return env.reset(seed=reset_seed)
+
+    obs, info = _reset_env(args.seed, sequence_index)
+    model = _load_model(
+        state_path,
+        args,
+        device,
+        input_dim=int(np.asarray(obs).shape[0]),
+        action_dim=int(env.action_space.n),
+    )
 
     total_reward = 0.0
     discounted_return = 0.0
@@ -237,6 +302,7 @@ def evaluate(
     successes = 0
     task_return = 0.0
     task_steps = 0
+    task_paper2_cost = 0.0
     tasks_since_reset = 0
     episode_index = 0
     current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
@@ -245,13 +311,14 @@ def evaluate(
     action_gen.manual_seed(args.seed)
 
     max_steps = None if args.total_steps <= 0 else int(args.total_steps)
-    progress = tqdm(total=args.num_tasks, desc=f"Inference [{run_label}]", unit="task")
+    progress = tqdm(total=target_tasks, desc=f"Inference [{run_label}]", unit="task")
 
-    while total_tasks < args.num_tasks:
+    while total_tasks < target_tasks:
         if max_steps is not None and total_steps >= max_steps:
             break
         task_snapshot = dict(info.get("task", {}))
         auto_snapshot = bool(current_task_auto_satisfied)
+        layout_snapshot = info.get("layout_id")
         valid_mask = np.asarray(info.get("valid_action_mask"), dtype=np.float32)
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
@@ -270,6 +337,7 @@ def evaluate(
         total_steps += 1
         task_steps += 1
         task_return += float(reward)
+        task_paper2_cost += float(info.get("paper2_cost_step", 0.0))
         total_reward += float(reward)
         discounted_return += discount * float(reward)
         discount *= float(args.gamma)
@@ -290,17 +358,25 @@ def evaluate(
                     "truncated": bool(truncated),
                     "steps": int(task_steps),
                     "return": float(task_return),
+                    "paper2_cost": float(task_paper2_cost),
                     "auto_satisfied": auto_snapshot,
+                    "layout_id": layout_snapshot,
                 }
             )
             task_return = 0.0
+            task_paper2_cost = 0.0
             task_steps = 0
+            sequence_task_count += 1
             reset_required = bool(truncated)
             if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
                 reset_required = True
+            if args.task_sequence_length > 0 and sequence_task_count >= args.task_sequence_length:
+                reset_required = True
+                sequence_task_count = 0
+                sequence_index += 1
             if reset_required:
                 episode_index += 1
-                obs, info = env.reset(seed=args.seed + 100_003 * episode_index)
+                obs, info = _reset_env(args.seed + 100_003 * episode_index, sequence_index)
                 tasks_since_reset = 0
             current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
 
@@ -313,6 +389,8 @@ def evaluate(
         "avg_task_steps": float(np.mean([r["steps"] for r in task_records])) if task_records else 0.0,
         "avg_task_return": float(np.mean([r["return"] for r in task_records])) if task_records else 0.0,
         "reward_per_step": float(total_reward / max(1, total_steps)),
+        "paper2_cost_total": float(np.sum([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
+        "avg_task_paper2_cost": float(np.mean([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
         "discounted_return": float(discounted_return),
         "auto_rate": float(np.mean([1.0 if r["auto_satisfied"] else 0.0 for r in task_records])) if task_records else 0.0,
         "total_steps": int(total_steps),
@@ -325,15 +403,18 @@ def evaluate(
         "by_task_type": _summarize_by_task_type(task_records),
         "tasks": task_records,
         "action_policy": _action_policy_label(float(args.softmax_temperature)),
+        "task_sequence_length": int(args.task_sequence_length),
+        "eval_layout_count": int(args.eval_layout_count),
+        "layout_corpus": None if args.layout_corpus is None else str(args.layout_corpus),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "rollout_stats.json").open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, default=str)
     _print_report(report, run_label)
-    if total_tasks < args.num_tasks:
+    if total_tasks < target_tasks:
         print(
             f"[{run_label}] Stopped early after {total_steps} primitive steps "
-            f"with {total_tasks}/{args.num_tasks} tasks evaluated."
+            f"with {total_tasks}/{target_tasks} tasks evaluated."
         )
     return report
 
@@ -370,11 +451,18 @@ def run_compare(args: argparse.Namespace) -> None:
             "success_rate": float(ant_stats["success_rate"] - myo_stats["success_rate"]),
             "avg_task_steps": float(ant_stats["avg_task_steps"] - myo_stats["avg_task_steps"]),
             "avg_task_return": float(ant_stats["avg_task_return"] - myo_stats["avg_task_return"]),
+            "avg_task_paper2_cost": float(ant_stats["avg_task_paper2_cost"] - myo_stats["avg_task_paper2_cost"]),
+            "paper2_cost_total": float(ant_stats["paper2_cost_total"] - myo_stats["paper2_cost_total"]),
             "reward_per_step": float(ant_stats["reward_per_step"] - myo_stats["reward_per_step"]),
             "discounted_return": float(ant_stats["discounted_return"] - myo_stats["discounted_return"]),
             "auto_rate": float(ant_stats["auto_rate"] - myo_stats["auto_rate"]),
         },
     }
+    comparison["delta"]["delta_success_rate"] = comparison["delta"]["success_rate"]
+    comparison["delta"]["delta_avg_steps"] = comparison["delta"]["avg_task_steps"]
+    comparison["delta"]["delta_avg_return"] = comparison["delta"]["avg_task_return"]
+    comparison["delta"]["delta_reward_per_step"] = comparison["delta"]["reward_per_step"]
+    comparison["delta"]["delta_auto_rate"] = comparison["delta"]["auto_rate"]
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "comparison.json").open("w", encoding="utf-8") as fh:
         json.dump(comparison, fh, indent=2, default=str)
@@ -392,6 +480,7 @@ def run_compare(args: argparse.Namespace) -> None:
     print(f"  Delta success rate  : {comparison['delta']['success_rate']:+.4f}")
     print(f"  Delta avg steps     : {comparison['delta']['avg_task_steps']:+.4f}")
     print(f"  Delta avg return    : {comparison['delta']['avg_task_return']:+.4f}")
+    print(f"  Delta avg paper2    : {comparison['delta']['avg_task_paper2_cost']:+.4f}")
     print(f"  Delta reward/step   : {comparison['delta']['reward_per_step']:+.4f}")
     print(f"  Delta disc return   : {comparison['delta']['discounted_return']:+.4f}")
     print(f"  Delta auto-rate     : {comparison['delta']['auto_rate']:+.4f}")

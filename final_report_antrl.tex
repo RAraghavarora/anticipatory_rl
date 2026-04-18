@@ -1,0 +1,224 @@
+% !TEX program = pdflatex
+% !TEX root = main.tex
+\documentclass{article}
+
+\usepackage[preprint,nonatbib]{neurips_2020}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+
+\newtheorem{theorem}{Theorem}
+
+\title{Anticipatory Reinforcement Learning for Long-Lived Robot Planning}
+
+\author{%
+  Raghav Arora \\
+  Department of Electrical and Computer Engineering \\
+  The University of Texas at Austin \\
+  \texttt{raghavaurora@utexas.edu}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Long-lived service robots act in persistent environments where solving the current task can change the cost of future tasks. 
+Anticipatory planning is a strategy where an agent uses the knowledge of task distribution in the home to anticipate future tasks, and choose a plan that jointly optimizes for the current task and expected future tasks.
+Prior anticipatory-planning work uses offline learned estimates of expected future cost to bias symbolic planning, but it largely remains planner-centric and short-horizon. 
+We instead formulate anticipatory planning as a continual-task Markov Decision Process in which preparedness becomes the value of the persistent state under future tasks. We evaluate anticipatory RL against myopic RL on a symbolic restaurant benchmark and on a 2D Blocksworld environment. In the restaurant benchmark, anticipatory RL reduces average steps per task by about 4.0\%, increases average task return by 5.6\%, and increases reward per step by 10.1\%. In the Blocksworld benchmark, it reduces average planner-evaluated task cost by 21.9\% relative to the myopic baseline.
+
+\end{abstract}
+
+\section{Introduction}
+Robots deployed in environments like homes, offices, and restaurants receive long sequences of instructions in environments that persist between tasks. 
+In such settings, a myopic agent can create side effects: the cheapest way to finish the current task may move objects into states that make likely follow-up tasks harder, or into a \textit{trap} state. Anticipatory behavior instead seeks states that complete the present task while leaving the environment well prepared for what comes next. Figure \ref{fig:motivation} illustrates this motivation where a myopic and an anticipatory agent receive the same sequence of tasks. The short-sighted myopic agent completes the first task greedily, but ends up in a \textit{trap} state that makes the second task much harder.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{images/anticipatory_rl_motivation.pdf}
+\caption{Motivation for anticipatory planning in a persistent environment. The agent gets the task to clear the dining table. The myopic agent chooses the lowest cost plan, and places the box on the floor next to the table. This blocks the agents path to the study table which would be needed for future tasks. The anticipatory agent instead places the box on the cabinet, which is more costly for the current task but leaves the path to the study table clear for future tasks.}
+\label{fig:motivation}
+\end{figure}
+
+
+Dhakal et al.\cite{dhakal2023anticipatory} introduced anticipatory planning as the joint optimization of current-task cost and expected future-task cost, with a learned offline estimator used to guide symbolic planning. They demonstrated the advantage of anticipatory planning over a myopic agent in an environment where tasks have high interdependence, and the goal state for one task affects the plan for future tasks\cite{dhakal2023anticipatory,dhakal2024tamp,talukder2024large,arora2024anticipate,singh2024anticipate}. 
+However, it suffers from major limitations. First, it assumes that the task distribution is fixed and known by the agent, allowing the anticipatory planning cost to be learned offline through supervised learning. Second, since classical symbolic planner is used to estimate the cost of tasks, learning the anticipatory cost becomes very computationally expensive as the number of tasks grows. Third, they minimize the expected cost associated with an immediately available task and a \textit{single} next task in the sequence. This limits the advantage of anticipation to one task ahead only, and fails for longer horizons. Fourth, the next anticipated task is not conditioned on the current task.
+
+This work instead formulates anticipatory planning as a continual-task Markov Decision Process (MDP) where an agent solves a stream of tasks in a persistent environment, and learns to anticipate future tasks implicitly through value propagation across task boundaries. 
+For this work, we also assume the task distribution to be stationary, but the agent does not have access to the distribution and must learn it through experience. Hence, we work on all the aforementioned limitations of the prior work by learning the anticipatory value function online through reinforcement learning.
+
+
+\section{Related Work}
+Dhakal et al.\ introduced \emph{anticipatory planning} as a planner-centric objective, where the agent solves the current task, but chooses a goal-reaching end state that also makes a likely follow-up task cheaper \cite{dhakal2023anticipatory}. They learn the anticipatory term offline with a GNN trained on planner-labeled costs over a structured scene representation, and then use that learned estimator to guide symbolic planning. Dhakal et al.\ later extend this idea to anticipatory task and motion planning (TAMP), adding geometric feasibility and motion costs while keeping the same objective \cite{dhakal2024tamp}. Talukder et al.\ scale the approach to larger home-like and restaurant environments with richer task streams and scene graphs \cite{talukder2024large}.
+
+These works show that anticipation can help in persistent settings, but they also motivate an RL formulation. First, they rely on offline supervised training with planner-generated labels. This can be expensive, since it requires many planner calls as task templates and environments grow. Second, the objective is usually a \emph{one-step} lookahead (current task plus one follow-up task). It does not directly capture longer-horizon value propagation through multiple future tasks. Third, the learned component is an estimator inside a planning loop, not an online-learned value function updated from interaction.
+
+In parallel, Arora et al.\ and Singh et al.\ use language models to predict likely future tasks and feed these predictions into classical planning \cite{arora2024anticipate,singh2024anticipate}. These methods can generalize through language, but they are still planner-centric: they bias symbolic planning with predicted goals rather than learning a value function over persistent physical states.
+
+Our formulation is equivalent to a continual goal-conditioned MDP with task changes at goal-reaching transitions. For semantic clarity, we refer to our goals as tasks.
+UVFAs \cite{schaul2015uvfa} and successor features \cite{barreto2017successor} study generalization across tasks, while continual-RL work studies long-lived learning \cite{khetarpal2022continual}. Side-effect avoidance formalizes how actions can create bad future states \cite{krakovna2020avoiding}. Our work connects these ideas by treating anticipatory planning as continuing-task RL: we learn a task-conditioned value function online in a persistent world and isolate anticipation as value propagation across successful task boundaries (Eq.~\eqref{eq:targets}), with the anticipation horizon controlled by $\gamma$ (Theorem~\ref{thm:gamma-horizon}).
+
+\section{Problem Statement}
+Dhakal et al.\ define anticipatory planning for a current task $\tau$ as choosing a goal-reaching end state that trades off immediate planning cost and expected cost of a sampled follow-up task:
+\begin{equation}
+\label{eq:dhakal}
+s_g^*=\operatorname*{argmin}_{s_g' \in \mathcal{G}_\tau}\left[C^*_{s_g'}(s_0)+\sum_{\tau'} P(\tau')C^*_{\tau'}(s_g')\right].
+\end{equation}
+Here, $s_0$ is the current state, $\tau$ the current task, $\mathcal{G}_\tau$ the set of goal states satisfying $\tau$, $s_g'$ a candidate end state, $C^*_{s_g'}(s_0)$ the optimal cost of reaching $s_g'$ from $s_0$, $\tau'$ a follow-up task, $P(\tau')$ its probability, and $C^*_{\tau'}(s_g')$ the optimal cost of completing $\tau'$ from $s_g'$. Thus $s_g^*$ is the task-completing state that best balances immediate and expected future cost.\footnote{While the original work uses $V$ for cost, we write cost as $C$ rather than $V$ to avoid confusion with the RL value function below.} Prior work learns the anticipatory term \( C_{A.P}(s_g') = \sum_{\tau'} P(\tau')C^*_{\tau'}(s_g') \) offline with a GNN and uses it as a symbolic-planning heuristic \cite{dhakal2023anticipatory}.
+
+We instead model the long-lived robot as an infinite-horizon MDP. Let $s \in \mathcal{S}$ be the physical state, $a \in \mathcal{A}$ the action, and $\tau \in \mathcal{T}$ the current task sampled from a task process $P(\tau)$. With goal predicate $g(s,\tau)\in\{0,1\}$, the augmented state is $x=(s,\tau)\in\mathcal{X}=\mathcal{S}\times\mathcal{T}$ and the task changes only at task boundaries:
+\begin{equation}
+\label{eq:task-transition}
+\tau'=
+\begin{cases}
+\tau, & g(s',\tau)=0,\\
+\text{sampled from } P(\tau), & g(s',\tau)=1.
+\end{cases}
+\end{equation}
+The task-conditioned value function is
+\begin{equation}
+\label{eq:value}
+V^\pi(s,\tau)=\mathbb{E}^\pi\!\left[\sum_{t=0}^{\infty}\gamma^t r(s_t,\tau_t,a_t,s_{t+1}) \mid s_0=s,\tau_0=\tau\right],
+\end{equation}
+and the anticipatory value of a physical state is
+\begin{equation}
+\label{eq:ap-value}
+\mathbf{V}_{\mathrm{AP}}^\pi(s)=\mathbb{E}_{\tau \sim P(\tau)}[V^\pi(s,\tau)].
+\end{equation}
+Here, $\gamma$ is the discount factor controlling the effective anticipation horizon. Under this view, preparedness is the expected value of the persistent state under future tasks.
+We define two agents, an anticipatory and a myopic agent. Both these agents use the same environment, action space, reward function, task generator, and reset schedule. They differ only in the Bellman target used at successful task completion:
+\begin{equation}
+\label{eq:targets}
+\;y(s,\tau,a,s')=
+\begin{cases}
+r+\gamma \max_{a'}Q(s',\tau,a'), & g(s',\tau)=0 \;\;\;(\text{within-task}),\\
+r+\gamma \max_{a'}Q(s',\tau',a'), & g(s',\tau)=1 \;\;\;(\text{anticipatory}),\\
+r, & g(s',\tau)=1 \;\;\;(\text{myopic}).
+\end{cases}
+\end{equation}
+This difference corresponds to two distinct mathematical formulations over the same continuing environment dynamics. The \textbf{myopic} agent executes the task stream continuously without physical environment resets, but it is formulated as a sequence of isolated task-horizon episodes. Let $T_\tau=\min\{t \ge 0: g(s_t,\tau)=1\}$ denote the first time the current task is satisfied. The myopic objective truncates return at the task boundary,
+\begin{equation}
+\label{eq:myopic-episodic}
+V_{\mathrm{myo}}^\pi(s,\tau)=\mathbb{E}^\pi\!\left[\sum_{t=0}^{T_\tau-1}\gamma^t r_t \mid s_0=s,\tau_0=\tau\right],
+\end{equation}
+which is equivalent to treating the goal-reaching transition as terminating into an absorbing state with zero continuation value. As a result, the physical configuration $s'$ left behind at success has no value under the myopic formulation, so the agent has no incentive to shape the persistent world state for what comes next.
+
+In contrast, the \textbf{anticipatory} agent uses the continuing-task MDP in Eq.~\eqref{eq:task-transition}--\eqref{eq:value}: task completion is not terminal for learning, and the goal-reaching transition bootstraps through the next sampled task. Consequently, the anticipatory agent assigns value to the persistent post-task state $s'$ through $\max_{a'}Q(s',\tau',a')$ and can trade off immediate cost against preparedness for the future task stream.
+
+\begin{theorem}[Discount Sets the Anticipation Horizon]
+\label{thm:gamma-horizon}
+Let $\lvert r \rvert \le R_{\max}$ and $\gamma \in [0,1)$. Then the optimal discounted action-value $Q^*_\gamma$ on the augmented-state MDP exists and is unique. Furthermore, for any augmented state $x=(s,\tau)$ and action $a$,
+\begin{equation}
+\label{eq:gamma-bound}
+\Bigl\lvert Q^*_\gamma(x,a)-\mathbb{E}\bigl[r(x,a,X')\bigr]\Bigr\rvert \le \frac{\gamma}{1-\gamma}R_{\max},
+\end{equation}
+so as $\gamma \downarrow 0$ the value of future tasks vanishes and $Q^*_\gamma(x,a)$ reduces to immediate-reward evaluation.
+\end{theorem}
+
+% \noindent\textbf{Explanation.}
+Eq.~\eqref{eq:gamma-bound} makes the role of $\gamma$ explicit: increasing $\gamma$ increases the weight of post-task continuation and therefore the incentive to prepare the persistent physical state for likely follow-up tasks. If we coarse-grain time at \emph{task boundaries} and define a task-level return $G_k$ per completed task, then $V_{\bar{\gamma}}(s)=\mathbb{E}[\sum_{k\ge 0}\bar{\gamma}^k G_k]$ implies a one-step lookahead approximation
+\(
+V_{\bar{\gamma}}(s)\approx \mathbb{E}[G_0]+\bar{\gamma}\,\mathbb{E}[G_1]
+\)
+with a remainder of order $O(\bar{\gamma}^2)$ when higher-order terms are small. This matches the planner-centric ``current cost + expected next-task cost'' structure used by Dhakal et al., while our RL formulation retains the full discounted horizon and can propagate value across multiple future tasks when $\gamma$ is large.
+
+% The benchmarks are procedurally generated task streams rather than an offline corpus. The first is a symbolic restaurant benchmark with recurring service and cleanup tasks (\texttt{serve\_water}, \texttt{make\_coffee}, \texttt{serve\_fruit\_bowl}, \texttt{clear\_containers}, \texttt{wash\_objects}), aligned with the restaurant task families used by Talukder et al.\ \cite{talukder2024large}. The second is a 5$\times$5 gridworld with four objects, three receptacles, and move/clear tasks. We evaluate greedy matched-seed rollouts using success rate, average task steps, and average task return.
+
+\section{Technical Approach}
+Our implementation uses task-conditioned Deep Q-Network (DQN) agents operating on the augmented state $(s,\tau)$ \cite{mnih2015dqn}. We train both anticipatory and myopic agents in the same persistent environments, with the same action spaces, rewards, and reset schedules; they differ only in the Bellman target at successful task completion, as defined in Eq.~\eqref{eq:targets}. We approximate $Q(s,\tau,a)$ with a two-hidden-layer MLP and evaluate the learned policies in two persistent-task settings.
+
+\noindent\textbf{Restaurant}
+The first setting is a symbolic restaurant benchmark aligned with the task families used by Talukder et al.\ \cite{talukder2024large}. The restaurant state consists of the robot location, an optional held object, and for each container object its location, cleanliness, and contents (empty/water/coffee/fruit). The DQN input is a task-conditioned flat symbolic vector encoding robot location, held object, per-object location/cleanliness/contents/kind features, and the current task descriptor. The action space is a discrete set of 19 macro-actions: one \texttt{pick} action per object, one \texttt{place} action per location, and four manipulation actions (\texttt{wash\_held}, \texttt{fill\_water\_held}, \texttt{make\_coffee\_held}, \texttt{fill\_fruit\_held}).
+
+In our configuration we use 10 discrete locations (kitchen stations, sink/dish rack, pass counter, and two tables) and 5 reusable container objects (one mug, two glasses, and two bowls). Tasks are sampled i.i.d.\ from a fixed distribution over the five task families: \texttt{serve\_water}$(L)$, \texttt{make\_coffee}$(L)$, \texttt{serve\_fruit\_bowl}$(L)$, and \texttt{clear\_containers}$(L)$ for service locations $L \in \{\texttt{pass\_counter}, \texttt{table\_left}, \texttt{table\_right}\}$, plus \texttt{wash\_objects}$(k)$ for object kind $k \in \{\texttt{mug}, \texttt{glass}, \texttt{bowl}\}$. Conceptually, service tasks are satisfied by placing the appropriate prepared container at the target location, clearing requires removing all containers from the target location, and washing requires leaving a clean object of the requested kind in a wash-ready place. The physical world persists across task completion (objects stay where they were left), with separate environment resets only on a coarser schedule. A task can therefore be \emph{auto-satisfied} immediately if it is already true in the inherited state. This makes ``preparedness'' measurable as auto-satisfaction rate and as reductions in task steps/cost. Rewards use a positive success bonus together with per-step manipulation/travel costs and penalties for invalid macro-actions; we additionally apply an invalid-action mask during action selection.
+
+\noindent\textbf{Blocksworld}
+The original Blocksworld implementation from Dhakal et al.\ was not released, so some low-level environment details in our benchmark are assumed rather than copied exactly. In particular, we chose a $10\times 10$ grid, $2\times 2$ rectangular regions, and $1\times 1$ movable blocks. What we do keep consistent with their environment is the higher-level problem structure: 10 regions total (7 colored regions: red/blue/green/cyan/pink/orange/brown; and 3 ``white'' regions: \texttt{white\_1}, \texttt{white\_2}, \texttt{white\_3}), 8 blocks total (5 non-white blocks and 3 white blocks), and a single robot. Each region is a logical receptacle: any tile inside the region satisfies a placement directive, and at most one block may occupy a region. Thus a state is determined by the robot position, each block's position (or region occupancy), and whether the robot is holding a block. Figure \ref{fig:obs} shows the state space for the Blocksworld benchmark.
+
+The task space consists of 1-block or 2-block placement directives (e.g., $a\!\rightarrow\!\texttt{red}$ or $a\!\rightarrow\!\texttt{red},\,b\!\rightarrow\!\texttt{blue}$). Only non-white blocks and non-white regions appear in tasks; each environment samples a task library of 20 unique tasks by default, and task streams are sampled from this library. Anticipatory behavior can therefore exploit the fact that white regions/blocks serve as ``parking'' resources that do not directly appear as goals. In other words, the numbers of regions, objects, and task types are intended to stay consistent with the prior benchmark even though the exact geometry is our own assumption.
+
+For planner-cost evaluation we use the action model in our PDDL domain (\texttt{move}, \texttt{pick}, \texttt{place}) and a motion-cost model aligned with Dhakal et al.\: the move cost is $25\times$ a collision-avoiding Lazy PRM path length (occupied block tiles are obstacles; empty region tiles are traversable), while pick and place have fixed cost 100 each. Separately, the image-based RL environment exposes a primitive 6-action space (move up/down/left/right, pick, place) and uses the same region semantics for goal satisfaction (Figure~\ref{fig:obs}). Thus, our Blocksworld benchmark should be read as a faithful structural reproduction of the published setting---matching the numbers of regions, objects, task types, and planner cost model---while making explicit assumptions for unreleased geometric details such as grid size, region size, object size, and layout.
+
+We focus on these lightweight benchmarks because reproducing the full large-scale embodied restaurant and home experiments of Talukder et al.\ would require substantially more computation (repeated planning, large simulators, and long task sequences) than available in this project.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.45\textwidth]{images/blockworld_obs.png}
+\includegraphics[width=0.45\textwidth]{images/blockworld_obs_all.png}
+\caption{State space for the Blocksworld benchmark. The left image shows the first three channels of the input observation, which shows the current environment state. 
+Each region is a $2\times 2$ block, and each object is a $1\times 1$ block.
+The right image shows all the eight channels that the agent sees, which includes additional channels for the current task.}
+\label{fig:obs}
+\end{figure}
+
+
+
+The myopic baseline is the same persistent environment with the same reset schedule as anticipatory, but successful transitions are stored as terminal for learning (Eq.~\eqref{eq:targets}). Once task-boundary bootstrapping is enabled, the discount factor $\gamma$ controls the effective anticipation horizon: smaller values emphasize near-term tasks, while larger values more strongly value preparedness for the continuing stream (Theorem~\ref{thm:gamma-horizon}).
+
+\section{Results}
+Table \ref{tab:restaurant_multiseed} summarizes restaurant performance over 5 matched evaluation seeds (task and environment RNG), with 5000 tasks per seed. Across all seeds, the anticipatory agent increases preparedness (auto-rate) and improves efficiency (lower steps per task) while achieving higher average return and reward per step. Success rates are nearly identical, with a small drop for the anticipatory agent that is within a few tenths of a percent.
+
+\noindent\textbf{Metrics:}
+Restaurant results are reported in RL-centric metrics induced by the environment reward function (average task return and reward per step), along with success, steps per task, and preparedness (auto-rate). In contrast, Blocksworld results are reported as planner-style average task cost under the Dhakal et al.\ cost model (Lazy PRM motion cost plus fixed pick/place costs). These quantities are therefore not comparable in absolute scale across environments; comparisons should be made within each benchmark.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+Metric & Anticipatory (mean$\pm$std) & Myopic (mean$\pm$std)  \\
+\midrule
+% Success rate & 0.9958$\pm$0.0007 & 0.9995$\pm$0.0002 & -0.0037$\pm$0.0005 \\
+% Auto-rate & 0.3963$\pm$0.0071 & 0.2965$\pm$0.0041 & 0.0998$\pm$0.0109 \\
+Avg steps / task & 1.8934$\pm$0.0167 & 1.9729$\pm$0.0200  \\
+Avg task return & 10.9562$\pm$0.0510 & 10.3705$\pm$0.0866  \\
+Reward / step & 5.7871$\pm$0.0759 & 5.2574$\pm$0.0965  \\
+\bottomrule
+\end{tabular}
+\caption{Restaurant evaluation over 5 seeds (task/env RNG seeds), 5000 tasks each.}
+\label{tab:restaurant_multiseed}
+\end{table}
+
+For Blocksworld, we evaluate anticipatory and myopic planning cost under the planner-centric cost model used by Dhakal et al.\. The environment is a $10 \times 10$ grid with $2 \times 2$ regions and $1 \times 1$ objects; costs are $25 \times$ Lazy PRM collision-aware path length for moves and a fixed cost of $100$ each for pick and place. Table \ref{tab:blocksworld_cost} reports the resulting average task cost (lower is better).
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Metric & Anticipatory (mean$\pm$std) & Myopic (mean$\pm$std) \\
+\midrule
+Avg task cost & 17765.0$\pm$5488.35 & 22751.0$\pm$1836.13 \\
+\bottomrule
+\end{tabular}
+\caption{Blocksworld planner-cost evaluation (lower is better) under the Dhakal et al.\ cost model: move cost $25\times$ Lazy PRM path length, pick cost $100$, place cost $100$.}
+\label{tab:blocksworld_cost}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{images/restaurant_aog_plot.png}
+\caption{Restaurant anticipatory planning results across evaluation seeds. The anticipatory agent gets higher return, and on average completes tasks in less number of steps.}
+\label{fig:restaurant_aog}
+\end{figure}
+
+\section{Conclusion}
+We formulated anticipatory planning as continuing-task RL in a persistent environment, where preparedness corresponds to the value of the physical state under the future task stream. This yields a simple theoretical difference between anticipatory and myopic learning: the anticipatory agent bootstraps across task boundaries, while the myopic agent treats task completion as terminal for learning. Empirically, in a symbolic restaurant benchmark aligned with Talukder et al., anticipatory RL improves preparedness (auto-rate) and efficiency (steps per task) and increases return per step under matched evaluation seeds. In a Blocksworld benchmark based on Dhakal et al., anticipatory behavior also reduces planner-evaluated task cost under a collision-aware Lazy PRM motion model. More broadly, these benefits arise when tasks are interdependent through the persistent world state: anticipation is useful when how one task is completed changes the cost of likely future tasks, but it offers little or no advantage when tasks are effectively independent and each task leaves no meaningful consequences for the next.
+
+Future work will (i) more faithfully recreate prior anticipatory-planning baselines (classical planner and supervised GNN cost estimator) and perform direct, matched comparisons against anticipatory RL under identical task streams and cost models, (ii) extend beyond stationary task distributions to non-stationary and context-dependent task processes, where the agent must adapt its anticipatory value estimates online, and (iii) test the advantage of anticipation on bigger scale with actual human data, such as HOMER \cite{patel2023predicting}.
+\clearpage
+\phantomsection
+\label{sec:refs}
+\bibliographystyle{unsrt}
+\bibliography{final_report}
+\end{document}
