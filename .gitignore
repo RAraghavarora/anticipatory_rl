@@ -17,3 +17,6 @@ sas_plan*
 *.log
 *.err
 *.out
+*.aux
+*.fdb_latexmk
+*.fls
