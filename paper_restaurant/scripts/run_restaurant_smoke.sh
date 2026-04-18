@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CORPUS_PATH="${CORPUS_PATH:-data/restaurant_layouts/talukder_scale_layouts.json}"
-OUT_ROOT="${OUT_ROOT:-runs/talukder_scale_smoke}"
+CORPUS_PATH="${CORPUS_PATH:-data/restaurant_layouts/paper2_scale_layouts.json}"
+OUT_ROOT="${OUT_ROOT:-runs/paper2_scale_smoke}"
 SEED="${SEED:-0}"
 
 python scripts/generate_restaurant_layout_corpus.py \
@@ -15,7 +15,7 @@ python scripts/validate_restaurant_layout_corpus.py \
   --head 50
 
 python -m anticipatory_rl.agents.restaurant_dqn \
-  --run-label talukder_smoke_myo_seed"${SEED}" \
+  --run-label paper2_smoke_myo_seed"${SEED}" \
   --config-path anticipatory_rl/configs/restaurant_symbolic.yaml \
   --layout-corpus "${CORPUS_PATH}" \
   --sample-layout-per-reset \
@@ -26,7 +26,7 @@ python -m anticipatory_rl.agents.restaurant_dqn \
   --seed "${SEED}"
 
 python -m anticipatory_rl.agents.restaurant_dqn \
-  --run-label talukder_smoke_ant_seed"${SEED}" \
+  --run-label paper2_smoke_ant_seed"${SEED}" \
   --config-path anticipatory_rl/configs/restaurant_symbolic.yaml \
   --layout-corpus "${CORPUS_PATH}" \
   --sample-layout-per-reset \
@@ -37,8 +37,8 @@ python -m anticipatory_rl.agents.restaurant_dqn \
   --seed "${SEED}"
 
 python paper_restaurant/scripts/restaurant_multi_seed_infer.py \
-  --anticipatory-weights runs/talukder_smoke_ant_seed"${SEED}"/restaurant_dqn.pt \
-  --myopic-weights runs/talukder_smoke_myo_seed"${SEED}"/restaurant_dqn.pt \
+  --anticipatory-weights runs/paper2_smoke_ant_seed"${SEED}"/restaurant_dqn.pt \
+  --myopic-weights runs/paper2_smoke_myo_seed"${SEED}"/restaurant_dqn.pt \
   --config-path anticipatory_rl/configs/restaurant_symbolic.yaml \
   --layout-corpus "${CORPUS_PATH}" \
   --sample-layout-per-reset \

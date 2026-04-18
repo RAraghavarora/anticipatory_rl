@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Talukder-scale symbolic restaurant layout corpus."""
+"""Generate Paper2-scale symbolic restaurant layout corpus."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ def generate_corpus(args: argparse.Namespace) -> Dict[str, Any]:
         layouts.append(layout)
 
     return {
-        "version": "talukder_scale_v1",
+        "version": "paper2_scale_v1",
         "seed": int(args.seed),
         "num_layouts": int(args.num_layouts),
         "target_rooms_per_layout": 2,
@@ -213,7 +213,7 @@ def generate_corpus(args: argparse.Namespace) -> Dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate large-scale symbolic restaurant layout corpus.")
-    parser.add_argument("--output-path", type=Path, default=Path("data/restaurant_layouts/talukder_scale_layouts.json"))
+    parser.add_argument("--output-path", type=Path, default=Path("data/restaurant_layouts/paper2_scale_layouts.json"))
     parser.add_argument("--num-layouts", type=int, default=1000)
     parser.add_argument("--min-tasks-per-layout", type=int, default=50)
     parser.add_argument("--max-tasks-per-layout", type=int, default=100)

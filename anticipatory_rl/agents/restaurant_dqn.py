@@ -446,13 +446,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-task-steps", type=int, default=24)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
-    parser.add_argument("--pick-cost", type=float, default=1.0)
-    parser.add_argument("--place-cost", type=float, default=1.0)
-    parser.add_argument("--wash-cost", type=float, default=2.0)
-    parser.add_argument("--fill-cost", type=float, default=1.0)
-    parser.add_argument("--brew-cost", type=float, default=2.0)
-    parser.add_argument("--fruit-cost", type=float, default=2.0)
+    parser.add_argument("--travel-cost-scale", type=float, default=25.0)
+    parser.add_argument("--pick-cost", type=float, default=25.0)
+    parser.add_argument("--place-cost", type=float, default=25.0)
+    parser.add_argument("--wash-cost", type=float, default=25.0)
+    parser.add_argument("--fill-cost", type=float, default=25.0)
+    parser.add_argument("--brew-cost", type=float, default=25.0)
+    parser.add_argument("--fruit-cost", type=float, default=25.0)
     parser.add_argument(
         "--config-path",
         type=Path,

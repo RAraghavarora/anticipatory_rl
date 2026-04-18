@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate generated Talukder-scale restaurant layout corpus."""
+"""Validate generated Paper2-scale restaurant layout corpus."""
 
 from __future__ import annotations
 
@@ -87,8 +87,8 @@ def validate(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate Talukder-scale restaurant layout corpus.")
-    parser.add_argument("--corpus-path", type=Path, default=Path("data/restaurant_layouts/talukder_scale_layouts.json"))
+    parser = argparse.ArgumentParser(description="Validate Paper2-scale restaurant layout corpus.")
+    parser.add_argument("--corpus-path", type=Path, default=Path("data/restaurant_layouts/paper2_scale_layouts.json"))
     parser.add_argument("--min-layouts", type=int, default=1000)
     parser.add_argument("--min-categories", type=int, default=25)
     parser.add_argument("--min-tasks", type=int, default=50)
