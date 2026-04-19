@@ -1,5 +1,7 @@
-"""Agent implementations."""
+"""Agent implementations.
 
-from . import task_conditioned_q_agent
+Keep package init import-light so standalone entry points do not pull optional
+GUI/OpenGL dependencies (e.g., MiniWorld) unless explicitly needed.
+"""
 
-__all__ = ["task_conditioned_q_agent"]
+__all__ = []
