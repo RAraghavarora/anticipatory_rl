@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
+from tqdm import tqdm
 
 from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv, RestaurantTask
 from anticipatory_rl.tasks.restaurant_graph import build_restaurant_graph
@@ -106,6 +107,8 @@ def build_dataset(args: argparse.Namespace) -> Dict[str, Any]:
     split_probs = split_probs / split_probs.sum()
     jobs: List[Dict[str, Any]] = []
     for i in range(args.num_states):
+        if args.num_shards > 1 and (i % args.num_shards) != args.shard_index:
+            continue
         jobs.append(
             {
                 "idx": i,
@@ -122,16 +125,26 @@ def build_dataset(args: argparse.Namespace) -> Dict[str, Any]:
                 "split_probs": split_probs.tolist(),
             }
         )
+    progress_desc = f"planner-dataset shard {args.shard_index + 1}/{args.num_shards}"
     if args.jobs <= 1:
-        rows = [_build_one_row(job) for job in jobs]
+        rows = []
+        for job in tqdm(jobs, desc=progress_desc, unit="state"):
+            rows.append(_build_one_row(job))
     else:
         with concurrent.futures.ProcessPoolExecutor(max_workers=int(args.jobs)) as ex:
-            for row in ex.map(_build_one_row, jobs, chunksize=max(1, len(jobs) // (args.jobs * 4) if args.jobs > 0 else 1)):
+            chunksize = max(1, len(jobs) // (args.jobs * 4) if args.jobs > 0 else 1)
+            for row in tqdm(
+                ex.map(_build_one_row, jobs, chunksize=chunksize),
+                total=len(jobs),
+                desc=progress_desc,
+                unit="state",
+            ):
                 rows.append(row)
 
     return {
         "meta": {
             "num_rows": len(rows),
+            "num_states_requested": int(args.num_states),
             "seed": int(args.seed),
             "search": args.search,
             "followup_samples": int(args.followup_samples),
@@ -139,6 +152,8 @@ def build_dataset(args: argparse.Namespace) -> Dict[str, Any]:
             "planner_path": str(planner),
             "domain_path": str(domain),
             "jobs": int(args.jobs),
+            "shard_index": int(args.shard_index),
+            "num_shards": int(args.num_shards),
         },
         "rows": rows,
     }
@@ -159,9 +174,16 @@ def main() -> None:
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--jobs", type=int, default=1, help="CPU worker processes for parallel FD labeling.")
+    parser.add_argument("--shard-index", type=int, default=0, help="Shard id in [0, num-shards).")
+    parser.add_argument("--num-shards", type=int, default=1, help="Total number of shards for multi-node generation.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-path", type=Path, default=Path("data/restaurant_planner_dataset/paper2_planner_labels.json"))
     args = parser.parse_args()
+
+    if args.num_shards <= 0:
+        raise ValueError("--num-shards must be >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.num_shards:
+        raise ValueError("--shard-index must be in [0, num-shards)")
 
     dataset = build_dataset(args)
     args.output_path.parent.mkdir(parents=True, exist_ok=True)

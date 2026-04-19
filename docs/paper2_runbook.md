@@ -79,11 +79,15 @@ LS6:
 sbatch slurm/build_restaurant_paper2_planner_dataset_ls6.sh
 ```
 
-This LS6 job is CPU-oriented (`normal` queue) and uses `--cpus-per-task=32`.
-Override worker count if needed:
+This LS6 job is CPU-oriented and defaults to multi-node sharded generation:
+- partition: `large`
+- nodes/tasks: `4` nodes, `4` shards (one per task/rank)
+- CPUs per shard: `64` (`JOBS` defaults to `SLURM_CPUS_PER_TASK`)
+
+Override resources/parallelism if needed:
 
 ```bash
-sbatch --export=ALL,JOBS=48 slurm/build_restaurant_paper2_planner_dataset_ls6.sh
+sbatch -N 4 -n 4 --cpus-per-task=64 --export=ALL,JOBS=64,NUM_STATES=4000 slurm/build_restaurant_paper2_planner_dataset_ls6.sh
 ```
 
 ## 5) Train planner-side APCostEstimator (GNN)
