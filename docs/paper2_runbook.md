@@ -80,7 +80,7 @@ sbatch slurm/build_restaurant_paper2_planner_dataset_ls6.sh
 ```
 
 This LS6 job is CPU-oriented and defaults to multi-node sharded generation:
-- partition: `large`
+- partition: `normal`
 - nodes/tasks: `4` nodes, `4` shards (one per task/rank)
 - CPUs per shard: `64` (`JOBS` defaults to `SLURM_CPUS_PER_TASK`)
 

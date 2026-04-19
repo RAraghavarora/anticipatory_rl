@@ -4,7 +4,7 @@
 #SBATCH -J rest_p2_dataset_ls6
 #SBATCH -o slurm_logs/%x.o%j
 #SBATCH -e slurm_logs/%x.e%j
-#SBATCH -p large
+#SBATCH -p normal
 #SBATCH -N 4
 #SBATCH -n 4
 #SBATCH --ntasks-per-node=1
