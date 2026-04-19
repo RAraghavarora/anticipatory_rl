@@ -1,0 +1,133 @@
+locations:
+  - name: kitchen_counter
+    coord: [1, 1]
+    room: kitchen
+  - name: coffee_machine
+    coord: [2, 1]
+    room: kitchen
+  - name: water_station
+    coord: [2, 2]
+    room: kitchen
+  - name: fruit_station
+    coord: [2, 3]
+    room: kitchen
+  - name: dish_rack
+    coord: [1, 2]
+    room: kitchen
+  - name: sink
+    coord: [1, 3]
+    room: kitchen
+  - name: pass_counter
+    coord: [5, 5]
+    room: serving
+  - name: table_left
+    coord: [7, 3]
+    room: serving
+  - name: bus_tub
+    coord: [7, 5]
+    room: serving
+  - name: table_right
+    coord: [7, 7]
+    room: serving
+
+object_kinds: [mug, glass, bowl]
+contents: [empty, water, coffee, fruit]
+task_types: [serve_water, make_coffee, serve_fruit_bowl, clear_containers, wash_objects]
+
+service_locations: [pass_counter, table_left, table_right]
+wash_ready_locations: [dish_rack, kitchen_counter]
+dirty_drop_locations: [sink, bus_tub]
+
+stations:
+  water: water_station
+  coffee: coffee_machine
+  fruit: fruit_station
+  wash: sink
+
+object_specs:
+  - {name: mug_red, kind: mug}
+  - {name: glass_tall, kind: glass}
+  - {name: glass_short, kind: glass}
+  - {name: bowl_small, kind: bowl}
+  - {name: bowl_large, kind: bowl}
+
+container_capacity: null
+
+task_distribution:
+  # No-clear ablation: clear_containers removed and remaining tasks renormalized.
+  serve_water: 0.4117647059
+  make_coffee: 0.2941176471
+  serve_fruit_bowl: 0.1764705882
+  clear_containers: 0.0
+  wash_objects: 0.1176470588
+
+service_location_distribution:
+  pass_counter: 0.34
+  table_left: 0.33
+  table_right: 0.33
+
+wash_kind_distribution:
+  mug: 0.40
+  glass: 0.30
+  bowl: 0.30
+
+reset_location_distribution:
+  mug:
+    kitchen_counter: 0.40
+    dish_rack: 0.25
+    sink: 0.05
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
+  glass:
+    kitchen_counter: 0.15
+    dish_rack: 0.45
+    sink: 0.05
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
+    bus_tub: 0.05
+  bowl:
+    kitchen_counter: 0.20
+    dish_rack: 0.35
+    sink: 0.05
+    fruit_station: 0.10
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
+
+paper2_cost:
+  enabled: true
+  fixed_costs:
+    pick: 100.0
+    place: 100.0
+    fill: 100.0
+    wash: 100.0
+    brew: 100.0
+    fruit: 100.0
+  move:
+    scale: 1.0
+    grid:
+      width: 10
+      height: 10
+      blocked_cells:
+        - [4, 0]
+        - [4, 1]
+        - [4, 2]
+        - [4, 3]
+        - [4, 4]
+        - [4, 6]
+        - [4, 7]
+        - [4, 8]
+        - [4, 9]
+    location_cells:
+      kitchen_counter: [1, 1]
+      coffee_machine: [2, 1]
+      water_station: [2, 2]
+      fruit_station: [2, 3]
+      dish_rack: [1, 2]
+      sink: [1, 3]
+      pass_counter: [5, 5]
+      table_left: [7, 3]
+      bus_tub: [7, 5]
+      table_right: [7, 7]
