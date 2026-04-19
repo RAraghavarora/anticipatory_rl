@@ -54,7 +54,6 @@ object_specs:
 container_capacity: null
 
 task_distribution:
-  # No-clear ablation: clear_containers removed and remaining tasks renormalized.
   serve_water: 0.4117647059
   make_coffee: 0.2941176471
   serve_fruit_bowl: 0.1764705882
