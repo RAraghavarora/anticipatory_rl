@@ -101,7 +101,7 @@ class RestaurantSymbolicEnv(Env):
         self,
         *,
         config_path: str | Path | None = None,
-        max_task_steps: int = 24,
+        max_steps_per_task: int = 100,
         success_reward: float = 15.0,
         invalid_action_penalty: float = 6.0,
         travel_cost_scale: float = 25.0,
@@ -117,7 +117,7 @@ class RestaurantSymbolicEnv(Env):
         self._base_config = _load_config(Path(config_path)) if config_path is not None else _load_config(CONFIG_PATH)
         self._rng = np.random.default_rng(rng_seed)
 
-        self.max_task_steps = max(1, int(max_task_steps))
+        self.max_steps_per_task = max(1, int(max_steps_per_task))
         self.success_reward = float(success_reward)
         self.invalid_action_penalty = float(invalid_action_penalty)
         self.travel_cost_scale = float(travel_cost_scale)
@@ -230,11 +230,18 @@ class RestaurantSymbolicEnv(Env):
             self._task_steps = 0
             self._paper2_task_cost = 0.0
 
-        if not success and self._task_steps >= self.max_task_steps:
+        if not success and self._task_steps >= self.max_steps_per_task:
             truncated = True
             self._paper2_task_cost = 0.0
 
         return self._obs(), reward, success, truncated, self._info(success=success)
+
+    def advance_task_after_timeout(self):
+        """Advance to a new task without resetting persistent world state."""
+        self._task_steps = 0
+        self._paper2_task_cost = 0.0
+        self._resample_task()
+        return self._obs(), self._info(success=False)
 
     # ------------------------------------------------------------------
     # Public helpers

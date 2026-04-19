@@ -77,10 +77,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--softmax-temperature", type=float, default=0.0)
-    parser.add_argument("--tasks-per-reset", type=int, default=200)
-    parser.add_argument("--task-sequence-length", type=int, default=40)
+    parser.add_argument("--task-sequence-length", type=int, default=200)
     parser.add_argument("--eval-layout-count", type=int, default=0, help="When >0, evaluate this many layout sequences.")
-    parser.add_argument("--max-task-steps", type=int, default=24)
+    parser.add_argument("--max-steps-per-task", type=int, default=100)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--travel-cost-scale", type=float, default=25.0)
@@ -125,7 +124,7 @@ def parse_args() -> argparse.Namespace:
 def make_env(args: argparse.Namespace) -> RestaurantSymbolicEnv:
     return RestaurantSymbolicEnv(
         config_path=args.config_path,
-        max_task_steps=args.max_task_steps,
+        max_steps_per_task=args.max_steps_per_task,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
         travel_cost_scale=args.travel_cost_scale,
@@ -308,7 +307,6 @@ def evaluate(
     task_return = 0.0
     task_steps = 0
     task_paper2_cost = 0.0
-    tasks_since_reset = 0
     episode_index = 0
     current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
     task_records: List[Dict[str, Any]] = []
@@ -338,7 +336,11 @@ def evaluate(
                 generator=action_gen,
             )
 
-        obs, reward, success, truncated, info = env.step(action)
+        next_obs, reward, success, truncated, next_info = env.step(action)
+        if truncated:
+            next_obs, next_info = env.advance_task_after_timeout()
+        obs = next_obs
+        info = next_info
         total_steps += 1
         task_steps += 1
         task_return += float(reward)
@@ -352,7 +354,6 @@ def evaluate(
             progress.update(1)
             if success:
                 successes += 1
-                tasks_since_reset += 1
             task_records.append(
                 {
                     "task_number": total_tasks,
@@ -372,9 +373,7 @@ def evaluate(
             task_paper2_cost = 0.0
             task_steps = 0
             sequence_task_count += 1
-            reset_required = bool(truncated)
-            if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
-                reset_required = True
+            reset_required = False
             if args.task_sequence_length > 0 and sequence_task_count >= args.task_sequence_length:
                 reset_required = True
                 sequence_task_count = 0
@@ -382,7 +381,6 @@ def evaluate(
             if reset_required:
                 episode_index += 1
                 obs, info = _reset_env(args.seed + 100_003 * episode_index, sequence_index)
-                tasks_since_reset = 0
             current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
 
     progress.close()
@@ -449,7 +447,7 @@ def run_compare(args: argparse.Namespace) -> None:
         "action_policy": _action_policy_label(float(args.softmax_temperature)),
         "seed": int(args.seed),
         "num_tasks": int(args.num_tasks),
-        "tasks_per_reset": int(args.tasks_per_reset),
+        "task_sequence_length": int(args.task_sequence_length),
         "anticipatory": anticipatory,
         "myopic": myopic,
         "delta": {

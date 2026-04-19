@@ -44,8 +44,7 @@ srun python -m anticipatory_rl.agents.restaurant_dqn \
   --task-sequence-length 40 \
   --run-label restaurant_paper2_anticipatory_seed0 \
   --total-steps 700000 \
-  --tasks-per-reset 40 \
-  --env-reset-tasks 40
+  --tasks-per-episode 40
 
 date
 echo "Job finished"

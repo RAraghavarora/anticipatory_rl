@@ -18,26 +18,11 @@ from tqdm import tqdm
 
 from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv
 
-
-def _select_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:
-    if decay <= 0:
-        return final
-    return final + (start - final) * np.exp(-float(step) / float(decay))
-
-
-def _resolve_run_label(args: argparse.Namespace) -> str:
-    if args.run_label is not None:
-        return args.run_label
-    return "myopic_restaurant" if args.tasks_per_reset <= 1 else "anticipatory_restaurant"
-
+from anticipatory_rl.agents.utils import (
+    select_device,
+    epsilon_by_step,
+    resolve_run_label,
+)
 
 def _load_layout_corpus(path: Path | None) -> List[Dict[str, Any]]:
     if path is None:
@@ -172,7 +157,7 @@ def _optimize(
 
 
 def train(args: argparse.Namespace) -> Path:
-    device = _select_device()
+    device = select_device()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -181,7 +166,7 @@ def train(args: argparse.Namespace) -> Path:
 
     env = RestaurantSymbolicEnv(
         config_path=args.config_path,
-        max_task_steps=args.max_task_steps,
+        max_steps_per_task=args.max_steps_per_task,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
         travel_cost_scale=args.travel_cost_scale,
@@ -194,7 +179,7 @@ def train(args: argparse.Namespace) -> Path:
         rng_seed=args.seed,
     )
 
-    run_label = _resolve_run_label(args)
+    run_label = resolve_run_label(args)
     run_dir = Path("runs") / run_label
     run_dir.mkdir(parents=True, exist_ok=True)
     output_path = run_dir / args.output_name
@@ -231,13 +216,6 @@ def train(args: argparse.Namespace) -> Path:
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
     replay = ReplayBuffer(args.replay_size)
 
-    if args.env_reset_tasks is not None:
-        env_reset_tasks = args.env_reset_tasks
-    elif args.task_sequence_length > 0:
-        env_reset_tasks = args.task_sequence_length
-    else:
-        env_reset_tasks = args.tasks_per_reset
-
     task_return = 0.0
     task_paper2_cost = 0.0
     task_steps = 0
@@ -245,8 +223,8 @@ def train(args: argparse.Namespace) -> Path:
     tasks_completed = 0
     current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
     steps_since_reset = 0
-    tasks_since_reset = 0
-    env_tasks_since_reset = 0
+    tasks_since_episode = 0
+    tasks_since_world_reset = 0
     episode_index = 0
 
     recent_returns: Deque[float] = deque(maxlen=100)
@@ -278,30 +256,19 @@ def train(args: argparse.Namespace) -> Path:
         steps_since_reset += 1
         episode_done_flag = False
         env_reset_flag = False
-        trunc_reset_flag = False
         bootstrap_done = False
 
         if success:
-            tasks_since_reset += 1
-            env_tasks_since_reset += 1
-            if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
+            tasks_since_episode += 1
+            if args.tasks_per_episode > 0 and tasks_since_episode >= args.tasks_per_episode:
                 episode_done_flag = True
                 bootstrap_done = True
-                tasks_since_reset = 0
-            if env_reset_tasks is not None and env_reset_tasks > 0 and env_tasks_since_reset >= env_reset_tasks:
-                env_reset_flag = True
-                episode_done_flag = True
-                bootstrap_done = True
-                env_tasks_since_reset = 0
+                tasks_since_episode = 0
 
         if truncated:
-            trunc_reset_flag = True
-            tasks_since_reset = 0
-            env_tasks_since_reset = 0
+            next_obs, next_info = env.advance_task_after_timeout()
         if args.episode_step_limit > 0 and steps_since_reset >= args.episode_step_limit:
-            trunc_reset_flag = True
-            tasks_since_reset = 0
-            env_tasks_since_reset = 0
+            env_reset_flag = True
 
         transition = Transition(
             state=np.array(obs, dtype=np.float32, copy=True),
@@ -333,6 +300,10 @@ def train(args: argparse.Namespace) -> Path:
             total_tasks += 1
             if success:
                 tasks_completed += 1
+            tasks_since_world_reset += 1
+            if args.task_sequence_length > 0 and tasks_since_world_reset >= args.task_sequence_length:
+                env_reset_flag = True
+                tasks_since_world_reset = 0
             recent_returns.append(task_return)
             recent_success.append(1 if success else 0)
             recent_auto.append(1 if current_task_auto_satisfied else 0)
@@ -360,13 +331,13 @@ def train(args: argparse.Namespace) -> Path:
             task_steps = 0
             current_task_auto_satisfied = bool(next_info.get("next_auto_satisfied", False))
 
-        if env_reset_flag or trunc_reset_flag:
+        if env_reset_flag:
             episode_index += 1
             reset_seed = args.seed + 100_003 * episode_index
             obs, info = _reset_env(reset_seed, episode_index)
             current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
-            env_tasks_since_reset = 0
-        if episode_done_flag or trunc_reset_flag:
+            tasks_since_world_reset = 0
+        if episode_done_flag or env_reset_flag:
             steps_since_reset = 0
 
         avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
@@ -399,8 +370,7 @@ def train(args: argparse.Namespace) -> Path:
         "paper2_cost_total": float(np.sum([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
         "avg_task_paper2_cost": float(np.mean([r.get("paper2_cost", 0.0) for r in task_records])) if task_records else 0.0,
         "mean_loss": float(np.mean(loss_history)) if loss_history else 0.0,
-        "tasks_per_reset": int(args.tasks_per_reset),
-        "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
+        "tasks_per_episode": int(args.tasks_per_episode),
         "task_sequence_length": int(args.task_sequence_length),
         "layout_corpus": None if args.layout_corpus is None else str(args.layout_corpus),
         "layout_mode": "sample_per_reset" if args.sample_layout_per_reset else "round_robin",
@@ -429,21 +399,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-update", type=int, default=1_000)
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
-    parser.add_argument("--tasks-per-reset", type=int, default=1)
-    parser.add_argument("--task-sequence-length", type=int, default=0, help="Target tasks per sequence; used as env reset interval when env-reset-tasks is unset.")
-    parser.add_argument(
-        "--env-reset-tasks",
-        type=int,
-        default=None,
-        help="Physical env reset interval in tasks (default: same as tasks-per-reset).",
-    )
+    parser.add_argument("--tasks-per-episode", type=int, default=200)
+    parser.add_argument("--task-sequence-length", type=int, default=200, help="Physical reset interval in task attempts.")
     parser.add_argument(
         "--episode-step-limit",
         type=int,
         default=0,
         help="Maximum primitive steps allowed between resets; <=0 disables.",
     )
-    parser.add_argument("--max-task-steps", type=int, default=24)
+    parser.add_argument("--max-steps-per-task", type=int, default=100)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--travel-cost-scale", type=float, default=25.0)

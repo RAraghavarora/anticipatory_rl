@@ -53,11 +53,17 @@ python paper_restaurant/scripts/restaurant_multi_seed_infer.py \
   --eval-layout-count 500 \
   --task-sequence-length 40 \
   --num-tasks 20000 \
-  --tasks-per-reset 40 \
   --seed-from 0 \
   --seed-to 4 \
   --output-dir runs/paper2_scale_full/infer
 ```
+
+## RL semantics (current)
+
+- `--tasks-per-episode` (training only): controls replay bootstrapping boundary.
+- `--task-sequence-length`: controls physical world reset cadence.
+- `--max-steps-per-task`: timeout threshold per task.
+- On timeout, the system samples a new task **without** resetting the world.
 
 ## 4) Build planner-labeled dataset (FD labels)
 
@@ -136,13 +142,20 @@ sbatch slurm/eval_restaurant_paper2_planner_ls6.sh
 
 Do not launch the next stage until the previous job finishes successfully.
 
-## Optional shortcuts
+## Optional unified RL wrapper
 
-- Smoke: `bash paper_restaurant/scripts/run_restaurant_smoke.sh`
-- Medium: `bash paper_restaurant/scripts/run_restaurant_medium.sh`
-- Full infer-only wrapper: `bash paper_restaurant/scripts/run_restaurant_full.sh`
+Run dataset generation + validation + RL training + multi-seed inference:
 
-These wrappers assume the same corpus path and naming conventions used above.
+```bash
+bash paper_restaurant/scripts/run_restaurant_rl.sh
+```
+
+Override defaults if needed:
+
+```bash
+SEED_FROM=0 SEED_TO=4 OUT_ROOT=runs/paper2_scale_full \
+bash paper_restaurant/scripts/run_restaurant_rl.sh
+```
 
 ## Notes
 

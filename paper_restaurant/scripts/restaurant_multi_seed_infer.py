@@ -72,8 +72,7 @@ def _infer_cmd(
     eval_layout_count: int,
     task_sequence_length: int,
     hidden_dim: int,
-    tasks_per_reset: int,
-    max_task_steps: int,
+    max_steps_per_task: int,
     success_reward: float,
     invalid_action_penalty: float,
     travel_cost_scale: float,
@@ -107,10 +106,8 @@ def _infer_cmd(
         str(int(total_steps)),
         "--hidden-dim",
         str(int(hidden_dim)),
-        "--tasks-per-reset",
-        str(int(tasks_per_reset)),
-        "--max-task-steps",
-        str(int(max_task_steps)),
+        "--max-steps-per-task",
+        str(int(max_steps_per_task)),
         "--success-reward",
         str(float(success_reward)),
         "--invalid-action-penalty",
@@ -161,8 +158,7 @@ def _run_one_seed(
     eval_layout_count: int,
     task_sequence_length: int,
     hidden_dim: int,
-    tasks_per_reset: int,
-    max_task_steps: int,
+    max_steps_per_task: int,
     success_reward: float,
     invalid_action_penalty: float,
     travel_cost_scale: float,
@@ -206,8 +202,7 @@ def _run_one_seed(
         eval_layout_count=eval_layout_count,
         task_sequence_length=task_sequence_length,
         hidden_dim=hidden_dim,
-        tasks_per_reset=tasks_per_reset,
-        max_task_steps=max_task_steps,
+        max_steps_per_task=max_steps_per_task,
         success_reward=success_reward,
         invalid_action_penalty=invalid_action_penalty,
         travel_cost_scale=travel_cost_scale,
@@ -357,8 +352,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-layout-count", type=int, default=0)
     p.add_argument("--task-sequence-length", type=int, default=40)
     p.add_argument("--hidden-dim", type=int, default=256)
-    p.add_argument("--tasks-per-reset", type=int, default=200)
-    p.add_argument("--max-task-steps", type=int, default=24)
+    p.add_argument("--max-steps-per-task", type=int, default=100)
     p.add_argument("--success-reward", type=float, default=15.0)
     p.add_argument("--invalid-action-penalty", type=float, default=6.0)
     p.add_argument("--travel-cost-scale", type=float, default=25.0)
@@ -418,8 +412,7 @@ def main() -> None:
                 eval_layout_count=args.eval_layout_count,
                 task_sequence_length=args.task_sequence_length,
                 hidden_dim=args.hidden_dim,
-                tasks_per_reset=args.tasks_per_reset,
-                max_task_steps=args.max_task_steps,
+                max_steps_per_task=args.max_steps_per_task,
                 success_reward=args.success_reward,
                 invalid_action_penalty=args.invalid_action_penalty,
                 travel_cost_scale=args.travel_cost_scale,
