@@ -173,6 +173,13 @@ class RestaurantSymbolicEnv(Env):
             self._task_library = []
             self._task_library_index = 0
 
+        task_distribution_override = options.get("task_distribution")
+        if isinstance(task_distribution_override, Mapping):
+            self.task_distribution = {
+                name: float(task_distribution_override.get(name, 0.0))
+                for name in self.task_types
+            }
+
         agent_location = str(options.get("agent_location", self._default_agent_location()))
         if agent_location not in self.location_index:
             agent_location = self._default_agent_location()

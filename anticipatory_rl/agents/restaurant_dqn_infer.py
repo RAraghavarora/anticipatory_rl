@@ -257,6 +257,7 @@ def evaluate(
     output_dir: Path,
 ) -> Dict[str, Any]:
     env = make_env(args)
+    base_task_distribution = dict(getattr(env, "_base_config", {}).get("task_distribution", {}))
     layout_pool = _load_layout_corpus(args.layout_corpus)
     if args.layout_id:
         layout_pool = [x for x in layout_pool if str(x.get("layout_id")) == args.layout_id]
@@ -281,6 +282,10 @@ def evaluate(
             options["layout"] = layout
             if args.task_library_per_layout and isinstance(layout.get("task_library"), list):
                 options["task_library"] = layout.get("task_library")
+            elif not args.task_library_per_layout:
+                options["clear_task_library"] = True
+                if isinstance(base_task_distribution, dict) and base_task_distribution:
+                    options["task_distribution"] = base_task_distribution
         if options:
             return env.reset(seed=reset_seed, options=options)
         return env.reset(seed=reset_seed)
