@@ -11,5 +11,3 @@ openai>=1.60.0
 google-genai>=1.68.0
 pypdf>=6.0.0
 docx2txt>=0.9
-ai2thor>=5.0.0
-procthor>=1.0.0
