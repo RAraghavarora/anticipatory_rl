@@ -17,13 +17,13 @@ import torch
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from anticipatory_rl.agents.paper1_blockworld_image_dqn import ConvQNetwork
-from anticipatory_rl.envs.paper1_blockworld_image_env import (
+from .blockworld_image_dqn import ConvQNetwork
+from anticipatory_rl.envs.blockworld.blockworld_env import (
     Paper1BlockworldImageEnv,
     Task,
     WorldState,
 )
-from paper1_blockworld.motion import LazyPRMMotionPlanner
+from blockworld.motion import LazyPRMMotionPlanner
 
 
 def _select_device() -> torch.device:

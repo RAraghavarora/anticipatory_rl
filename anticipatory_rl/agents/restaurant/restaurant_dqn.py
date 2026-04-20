@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv
+from anticipatory_rl.envs.restaurant.restaurant_symbolic_env import RestaurantSymbolicEnv
 
 
 def _select_device() -> torch.device:

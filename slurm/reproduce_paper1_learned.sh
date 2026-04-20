@@ -39,7 +39,7 @@ if [ ! -f "${CHECKPOINT}" ]; then
   exit 1
 fi
 
-python -m paper1_blockworld.reproduce_paper1 \
+python -m blockworld.reproduce_paper1 \
   --paper-settings \
   --tasks-per-environment 20 \
   --preparation-iterations 200 \

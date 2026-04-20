@@ -20,11 +20,11 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from anticipatory_rl.envs.paper1_blockworld_image_env import (
+from anticipatory_rl.envs.blockworld.blockworld_env import (
     Paper1BlockworldImageEnv,
     WorldState,
 )
-from paper1_blockworld.motion import LazyPRMMotionPlanner
+from blockworld.motion import LazyPRMMotionPlanner
 
 
 class ConvQNetwork(nn.Module):

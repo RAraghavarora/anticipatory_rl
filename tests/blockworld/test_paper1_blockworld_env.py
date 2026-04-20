@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from anticipatory_rl.envs import Paper1BlockworldImageEnv
-from paper1_blockworld.world import Task, WorldConfig, WorldState
+from blockworld.world import Task, WorldConfig, WorldState
 
 
 def make_env(**kwargs) -> Paper1BlockworldImageEnv:

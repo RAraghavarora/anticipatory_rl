@@ -24,7 +24,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 source /u/rarora1/ant_env/bin/activate
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
-python -m anticipatory_rl.agents.restaurant_dqn_infer \
+python -m anticipatory_rl.agents.restaurant.restaurant_dqn_infer \
   --anticipatory-weights ./runs/restaurant_capacity_anticipatory/restaurant_dqn.pt \
   --myopic-weights ./runs/restaurant_capacity_myopic/restaurant_dqn.pt \
   --output-dir ./runs/compare_restaurant_capacity_dqn \

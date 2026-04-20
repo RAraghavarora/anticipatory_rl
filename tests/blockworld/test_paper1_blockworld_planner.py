@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import random
 
-from paper1_blockworld.motion import LazyPRMMotionPlanner
-from paper1_blockworld.planner import FastDownwardBlockworldPlanner
-from paper1_blockworld.world import (
+from blockworld.motion import LazyPRMMotionPlanner
+from blockworld.planner import FastDownwardBlockworldPlanner
+from blockworld.world import (
     COLORED_REGIONS,
     WHITE_REGIONS,
     Task,

@@ -8,7 +8,7 @@ from typing import List
 import numpy as np
 from PIL import Image
 
-from anticipatory_rl.envs.paper1_blockworld_image_env import Paper1BlockworldImageEnv
+from anticipatory_rl.envs.blockworld.blockworld_env import Paper1BlockworldImageEnv
 
 
 def obs_to_rgb(obs: np.ndarray) -> np.ndarray:

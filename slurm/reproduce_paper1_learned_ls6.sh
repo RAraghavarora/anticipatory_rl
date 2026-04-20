@@ -56,7 +56,7 @@ if [ ! -x downward/builds/release/bin/downward ]; then
   fi
 fi
 
-srun python -m paper1_blockworld.reproduce_paper1 \
+srun python -m blockworld.reproduce_paper1 \
   --paper-settings \
   --tasks-per-environment 20 \
   --preparation-iterations 200 \

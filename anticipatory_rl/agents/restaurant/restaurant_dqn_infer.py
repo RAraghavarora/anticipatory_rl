@@ -19,8 +19,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from anticipatory_rl.agents.restaurant_dqn import RestaurantQNetwork
-from anticipatory_rl.envs.restaurant_symbolic_env import (
+from .restaurant_dqn import RestaurantQNetwork
+from anticipatory_rl.envs.restaurant.restaurant_symbolic_env import (
     CONFIG_PATH as DEFAULT_RESTAURANT_CONFIG_PATH,
     RestaurantSymbolicEnv,
     TASK_TYPES,

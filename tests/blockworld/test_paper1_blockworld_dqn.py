@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from anticipatory_rl.agents.paper1_blockworld_image_dqn import build_parser, train
-from anticipatory_rl.agents.paper1_blockworld_image_dqn_infer import run_compare
+from anticipatory_rl.agents.blockworld.blockworld_image_dqn import build_parser, train
+from anticipatory_rl.agents.blockworld.blockworld_dqn_infer import run_compare
 
 
 def _make_train_args(tasks_per_reset: int):

@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from anticipatory_rl.envs.restaurant_symbolic_env import CONFIG_PATH, RestaurantSymbolicEnv
+from anticipatory_rl.envs.restaurant.restaurant_symbolic_env import CONFIG_PATH, RestaurantSymbolicEnv
 
 
 def build_parser() -> argparse.ArgumentParser:

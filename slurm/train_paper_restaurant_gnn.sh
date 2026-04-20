@@ -58,7 +58,7 @@ if [ "${NUM_GPUS}" -gt 1 ]; then
   ACCELERATE_ARGS+=(--multi_gpu)
 fi
 
-srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper_restaurant.train_gnn \
+srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m restaurant.paper_restaurant.train_gnn \
   --num-train-envs 96 \
   --num-val-envs 16 \
   --states-per-env 64 \

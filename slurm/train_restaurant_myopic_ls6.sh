@@ -30,7 +30,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
-srun python -m anticipatory_rl.agents.restaurant_dqn \
+srun python -m anticipatory_rl.agents.restaurant.restaurant_dqn \
   --config-path "${CONFIG_PATH}" \
   --run-label restaurant_capacity_myopic \
   --total-steps 500000 \

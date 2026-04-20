@@ -77,7 +77,7 @@ if [ ! -x downward/builds/release/bin/downward ]; then
   fi
 fi
 
-srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m paper1_blockworld.train_gnn \
+srun --ntasks=1 python -m accelerate.commands.launch "${ACCELERATE_ARGS[@]}" -m blockworld.train_gnn \
   --num-train-envs 50 \
   --num-val-envs 0 \
   --num-test-envs 10 \
