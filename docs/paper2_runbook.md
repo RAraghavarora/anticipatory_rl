@@ -2,6 +2,86 @@
 
 Run all commands from the repository root.
 
+## Paper2 alignment summary
+
+- Layout corpus scale target: `1000` restaurant layouts.
+- Two-room structure per layout: kitchen + serving room.
+- Category scale target: `25` category labels per layout.
+- Task-library scale target: `50-100` feasible tasks per layout. (Randomly chosen from 50-100)
+- Evaluation protocol target: `500` layout sequences x `40` tasks
+  (`20,000` task executions per evaluation seed).
+- Separate planner-style logging via `paper2_cost`:
+  - non-move fixed costs: `pick/place/fill/wash/brew/fruit = 100`
+  - move cost: Dijkstra shortest path on a `10x10` occupancy grid.
+- Locations:10 
+```
+  kitchen_counter
+  coffee_machine
+  water_station
+  fruit_station
+  dish_rack
+  sink
+  pass_counter
+  table_left
+  bus_tub
+  table_right
+```
+- Objects: 60
+- When we sample an environment we assign each location to a (x,y) in a 10x10 grid. We use these locations to calculate move costs. Kitchen locations are on the left (x<=4), and serving locations are on the right.
+
+### What is intentionally different
+
+- RL reward is unchanged and remains the optimization objective.
+- `paper2_cost` is an auxiliary metric and is not used for policy optimization.
+- Symbolic macro-actions approximate planner actions and do not replicate full
+  embodied planning internals.
+
+## Restaurant environment specification
+
+### State space (symbolic)
+
+The observation encodes:
+
+- agent location (one-hot over locations),
+- held object (one-hot over objects plus empty),
+- per-object features:
+  - location (including held slot),
+  - dirty flag,
+  - contents (`empty`, `water`, `coffee`, `fruit`),
+  - object kind (`mug`, `glass`, `bowl`),
+- current task descriptor:
+  - task type,
+  - target location (or none),
+  - target kind (or none).
+
+### Action space (macro actions)
+
+- `pick:<object>` for each object in the current layout.
+- `place:<location>` for each location in the current layout.
+- `wash_held`
+- `fill_water_held`
+- `make_coffee_held`
+- `fill_fruit_held`
+
+### Task categories and completion conditions
+
+The core task families are:
+
+- `serve_water(target_location)`
+  - success if a `mug` or `glass` containing `water` is at `target_location`.
+- `make_coffee(target_location)`
+  - success if a `mug` containing `coffee` is at `target_location`.
+- `serve_fruit_bowl(target_location)`
+  - success if a `bowl` containing `fruit` is at `target_location`.
+- `clear_containers(target_location)`
+  - success if no container object remains at `target_location`.
+- `wash_objects(target_kind)`
+  - success if at least one object of `target_kind` is clean, empty, and at a
+    wash-ready location.
+
+Task libraries generated for Paper2-scale layouts are built from these families
+with per-layout targets and feasibility filtering.
+
 ## 1) Generate and validate the Paper2 layout dataset
 
 Generate the layout corpus:
