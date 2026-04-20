@@ -169,6 +169,7 @@ This LS6 job is CPU-oriented and defaults to multi-node sharded generation:
 - partition: `normal`
 - nodes/tasks: `4` nodes, `4` shards (one per task/rank)
 - CPUs per shard: `64` (`JOBS` defaults to `SLURM_CPUS_PER_TASK`)
+PS: This has been generated for older restaurant environment at raghavaurora ls6 data/restaurant_planner_dataset/paper2_planner_labels.json
 
 Override resources/parallelism if needed:
 

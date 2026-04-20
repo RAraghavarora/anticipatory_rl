@@ -10,14 +10,14 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH -t 48:00:00
-#SBATCH -A IRI23005
+#SBATCH -A ASC26023
 #SBATCH --export=ALL
 
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p slurm_logs
-source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
+source /work/11373/raghavaurora2/ls6/miniconda3/etc/profile.d/conda.sh
 conda activate thesis
 
 CORPUS_PATH="${CORPUS_PATH:-data/restaurant_layouts/paper2_scale_layouts.json}"
@@ -31,7 +31,7 @@ mkdir -p "${SHARD_DIR}"
 export OUT_PATH SHARD_DIR
 
 echo "Launching ${SLURM_NTASKS} shards across ${SLURM_JOB_NUM_NODES} nodes"
-srun --ntasks="${SLURM_NTASKS}" --ntasks-per-node=1 bash -lc '
+srun --ntasks="${SLURM_NTASKS}" --ntasks-per-node=1 bash -c '
   set -euo pipefail
   python -m anticipatory_rl.tasks.build_restaurant_planner_dataset \
     --layout-corpus "'"${CORPUS_PATH}"'" \
