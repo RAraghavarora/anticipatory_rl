@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import random
 
-from paper_restaurant.candidates import expand_goal_candidates
-from paper_restaurant.estimator import OracleFutureCostEstimator
-from paper_restaurant.planner import FastDownwardRestaurantPlanner
-from paper_restaurant.reproduce_restaurant_supervised import AnticipatoryExperiment
-from paper_restaurant.world import (
+from restaurant.paper_restaurant.candidates import expand_goal_candidates
+from restaurant.paper_restaurant.estimator import OracleFutureCostEstimator
+from restaurant.paper_restaurant.planner import FastDownwardRestaurantPlanner
+from restaurant.paper_restaurant.reproduce_restaurant_supervised import AnticipatoryExperiment
+from restaurant.paper_restaurant.world import (
     PaperRestaurantTask,
     RestaurantObjectState,
     RestaurantTaskLibrary,

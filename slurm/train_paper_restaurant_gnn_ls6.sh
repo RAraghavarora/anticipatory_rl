@@ -43,7 +43,7 @@ srun --ntasks=1 python -m accelerate.commands.launch \
   --main_process_port "${MASTER_PORT}" \
   --mixed_precision no \
   --dynamo_backend no \
-  -m paper_restaurant.train_gnn \
+  -m restaurant.paper_restaurant.train_gnn \
   --num-train-envs 96 \
   --num-val-envs 16 \
   --states-per-env 64 \

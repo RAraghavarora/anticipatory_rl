@@ -28,7 +28,7 @@ echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostnam
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
-srun python -m anticipatory_rl.agents.paper1_blockworld_image_dqn \
+srun python -m anticipatory_rl.agents.blockworld.blockworld_image_dqn \
   --run-label myopic_blockworld \
   --total-steps 500000 \
   --replay-size 10000 \

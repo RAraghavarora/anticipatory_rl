@@ -30,7 +30,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
-srun python -m anticipatory_rl.agents.restaurant_dqn_infer \
+srun python -m anticipatory_rl.agents.restaurant.restaurant_dqn_infer \
   --anticipatory-weights ./runs/restaurant_capacity_anticipatory/restaurant_dqn.pt \
   --myopic-weights ./runs/restaurant_capacity_myopic/restaurant_dqn.pt \
   --output-dir ./runs/compare_restaurant_capacity_dqn \

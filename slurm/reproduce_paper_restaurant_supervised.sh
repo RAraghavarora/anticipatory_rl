@@ -40,7 +40,7 @@ if [ ! -f "${CHECKPOINT}" ]; then
   exit 1
 fi
 
-python -m paper_restaurant.reproduce_restaurant_supervised \
+python -m restaurant.paper_restaurant.reproduce_restaurant_supervised \
   --paper-settings \
   --tasks-per-environment 72 \
   --candidate-goal-limit 24 \

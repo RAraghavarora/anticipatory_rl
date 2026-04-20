@@ -24,7 +24,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 source /u/rarora1/ant_env/bin/activate
 CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
 
-python -m anticipatory_rl.agents.restaurant_dqn \
+python -m anticipatory_rl.agents.restaurant.restaurant_dqn \
   --config-path "${CONFIG_PATH}" \
   --run-label restaurant_capacity_myopic \
   --total-steps 500000 \

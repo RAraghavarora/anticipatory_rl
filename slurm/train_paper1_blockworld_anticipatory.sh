@@ -23,7 +23,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
 
-python -m anticipatory_rl.agents.paper1_blockworld_image_dqn \
+python -m anticipatory_rl.agents.blockworld.blockworld_image_dqn \
   --run-label anticipatory_blockworld \
   --total-steps 500000 \
   --replay-size 10000 \
