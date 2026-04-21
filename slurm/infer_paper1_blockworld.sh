@@ -23,7 +23,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
 
-python -m anticipatory_rl.agents.blockworld.blockworld_dqn_infer \
+python -m anticipatory_rl.agents.blockworld.dqn_infer \
   --anticipatory-weights ./runs/anticipatory_blockworld_paper1_blockworld_image_dqn_tpr10/paper1_blockworld_image_dqn.pt \
   --myopic-weights ./runs/myopic_blockworld_paper1_blockworld_image_dqn_tpr1/paper1_blockworld_image_dqn.pt \
   --output-dir ./runs/compare_blockworld_image_dqn_infer \

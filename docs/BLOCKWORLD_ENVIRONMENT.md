@@ -289,7 +289,7 @@ anticipatory_rl/
 ## Usage Example
 
 ```python
-from anticipatory_rl.envs.blockworld.blockworld_env import Paper1BlockworldImageEnv
+from anticipatory_rl.envs.blockworld.env import Paper1BlockworldImageEnv
 
 # Create environment
 env = Paper1BlockworldImageEnv(

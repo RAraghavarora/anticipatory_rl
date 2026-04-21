@@ -17,8 +17,8 @@ import torch
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from .blockworld_image_dqn import ConvQNetwork
-from anticipatory_rl.envs.blockworld.blockworld_env import (
+from .image_dqn import ConvQNetwork
+from anticipatory_rl.envs.blockworld.env import (
     Paper1BlockworldImageEnv,
     Task,
 )

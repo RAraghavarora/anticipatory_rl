@@ -20,7 +20,7 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from anticipatory_rl.envs.blockworld.blockworld_env import (
+from anticipatory_rl.envs.blockworld.env import (
     Paper1BlockworldImageEnv,
 )
 
