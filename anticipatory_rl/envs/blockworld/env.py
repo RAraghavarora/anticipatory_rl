@@ -18,21 +18,30 @@ COLORED_REGIONS: Tuple[str, ...] = (
     "green",
     "orange",
     "teal",
-    "purple",
-    "yellow",
+    # "purple",
+    # "yellow",
 )
 WHITE_REGIONS: Tuple[str, ...] = (
     "white_1",
     "white_2",
-    "white_3",
+    # "white_3",
 )
-BLOCK_NAMES: Tuple[str, ...] = ("a", "b", "c", "d", "e", "f", "g", "h")
+BLOCK_NAMES: Tuple[str, ...] = (
+    "a", 
+    "b", 
+    "c", 
+    "d", 
+    "e", 
+    # "f", 
+    # "g", 
+    # "h"
+)
 COLORED_BLOCK_COLORS: Tuple[str, ...] = (
     "red",
     "blue",
     "green",
-    "orange",
-    "teal",
+    # "orange",
+    # "teal",
 )
 
 BACKGROUND_RGB = (236, 236, 236)

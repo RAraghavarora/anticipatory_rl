@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import random
 import resource
@@ -318,9 +319,18 @@ def train(args: argparse.Namespace) -> Path:
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
 
     tb_writer = None
+    tb_log_dir_used: Path | None = None
     if args.tb_log_interval > 0 or args.tb_task_interval > 0:
-        tb_log_dir = args.tb_log_dir or (run_dir / "tb")
+        tb_base_dir = args.tb_log_dir or (run_dir / "tb")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        tb_log_dir = tb_base_dir / timestamp
+        suffix = 1
+        while tb_log_dir.exists():
+            tb_log_dir = tb_base_dir / f"{timestamp}_{suffix:02d}"
+            suffix += 1
         tb_log_dir.mkdir(parents=True, exist_ok=True)
+        tb_log_dir_used = tb_log_dir
+        print(f"[train] TensorBoard log dir -> {tb_log_dir.resolve()}")
         tb_writer = SummaryWriter(log_dir=str(tb_log_dir))
 
     obs, infos = env.reset(seed=args.seed)
@@ -335,6 +345,7 @@ def train(args: argparse.Namespace) -> Path:
 
     num_envs = env.num_envs
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
+    is_myopic = args.tasks_per_episode == 1
     global_step = 0
     steps_since_reset = np.zeros(num_envs, dtype=np.int64)
     tasks_since_reset = np.zeros(num_envs, dtype=np.int64)
@@ -415,6 +426,8 @@ def train(args: argparse.Namespace) -> Path:
             if args.episode_step_limit > 0 and steps_since_reset[idx] >= args.episode_step_limit:
                 episode_done_flags[idx] = True
             if env_reset_flags[idx]:
+                bootstrap_done_flags[idx] = True
+            elif is_myopic and bool(task_done[idx]):
                 bootstrap_done_flags[idx] = True
             elif episode_done_flags[idx] and bool(success[idx]):
                 bootstrap_done_flags[idx] = True
@@ -624,6 +637,7 @@ def train(args: argparse.Namespace) -> Path:
         "tasks_per_reset": int(args.tasks_per_episode),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "num_envs": int(args.num_envs),
+        "tb_log_dir": None if tb_log_dir_used is None else str(tb_log_dir_used),
     }
     _write_json(summary, run_dir / "train_summary.json")
     _write_json(task_records, run_dir / "task_records.json")
@@ -648,9 +662,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--num-envs", type=int, default=1)
-    parser.add_argument("--task-library-size", type=int, default=100)
-    parser.add_argument("--max-task-steps", type=int, default=500)
-    parser.add_argument("--success-reward", type=float, default=25.0)
+    parser.add_argument("--task-library-size", type=int, default=20)
+    parser.add_argument("--max-task-steps", type=int, default=128)
+    parser.add_argument("--success-reward", type=float, default=100.0)
     parser.add_argument("--step-penalty", type=float, default=1.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
@@ -659,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--procedural-layout",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Use procedurally sampled region layouts on reset.",
     )
     parser.add_argument(
