@@ -36,7 +36,7 @@ def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:
 def _resolve_run_label(args: argparse.Namespace) -> str:
     if args.run_label is not None:
         return args.run_label
-    return "myopic_restaurant" if args.tasks_per_reset <= 1 else "anticipatory_restaurant"
+    return "myopic_restaurant" if args.tasks_per_episode <= 1 else "anticipatory_restaurant"
 
 
 @dataclass
@@ -169,7 +169,7 @@ def train(args: argparse.Namespace) -> Path:
 
     env = RestaurantSymbolicEnv(
         config_path=args.config_path,
-        max_task_steps=args.max_task_steps,
+        max_steps_per_task=args.max_steps_per_task,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
         travel_cost_scale=args.travel_cost_scale,
@@ -198,7 +198,9 @@ def train(args: argparse.Namespace) -> Path:
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
     replay = ReplayBuffer(args.replay_size)
 
-    env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_reset
+    env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
+    if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
+        raise ValueError("For anticipatory runs, env-reset-tasks must equal tasks-per-episode.")
 
     task_return = 0.0
     task_steps = 0
@@ -243,7 +245,7 @@ def train(args: argparse.Namespace) -> Path:
         if success:
             tasks_since_reset += 1
             env_tasks_since_reset += 1
-            if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
+            if args.tasks_per_episode > 0 and tasks_since_reset >= args.tasks_per_episode:
                 episode_done_flag = True
                 bootstrap_done = True
                 tasks_since_reset = 0
@@ -353,7 +355,7 @@ def train(args: argparse.Namespace) -> Path:
         "auto_rate": float(np.mean([1.0 if r["auto_satisfied"] else 0.0 for r in task_records])) if task_records else 0.0,
         "reward_per_step": float(np.mean(step_reward_history)) if step_reward_history else 0.0,
         "mean_loss": float(np.mean(loss_history)) if loss_history else 0.0,
-        "tasks_per_reset": int(args.tasks_per_reset),
+        "tasks_per_episode": int(args.tasks_per_episode),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "seed": int(args.seed),
     }
@@ -380,12 +382,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-update", type=int, default=1_000)
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
-    parser.add_argument("--tasks-per-reset", type=int, default=1)
+    parser.add_argument("--tasks-per-episode", type=int, default=1)
     parser.add_argument(
         "--env-reset-tasks",
         type=int,
         default=None,
-        help="Physical env reset interval in tasks (default: same as tasks-per-reset).",
+        help="Physical env reset interval in tasks (default: same as tasks-per-episode).",
     )
     parser.add_argument(
         "--episode-step-limit",
@@ -393,20 +395,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Maximum primitive steps allowed between resets; <=0 disables.",
     )
-    parser.add_argument("--max-task-steps", type=int, default=24)
+    parser.add_argument("--max-steps-per-task", type=int, default=24)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
-    parser.add_argument("--pick-cost", type=float, default=1.0)
-    parser.add_argument("--place-cost", type=float, default=1.0)
-    parser.add_argument("--wash-cost", type=float, default=2.0)
-    parser.add_argument("--fill-cost", type=float, default=1.0)
-    parser.add_argument("--brew-cost", type=float, default=2.0)
-    parser.add_argument("--fruit-cost", type=float, default=2.0)
+    parser.add_argument("--travel-cost-scale", type=float, default=25.0)
+    parser.add_argument("--pick-cost", type=float, default=25.0)
+    parser.add_argument("--place-cost", type=float, default=25.0)
+    parser.add_argument("--wash-cost", type=float, default=25.0)
+    parser.add_argument("--fill-cost", type=float, default=25.0)
+    parser.add_argument("--brew-cost", type=float, default=25.0)
+    parser.add_argument("--fruit-cost", type=float, default=25.0)
     parser.add_argument(
         "--config-path",
         type=Path,
-        default=Path("anticipatory_rl/configs/restaurant_symbolic.yaml"),
+        default=Path("anticipatory_rl/configs/restaurant/restaurant_symbolic.yaml"),
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)

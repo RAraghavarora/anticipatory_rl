@@ -141,7 +141,8 @@ python paper_restaurant/scripts/restaurant_multi_seed_infer.py \
 ## RL semantics (current)
 
 - `--tasks-per-episode` (training only): controls replay bootstrapping boundary.
-- `--task-sequence-length`: controls physical world reset cadence.
+- `--env-reset-tasks` (training/inference): controls physical world reset cadence.
+  - For anticipatory training, `--env-reset-tasks` must equal `--tasks-per-episode`.
 - `--max-steps-per-task`: timeout threshold per task.
 - On timeout, the system samples a new task **without** resetting the world.
 
