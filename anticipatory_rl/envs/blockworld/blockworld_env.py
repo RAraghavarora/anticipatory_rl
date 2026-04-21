@@ -627,19 +627,15 @@ class Paper1BlockworldImageEnv(Env):
         nx = int(np.clip(ax + dx, 0, self.config.width - 1))
         ny = int(np.clip(ay + dy, 0, self.config.height - 1))
         blocked = nx == ax and ny == ay
-        if not blocked and self.state.block_at((nx, ny)) is not None:
-            blocked = True
-            nx, ny = ax, ay
         self.state.robot = (nx, ny)
         return -self.invalid_action_penalty if blocked else 0.0
 
     def _handle_pick(self) -> str | None:
         if self.state.holding is not None:
             return None
-        adjacent_blocks = self._adjacent_blocks()
-        if len(adjacent_blocks) != 1:
+        block = self.state.block_at(self.state.robot)
+        if block is None:
             return None
-        block = adjacent_blocks[0]
         del self.state.placements[block]
         self.state.holding = block
         return block
@@ -647,7 +643,7 @@ class Paper1BlockworldImageEnv(Env):
     def _handle_place(self) -> bool:
         if self.state.holding is None:
             return False
-        coord = self._adjacent_place_coord()
+        coord = self._current_place_coord()
         if coord is None:
             return False
         block = self.state.holding
@@ -732,8 +728,8 @@ class Paper1BlockworldImageEnv(Env):
         return obs.copy()
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
-        can_pick = self.state.holding is None and len(self._adjacent_blocks()) == 1
-        can_place = self._adjacent_place_coord() is not None
+        can_pick = self.state.holding is None and self.state.block_at(self.state.robot) is not None
+        can_place = self._current_place_coord() is not None
         info = BlockworldInfo(
             robot=self.state.robot,
             placements=dict(self.state.placements),
@@ -789,6 +785,19 @@ class Paper1BlockworldImageEnv(Env):
         if self._region_occupied(region):
             return None
         return min(tiles)
+
+    def _current_place_coord(self) -> Coord | None:
+        if self.state.holding is None:
+            return None
+        coord = self.state.robot
+        if self.state.block_at(coord) is not None:
+            return None
+        region = self.config.region_for_coord(coord)
+        if region is None:
+            return None
+        if self._region_occupied(region):
+            return None
+        return coord
 
     def _region_occupied(self, region: str, *, placements: Mapping[str, Coord] | None = None) -> bool:
         placements = placements or self.state.placements

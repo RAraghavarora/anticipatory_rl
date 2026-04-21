@@ -22,9 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from anticipatory_rl.envs.blockworld.blockworld_env import (
     Paper1BlockworldImageEnv,
-    WorldState,
 )
-from blockworld.motion import LazyPRMMotionPlanner
 
 
 class ConvQNetwork(nn.Module):
@@ -189,7 +187,7 @@ def _paper_step_cost(
         moved = tuple(pre_info["robot"]) != tuple(post_info["robot"])
         if not moved:
             return 0.0
-        return float(_prm_move_cost(env, pre_info, post_info))
+        return float(env.config.move_cost)
     if action == Paper1BlockworldImageEnv.PICK:
         picked = pre_info.get("holding") is None and post_info.get("holding") is not None
         return float(env.config.pick_cost if picked else 0.0)
@@ -197,34 +195,6 @@ def _paper_step_cost(
         placed = pre_info.get("holding") is not None and post_info.get("holding") is None
         return float(env.config.place_cost if placed else 0.0)
     return 0.0
-
-
-def _prm_move_cost(
-    env: Paper1BlockworldImageEnv,
-    pre_info: Dict[str, Any],
-    post_info: Dict[str, Any],
-) -> int:
-    start = tuple(pre_info["robot"])
-    goal = tuple(post_info["robot"])
-    if start == goal:
-        return 0
-    placements = {
-        str(block): tuple(coord)
-        for block, coord in dict(pre_info.get("placements", {})).items()
-    }
-    holding = pre_info.get("holding")
-    signature = (holding, tuple(sorted(placements.items())))
-    cache = getattr(env, "_paper_prm_cache", None)
-    if cache is None or cache.get("signature") != signature:
-        state = WorldState(robot=start, placements=placements, holding=holding)
-        planner = LazyPRMMotionPlanner(env.config, state)
-        cache = {"signature": signature, "planner": planner}
-        setattr(env, "_paper_prm_cache", cache)
-    planner = cache["planner"]
-    path = planner.shortest_path(start, goal)
-    if path is None:
-        return int(env.config.move_cost)
-    return int(path.cost)
 
 
 def _is_invalid_action(
@@ -669,18 +639,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replay-size", type=int, default=50_000)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--gamma", type=float, default=0.95)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
     parser.add_argument("--epsilon-final", type=float, default=0.05)
-    parser.add_argument("--epsilon-decay", type=int, default=100_000)
+    parser.add_argument("--epsilon-decay", type=int, default=500_000)
     parser.add_argument("--target-update", type=int, default=1_000)
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--task-library-size", type=int, default=100)
-    parser.add_argument("--max-task-steps", type=int, default=1000)
-    parser.add_argument("--success-reward", type=float, default=15.0)
+    parser.add_argument("--max-task-steps", type=int, default=500)
+    parser.add_argument("--success-reward", type=float, default=25.0)
     parser.add_argument("--step-penalty", type=float, default=1.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--correct-pick-bonus", type=float, default=1.0)

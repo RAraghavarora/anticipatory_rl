@@ -21,9 +21,7 @@ from .blockworld_image_dqn import ConvQNetwork
 from anticipatory_rl.envs.blockworld.blockworld_env import (
     Paper1BlockworldImageEnv,
     Task,
-    WorldState,
 )
-from blockworld.motion import LazyPRMMotionPlanner
 
 
 def _select_device() -> torch.device:
@@ -156,7 +154,7 @@ def _paper_step_cost(
         moved = tuple(pre_info["robot"]) != tuple(post_info["robot"])
         if not moved:
             return 0.0
-        return float(_prm_move_cost(env, pre_info, post_info))
+        return float(env.config.move_cost)
     if action == Paper1BlockworldImageEnv.PICK:
         picked = pre_info.get("holding") is None and post_info.get("holding") is not None
         return float(env.config.pick_cost if picked else 0.0)
@@ -164,34 +162,6 @@ def _paper_step_cost(
         placed = pre_info.get("holding") is not None and post_info.get("holding") is None
         return float(env.config.place_cost if placed else 0.0)
     return 0.0
-
-
-def _prm_move_cost(
-    env: Paper1BlockworldImageEnv,
-    pre_info: Dict[str, Any],
-    post_info: Dict[str, Any],
-) -> int:
-    start = tuple(pre_info["robot"])
-    goal = tuple(post_info["robot"])
-    if start == goal:
-        return 0
-    placements = {
-        str(block): tuple(coord)
-        for block, coord in dict(pre_info.get("placements", {})).items()
-    }
-    holding = pre_info.get("holding")
-    signature = (holding, tuple(sorted(placements.items())))
-    cache = getattr(env, "_paper_prm_cache", None)
-    if cache is None or cache.get("signature") != signature:
-        state = WorldState(robot=start, placements=placements, holding=holding)
-        planner = LazyPRMMotionPlanner(env.config, state)
-        cache = {"signature": signature, "planner": planner}
-        setattr(env, "_paper_prm_cache", cache)
-    planner = cache["planner"]
-    path = planner.shortest_path(start, goal)
-    if path is None:
-        return int(env.config.move_cost)
-    return int(path.cost)
 
 
 def _summarize_task_index_metrics(task_records: List[Dict[str, Any]], sequence_len: int) -> Dict[str, Dict[str, float]]:
