@@ -123,6 +123,12 @@ Let $\lvert r \rvert \le R_{\max}$ and $\gamma \in [0,1)$. Then the optimal disc
 \Bigl\lvert Q^*_\gamma(x,a)-\mathbb{E}\bigl[r(x,a,X')\bigr]\Bigr\rvert \le \frac{\gamma}{1-\gamma}R_{\max},
 \end{equation}
 so as $\gamma \downarrow 0$ the value of future tasks vanishes and $Q^*_\gamma(x,a)$ reduces to immediate-reward evaluation.
+
+More specifically, under the task transition dynamics of Eq.~\eqref{eq:task-transition}, the optimal value function can be decomposed as
+\[
+V^*_\gamma(s,\tau)=V^*_{\text{curr}}(s,\tau)+\gamma\,\mathbb{E}_{\tau'\sim P(\tau)}\bigl[V^*_\gamma(s_g(\tau),\tau')\bigr],
+\]
+where $V^*_{\text{curr}}(s,\tau)$ denotes the expected discounted return within the current task $\tau$, and $s_g(\tau)$ is the state reached upon completing $\tau$. Consequently, the effective anticipation horizon—the expected number of future tasks whose costs significantly influence the current decision—scales as $1/(1-\gamma)$ when tasks are of similar duration.
 \end{theorem}
 
 % \noindent\textbf{Explanation.}
@@ -242,6 +248,16 @@ Taking absolute values and using the bound on $M$,
 \]
 
 Finally, as $\gamma \to 0$, the right-hand side tends to zero, so $Q^*_\gamma(x,a)$ converges uniformly to the immediate expected reward $\mathbb{E}[r(x,a,X')]$. In the limit $\gamma=0$, the Bellman equation reduces to $Q^*_0(x,a) = \mathbb{E}[r(x,a,X')]$, which is exactly the myopic evaluation that ignores all future returns.
+
+To see how $\gamma$ controls the anticipation horizon in terms of future tasks, consider the value function $V^*_\gamma(s,\tau)$ under the task transition dynamics of Eq.~\eqref{eq:task-transition}. Let $T_\tau$ be the (random) number of steps needed to complete task $\tau$ from state $s$, and let $s_g(\tau)$ denote the state reached upon completion. The Bellman equation for $V^*_\gamma$ can be expanded as
+\[
+V^*_\gamma(s,\tau)=\mathbb{E}\Bigl[\sum_{t=0}^{T_\tau-1}\gamma^t r_t + \gamma^{T_\tau} V^*_\gamma(s_g(\tau),\tau')\Bigr],
+\]
+where $\tau'$ is sampled from $P(\tau)$ independently of the trajectory. Iterating this expansion $K$ times yields
+\[
+V^*_\gamma(s,\tau)=\mathbb{E}\Bigl[\sum_{k=0}^{K-1}\gamma^{T^{(k)}}G_k\Bigr]+\gamma^{T^{(K)}}\mathbb{E}\bigl[V^*_\gamma(s^{(K)},\tau^{(K)})\bigr],
+\]
+where $T^{(k)}$ is the cumulative steps up to the $k$-th task completion, $G_k$ is the discounted return accumulated during the $k$-th task, and $s^{(K)},\tau^{(K)}$ are the state and task after $K$ completions. Because $|V^*_\gamma| \le R_{\max}/(1-\gamma)$, the remainder term is bounded by $\gamma^{T^{(K)}}R_{\max}/(1-\gamma)$. For typical task durations, $T^{(K)} \approx K \cdot \bar{T}$ where $\bar{T}$ is the average task length. Hence the influence of tasks beyond $K$ decays as $\gamma^{K\bar{T}}$, implying that the effective number of future tasks considered scales as $1/(1-\gamma)$ when $\bar{T}$ is constant. This formalizes the intuition that increasing $\gamma$ extends the agent's anticipation horizon across future tasks.
 \end{proof}
 
 \clearpage
