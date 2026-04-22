@@ -311,7 +311,8 @@ class WorldGenerator:
         attempts = 0
         while len(chosen) < count and attempts < max_attempts:
             attempts += 1
-            task_size = rng.choice((1, 2))
+            # task_size = rng.choice((1, 2))
+            task_size = 1 # TODO: Temporarily limiting
             blocks = tuple(rng.sample(self.config.nonwhite_blocks, k=task_size))
             regions = tuple(rng.sample(self.config.nonwhite_regions, k=task_size))
             task = Task(tuple(zip(blocks, regions)))
