@@ -20,15 +20,12 @@
 
 \title{Anticipatory Reinforcement Learning for Long-Lived Robot Planning}
 
-\author{%
-  Raghav Arora \\
-  Department of Electrical and Computer Engineering \\
-  The University of Texas at Austin \\
-  \texttt{raghavaurora@utexas.edu}
-}
+% Anonymous submission for double-blind review
+% Code available at: https://anonymous.4open.science/r/...
 
 \begin{document}
 
+% Anonymous title
 \maketitle
 
 \begin{abstract}
@@ -51,7 +48,7 @@ In such settings, a myopic agent can create side effects: the cheapest way to fi
 \end{figure}
 
 
-Dhakal et al.\cite{dhakal2023anticipatory} introduced anticipatory planning as the joint optimization of current-task cost and expected future-task cost, with a learned offline estimator used to guide symbolic planning. They demonstrated the advantage of anticipatory planning over a myopic agent in an environment where tasks have high interdependence, and the goal state for one task affects the plan for future tasks\cite{dhakal2023anticipatory,dhakal2024tamp,talukder2024large,arora2024anticipate,singh2024anticipate}. 
+Prior work introduced anticipatory planning as the joint optimization of current-task cost and expected future-task cost, with a learned offline estimator used to guide symbolic planning \cite{dhakal2023anticipatory}. They demonstrated the advantage of anticipatory planning over a myopic agent in an environment where tasks have high interdependence, and the goal state for one task affects the plan for future tasks \cite{dhakal2023anticipatory,dhakal2024tamp,talukder2024large,arora2024anticipate,singh2024anticipate}. 
 However, it suffers from major limitations. First, it assumes that the task distribution is fixed and known by the agent, allowing the anticipatory planning cost to be learned offline through supervised learning. Second, since classical symbolic planner is used to estimate the cost of tasks, learning the anticipatory cost becomes very computationally expensive as the number of tasks grows. Third, they minimize the expected cost associated with an immediately available task and a \textit{single} next task in the sequence. This limits the advantage of anticipation to one task ahead only, and fails for longer horizons. Fourth, the next anticipated task is not conditioned on the current task.
 
 This work instead formulates anticipatory planning as a continual-task Markov Decision Process (MDP) where an agent solves a stream of tasks in a persistent environment, and learns to anticipate future tasks implicitly through value propagation across task boundaries. 
@@ -63,7 +60,7 @@ Dhakal et al.\ introduced \emph{anticipatory planning} as a planner-centric obje
 
 These works show that anticipation can help in persistent settings, but they also motivate an RL formulation. First, they rely on offline supervised training with planner-generated labels. This can be expensive, since it requires many planner calls as task templates and environments grow. Second, the objective is usually a \emph{one-step} lookahead (current task plus one follow-up task). It does not directly capture longer-horizon value propagation through multiple future tasks. Third, the learned component is an estimator inside a planning loop, not an online-learned value function updated from interaction.
 
-In parallel, Arora et al.\ and Singh et al.\ use language models to predict likely future tasks and feed these predictions into classical planning \cite{arora2024anticipate,singh2024anticipate}. These methods can generalize through language, but they are still planner-centric: they bias symbolic planning with predicted goals rather than learning a value function over persistent physical states.
+In parallel, other work uses language models to predict likely future tasks and feed these predictions into classical planning \cite{arora2024anticipate,singh2024anticipate}. These methods can generalize through language, but they are still planner-centric: they bias symbolic planning with predicted goals rather than learning a value function over persistent physical states.
 
 Our formulation is equivalent to a continual goal-conditioned MDP with task changes at goal-reaching transitions. For semantic clarity, we refer to our goals as tasks.
 UVFAs \cite{schaul2015uvfa} and successor features \cite{barreto2017successor} study generalization across tasks, while continual-RL work studies long-lived learning \cite{khetarpal2022continual}. Side-effect avoidance formalizes how actions can create bad future states \cite{krakovna2020avoiding}. Our work connects these ideas by treating anticipatory planning as continuing-task RL: we learn a task-conditioned value function online in a persistent world and isolate anticipation as value propagation across successful task boundaries (Eq.~\eqref{eq:targets}), with the anticipation horizon controlled by $\gamma$ (Theorem~\ref{thm:gamma-horizon}).
@@ -259,6 +256,9 @@ V^*_\gamma(s,\tau)=\mathbb{E}\Bigl[\sum_{k=0}^{K-1}\gamma^{T^{(k)}}G_k\Bigr]+\ga
 \]
 where $T^{(k)}$ is the cumulative steps up to the $k$-th task completion, $G_k$ is the discounted return accumulated during the $k$-th task, and $s^{(K)},\tau^{(K)}$ are the state and task after $K$ completions. Because $|V^*_\gamma| \le R_{\max}/(1-\gamma)$, the remainder term is bounded by $\gamma^{T^{(K)}}R_{\max}/(1-\gamma)$. For typical task durations, $T^{(K)} \approx K \cdot \bar{T}$ where $\bar{T}$ is the average task length. Hence the influence of tasks beyond $K$ decays as $\gamma^{K\bar{T}}$, implying that the effective number of future tasks considered scales as $1/(1-\gamma)$ when $\bar{T}$ is constant. This formalizes the intuition that increasing $\gamma$ extends the agent's anticipation horizon across future tasks.
 \end{proof}
+
+\section*{Code Availability}
+For the purpose of double-blind review, code is available at an anonymized repository. Upon acceptance, the full repository will be made publicly available.
 
 \clearpage
 \phantomsection
