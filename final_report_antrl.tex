@@ -216,6 +216,34 @@ Avg task cost & 17765.0$\pm$5488.35 & 22751.0$\pm$1836.13 \\
 We formulated anticipatory planning as continuing-task RL in a persistent environment, where preparedness corresponds to the value of the physical state under the future task stream. This yields a simple theoretical difference between anticipatory and myopic learning: the anticipatory agent bootstraps across task boundaries, while the myopic agent treats task completion as terminal for learning. Empirically, in a symbolic restaurant benchmark aligned with Talukder et al., anticipatory RL improves preparedness (auto-rate) and efficiency (steps per task) and increases return per step under matched evaluation seeds. In a Blocksworld benchmark based on Dhakal et al., anticipatory behavior also reduces planner-evaluated task cost under a collision-aware Lazy PRM motion model. More broadly, these benefits arise when tasks are interdependent through the persistent world state: anticipation is useful when how one task is completed changes the cost of likely future tasks, but it offers little or no advantage when tasks are effectively independent and each task leaves no meaningful consequences for the next.
 
 Future work will (i) more faithfully recreate prior anticipatory-planning baselines (classical planner and supervised GNN cost estimator) and perform direct, matched comparisons against anticipatory RL under identical task streams and cost models, (ii) extend beyond stationary task distributions to non-stationary and context-dependent task processes, where the agent must adapt its anticipatory value estimates online, and (iii) test the advantage of anticipation on bigger scale with actual human data, such as HOMER \cite{patel2023predicting}.
+\section*{Appendix: Proof of Theorem~\ref{thm:gamma-horizon}}
+\begin{proof}
+The augmented-state MDP with discount $\gamma \in [0,1)$ is a discounted infinite-horizon MDP with bounded rewards $|r| \le R_{\max}$. By standard results (e.g., Puterman~\cite{puterman2014markov}), the Bellman operator
+\[
+(\mathcal{T} Q)(x,a) = \mathbb{E}\bigl[r(x,a,X') + \gamma \max_{a'} Q(X',a')\bigr]
+\]
+is a contraction with modulus $\gamma$ in the sup norm. Hence, by the Banach fixed-point theorem, $\mathcal{T}$ has a unique fixed point $Q^*_\gamma$, which is the optimal action-value function.
+
+To obtain the bound, note that for any $(x,a)$,
+\[
+Q^*_\gamma(x,a) = \mathbb{E}\bigl[r(x,a,X') + \gamma \max_{a'} Q^*_\gamma(X',a')\bigr].
+\]
+Let $M = \sup_{x',a'} |Q^*_\gamma(x',a')|$. Taking absolute values and using the triangle inequality,
+\[
+|Q^*_\gamma(x,a)| \le \mathbb{E}|r(x,a,X')| + \gamma M \le R_{\max} + \gamma M.
+\]
+Since this holds for all $(x,a)$, we have $M \le R_{\max} + \gamma M$, i.e., $M \le \frac{R_{\max}}{1-\gamma}$. Now subtract $\mathbb{E}[r(x,a,X')]$ from the Bellman equation:
+\[
+Q^*_\gamma(x,a) - \mathbb{E}[r(x,a,X')] = \gamma\,\mathbb{E}\!\bigl[\max_{a'} Q^*_\gamma(X',a')\bigr].
+\]
+Taking absolute values and using the bound on $M$,
+\[
+\bigl|Q^*_\gamma(x,a) - \mathbb{E}[r(x,a,X')]\bigr| \le \gamma M \le \frac{\gamma}{1-\gamma}R_{\max}.
+\]
+
+Finally, as $\gamma \to 0$, the right-hand side tends to zero, so $Q^*_\gamma(x,a)$ converges uniformly to the immediate expected reward $\mathbb{E}[r(x,a,X')]$. In the limit $\gamma=0$, the Bellman equation reduces to $Q^*_0(x,a) = \mathbb{E}[r(x,a,X')]$, which is exactly the myopic evaluation that ignores all future returns.
+\end{proof}
+
 \clearpage
 \phantomsection
 \label{sec:refs}
