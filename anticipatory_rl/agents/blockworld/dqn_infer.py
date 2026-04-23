@@ -16,6 +16,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+from PIL import Image
 
 from .image_dqn import ConvQNetwork
 from anticipatory_rl.envs.blockworld.env import (
@@ -52,6 +53,25 @@ def _action_policy_label(temperature: float) -> str:
     return "argmax (greedy)" if temperature <= 0.0 else f"softmax (tau={float(temperature):g})"
 
 
+def _obs_to_rgb_uint8(obs: np.ndarray) -> np.ndarray:
+    rgb = np.clip(np.asarray(obs[:3], dtype=np.float32), 0.0, 1.0)
+    return np.rint(rgb.transpose(1, 2, 0) * 255.0).astype(np.uint8, copy=False)
+
+
+def _save_gif(frames: List[np.ndarray], path: Path, fps: int) -> None:
+    if not frames:
+        raise ValueError("No frames recorded; cannot save GIF.")
+    images = [Image.fromarray(frame) for frame in frames]
+    duration_ms = int(1000 / max(1, fps))
+    images[0].save(
+        path,
+        save_all=True,
+        append_images=images[1:],
+        duration=duration_ms,
+        loop=0,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run inference for paper1 blockworld image DQN checkpoints."
@@ -80,6 +100,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--invalid-action-penalty", type=float, default=5.0)
     parser.add_argument("--correct-pick-bonus", type=float, default=1.0)
     parser.add_argument("--tb-log-dir", type=Path, default=None)
+    parser.add_argument("--trajectory-log-dir", type=Path, default=None)
+    parser.add_argument("--trajectory-log-fps", type=int, default=6)
     parser.add_argument("--render-tile-px", type=int, default=24)
     parser.add_argument("--render-margin-px", type=int, default=None)
     parser.add_argument(
@@ -276,6 +298,11 @@ def evaluate(
     discount = 1.0
     task_records: List[Dict[str, Any]] = []
     sequence_costs: List[float] = []
+    trajectory_log_dir = args.trajectory_log_dir
+    collected_trajectories: Dict[str, Dict[str, Any] | None] = {
+        "success": None,
+        "failure": None,
+    }
 
     sequence_count = 0
     progress = tqdm(
@@ -292,6 +319,14 @@ def evaluate(
         sequence_running_cost = 0.0
 
         for task_idx, _task in enumerate(sequence_tasks):
+            trajectory_frames: List[np.ndarray] = [_obs_to_rgb_uint8(obs)]
+            trajectory_meta: Dict[str, Any] = {
+                "sequence_index": int(sequence_count),
+                "task_index": int(task_idx),
+                "task_assignments": [list(item) for item in env.current_task.assignments],
+                "task_size": int(env.current_task.assignments.__len__()),
+                "start_auto_satisfied": bool(current_task_auto),
+            }
             while total_steps < args.total_steps:
                 pre_info = info
                 auto_snapshot = bool(current_task_auto)
@@ -304,6 +339,7 @@ def evaluate(
                         generator=action_gen,
                     )
                 obs, reward, success, horizon, info = env.step(action)
+                trajectory_frames.append(_obs_to_rgb_uint8(obs))
                 total_steps += 1
                 task_steps += 1
                 task_return += float(reward)
@@ -317,8 +353,21 @@ def evaluate(
                     progress.update(1)
                     if success:
                         successes += 1
+                        trajectory_meta["outcome"] = "success"
                     if horizon:
                         horizon_tasks += 1
+                        trajectory_meta["outcome"] = "failure"
+                    if trajectory_log_dir is not None:
+                        if bool(success) and collected_trajectories["success"] is None:
+                            collected_trajectories["success"] = {
+                                "frames": list(trajectory_frames),
+                                "meta": dict(trajectory_meta),
+                            }
+                        elif bool(horizon) and collected_trajectories["failure"] is None:
+                            collected_trajectories["failure"] = {
+                                "frames": list(trajectory_frames),
+                                "meta": dict(trajectory_meta),
+                            }
                     task_records.append(
                         {
                             "task_number": total_tasks,
@@ -343,7 +392,11 @@ def evaluate(
                     break
             if total_steps >= args.total_steps:
                 break
+            if trajectory_log_dir is not None and collected_trajectories["success"] is not None and collected_trajectories["failure"] is not None:
+                break
         if total_steps >= args.total_steps:
+            break
+        if trajectory_log_dir is not None and collected_trajectories["success"] is not None and collected_trajectories["failure"] is not None:
             break
         sequence_costs.append(sequence_running_cost)
         sequence_count += 1
@@ -393,6 +446,21 @@ def evaluate(
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "rollout_stats.json").open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, default=str)
+    if trajectory_log_dir is not None:
+        trajectory_log_dir.mkdir(parents=True, exist_ok=True)
+        written: Dict[str, str] = {}
+        for kind, payload in collected_trajectories.items():
+            if payload is None:
+                continue
+            frames = payload["frames"]
+            meta = payload["meta"]
+            gif_path = trajectory_log_dir / f"{kind}.gif"
+            _save_gif(frames, gif_path, fps=int(args.trajectory_log_fps))
+            with (trajectory_log_dir / f"{kind}.json").open("w", encoding="utf-8") as fh:
+                json.dump(meta, fh, indent=2, default=str)
+            written[kind] = str(gif_path)
+        with (trajectory_log_dir / "index.json").open("w", encoding="utf-8") as fh:
+            json.dump({"written": written, "seed": int(args.seed), "checkpoint": str(state_path)}, fh, indent=2, default=str)
     return report
 
 
