@@ -72,6 +72,12 @@ def _save_gif(frames: List[np.ndarray], path: Path, fps: int) -> None:
     )
 
 
+def _save_trajectory_frames(frames: List[np.ndarray], out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx, frame in enumerate(frames):
+        Image.fromarray(frame).save(out_dir / f"frame_{idx:04d}.png")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run inference for paper1 blockworld image DQN checkpoints."
@@ -456,11 +462,13 @@ def evaluate(
                 continue
             frames = payload["frames"]
             meta = payload["meta"]
+            traj_dir = trajectory_log_dir / kind
+            _save_trajectory_frames(frames, traj_dir)
             gif_path = trajectory_log_dir / f"{kind}.gif"
             _save_gif(frames, gif_path, fps=int(args.trajectory_log_fps))
             with (trajectory_log_dir / f"{kind}.json").open("w", encoding="utf-8") as fh:
                 json.dump(meta, fh, indent=2, default=str)
-            written[kind] = str(gif_path)
+            written[kind] = str(traj_dir)
         with (trajectory_log_dir / "index.json").open("w", encoding="utf-8") as fh:
             json.dump({"written": written, "seed": int(args.seed), "checkpoint": str(state_path)}, fh, indent=2, default=str)
     return report
