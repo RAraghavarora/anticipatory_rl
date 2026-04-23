@@ -471,6 +471,14 @@ def evaluate(
             written[kind] = str(traj_dir)
         with (trajectory_log_dir / "index.json").open("w", encoding="utf-8") as fh:
             json.dump({"written": written, "seed": int(args.seed), "checkpoint": str(state_path)}, fh, indent=2, default=str)
+        if collected_trajectories["success"] is None:
+            print("[infer] No valid success trajectory was collected.")
+        else:
+            print(f"[infer] Wrote success trajectory to {trajectory_log_dir / 'success'}")
+        if collected_trajectories["failure"] is None:
+            print("[infer] No valid failure trajectory was collected.")
+        else:
+            print(f"[infer] Wrote failure trajectory to {trajectory_log_dir / 'failure'}")
     return report
 
 
