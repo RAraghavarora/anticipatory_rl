@@ -2,14 +2,20 @@ locations:
   - name: kitchen_counter
     coord: [1, 1]
     room: kitchen
-  - name: coffee_machine
-    coord: [2, 1]
-    room: kitchen
-  - name: water_station
+  - name: prep_counter
     coord: [2, 2]
     room: kitchen
+  - name: coffee_machine
+    coord: [3, 1]
+    room: kitchen
+  - name: water_station
+    coord: [4, 1]
+    room: kitchen
   - name: fruit_station
-    coord: [2, 3]
+    coord: [5, 1]
+    room: kitchen
+  - name: pantry_shelf
+    coord: [6, 1]
     room: kitchen
   - name: dish_rack
     coord: [1, 2]
@@ -18,24 +24,33 @@ locations:
     coord: [1, 3]
     room: kitchen
   - name: pass_counter
-    coord: [5, 5]
+    coord: [8, 4]
     room: serving
-  - name: table_left
-    coord: [7, 3]
+  - name: service_shelf
+    coord: [10, 1]
+    room: serving
+  - name: host_stand
+    coord: [10, 6]
     room: serving
   - name: bus_tub
-    coord: [7, 5]
+    coord: [9, 5]
+    room: serving
+  - name: table_left
+    coord: [13, 1]
+    room: serving
+  - name: table_center
+    coord: [13, 3]
     room: serving
   - name: table_right
-    coord: [7, 7]
+    coord: [13, 5]
     room: serving
 
-object_kinds: [mug, glass, bowl]
-contents: [empty, water, coffee, fruit]
-task_types: [serve_water, make_coffee, serve_fruit_bowl, clear_containers, wash_objects]
+object_kinds: [cup, mug, jar, coffeegrinds, water, bread, knife, plate, bowl, spread, apple]
+contents: [empty, water, coffee, spread, apple]
+task_types: [serve_water, make_coffee, make_fruit_bowl, clear_containers, wash_objects, pick_place]
 
-service_locations: [pass_counter, table_left, table_right]
-wash_ready_locations: [dish_rack, kitchen_counter]
+service_locations: [pass_counter, table_left, table_center, table_right]
+wash_ready_locations: [dish_rack, prep_counter, kitchen_counter]
 dirty_drop_locations: [sink, bus_tub]
 
 stations:
@@ -45,32 +60,59 @@ stations:
   wash: sink
 
 object_specs:
+  - {name: cup_small, kind: cup}
+  - {name: cup_large, kind: cup}
   - {name: mug_red, kind: mug}
-  - {name: glass_tall, kind: glass}
-  - {name: glass_short, kind: glass}
+  - {name: mug_blue, kind: mug}
+  - {name: jar_sugar, kind: jar}
+  - {name: jar_coffee, kind: jar}
+  - {name: coffeegrinds, kind: coffeegrinds}
+  - {name: water_pitcher, kind: water}
+  - {name: bread_loaf, kind: bread}
+  - {name: bread_slice, kind: bread}
+  - {name: knife_chef, kind: knife}
+  - {name: knife_butter, kind: knife}
+  - {name: plate_dinner, kind: plate}
+  - {name: plate_side, kind: plate}
   - {name: bowl_small, kind: bowl}
   - {name: bowl_large, kind: bowl}
+  - {name: spread_butter, kind: spread}
+  - {name: spread_jam, kind: spread}
+  - {name: apple_red, kind: apple}
+  - {name: apple_green, kind: apple}
 
 container_capacity: null
 
+# Task distribution is uniform P(τ) per author clarification
+# These weights are ignored; uniform sampling is always used
 task_distribution:
   serve_water: 0.35
   make_coffee: 0.25
-  serve_fruit_bowl: 0.15
+  make_fruit_bowl: 0.15
   clear_containers: 0.15
   wash_objects: 0.10
 
+# Service location distribution is ignored; uniform sampling is always used
 service_location_distribution:
   pass_counter: 0.34
   table_left: 0.33
+  table_center: 0.33
   table_right: 0.33
 
+# Wash kind distribution is ignored; uniform sampling is always used
 wash_kind_distribution:
-  mug: 0.40
-  glass: 0.30
+  cup: 0.40
+  mug: 0.30
   bowl: 0.30
 
 reset_location_distribution:
+  cup:
+    kitchen_counter: 0.40
+    dish_rack: 0.25
+    sink: 0.05
+    pass_counter: 0.10
+    table_left: 0.10
+    table_right: 0.10
   mug:
     kitchen_counter: 0.40
     dish_rack: 0.25
@@ -78,22 +120,39 @@ reset_location_distribution:
     pass_counter: 0.10
     table_left: 0.10
     table_right: 0.10
-  glass:
-    kitchen_counter: 0.15
-    dish_rack: 0.45
-    sink: 0.05
-    pass_counter: 0.10
-    table_left: 0.10
-    table_right: 0.10
-    bus_tub: 0.05
+  jar:
+    coffee_machine: 0.40
+    pantry_shelf: 0.60
+  coffeegrinds:
+    coffee_machine: 0.60
+    pantry_shelf: 0.40
+  water:
+    water_station: 0.60
+    kitchen_counter: 0.40
+  bread:
+    prep_counter: 0.50
+    pantry_shelf: 0.50
+  knife:
+    kitchen_counter: 0.60
+    prep_counter: 0.40
+  plate:
+    service_shelf: 0.40
+    table_left: 0.20
+    table_center: 0.20
+    table_right: 0.20
   bowl:
-    kitchen_counter: 0.20
     dish_rack: 0.35
-    sink: 0.05
+    kitchen_counter: 0.20
     fruit_station: 0.10
     pass_counter: 0.10
     table_left: 0.10
     table_right: 0.10
+  spread:
+    prep_counter: 0.50
+    pantry_shelf: 0.50
+  apple:
+    fruit_station: 0.60
+    pantry_shelf: 0.40
 
 paper2_cost:
   enabled: true
@@ -107,26 +166,30 @@ paper2_cost:
   move:
     scale: 1.0
     grid:
-      width: 10
-      height: 10
+      width: 16
+      height: 8
       blocked_cells:
-        - [4, 0]
-        - [4, 1]
-        - [4, 2]
-        - [4, 3]
-        - [4, 4]
-        - [4, 6]
-        - [4, 7]
-        - [4, 8]
-        - [4, 9]
+        - [7, 0]
+        - [7, 1]
+        - [7, 2]
+        - [7, 3]
+        - [7, 4]
+        - [7, 5]
+        - [7, 6]
+        - [7, 7]
     location_cells:
       kitchen_counter: [1, 1]
-      coffee_machine: [2, 1]
-      water_station: [2, 2]
-      fruit_station: [2, 3]
+      prep_counter: [2, 2]
+      coffee_machine: [3, 1]
+      water_station: [4, 1]
+      fruit_station: [5, 1]
+      pantry_shelf: [6, 1]
       dish_rack: [1, 2]
       sink: [1, 3]
-      pass_counter: [5, 5]
-      table_left: [7, 3]
-      bus_tub: [7, 5]
-      table_right: [7, 7]
+      pass_counter: [8, 4]
+      service_shelf: [10, 1]
+      host_stand: [10, 6]
+      bus_tub: [9, 5]
+      table_left: [13, 1]
+      table_center: [13, 3]
+      table_right: [13, 5]

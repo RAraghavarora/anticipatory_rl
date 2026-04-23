@@ -11,8 +11,14 @@ import numpy as np
 import yaml
 from gymnasium import Env, spaces
 
+from .pddl_domain import (
+    PDDL_ACTION_COSTS,
+    get_pddl_cost,
+    get_rl_action_cost,
+)
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "restaurant_symbolic.yaml"
+
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "restaurant" / "restaurant_symbolic.yaml"
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -48,21 +54,37 @@ DEFAULT_LOCATION_COORDS: Dict[str, Tuple[int, int]] = {
 }
 DEFAULT_SERVICE_LOCATIONS: Tuple[str, ...] = ("pass_counter", "table_left", "table_right")
 DEFAULT_WASH_READY_LOCATIONS: Tuple[str, ...] = ("dish_rack", "kitchen_counter")
-DEFAULT_OBJECT_KINDS: Tuple[str, ...] = ("mug", "glass", "bowl")
-DEFAULT_CONTENTS: Tuple[str, ...] = ("empty", "water", "coffee", "fruit")
+DEFAULT_OBJECT_KINDS: Tuple[str, ...] = ("cup", "mug", "jar", "coffeegrinds", "water", "bread", "knife", "plate", "bowl", "spread", "apple")
+DEFAULT_CONTENTS: Tuple[str, ...] = ("empty", "water", "coffee", "spread", "apple")
 DEFAULT_TASK_TYPES: Tuple[str, ...] = (
     "serve_water",
     "make_coffee",
-    "serve_fruit_bowl",
+    "make_fruit_bowl",
     "clear_containers",
     "wash_objects",
+    "pick_place",
 )
 DEFAULT_OBJECT_SPECS: Tuple[Tuple[str, str], ...] = (
+    ("cup_small", "cup"),
+    ("cup_large", "cup"),
     ("mug_red", "mug"),
-    ("glass_tall", "glass"),
-    ("glass_short", "glass"),
+    ("mug_blue", "mug"),
+    ("jar_sugar", "jar"),
+    ("jar_coffee", "jar"),
+    ("coffeegrinds", "coffeegrinds"),
+    ("water_pitcher", "water"),
+    ("bread_loaf", "bread"),
+    ("bread_slice", "bread"),
+    ("knife_chef", "knife"),
+    ("knife_butter", "knife"),
+    ("plate_dinner", "plate"),
+    ("plate_side", "plate"),
     ("bowl_small", "bowl"),
     ("bowl_large", "bowl"),
+    ("spread_butter", "spread"),
+    ("spread_jam", "spread"),
+    ("apple_red", "apple"),
+    ("apple_green", "apple"),
 )
 
 # Exported for compatibility with existing imports.
@@ -74,6 +96,7 @@ class RestaurantTask:
     task_type: str
     target_location: str | None = None
     target_kind: str | None = None
+    object_name: str | None = None
 
 
 @dataclass
@@ -111,6 +134,9 @@ class RestaurantSymbolicEnv(Env):
         fill_cost: float = 25.0,
         brew_cost: float = 25.0,
         fruit_cost: float = 25.0,
+        pour_cost: float = 25.0,
+        refill_cost: float = 25.0,
+        drain_cost: float = 25.0,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__()
@@ -127,6 +153,9 @@ class RestaurantSymbolicEnv(Env):
         self.fill_cost = float(fill_cost)
         self.brew_cost = float(brew_cost)
         self.fruit_cost = float(fruit_cost)
+        self.pour_cost = float(pour_cost)
+        self.refill_cost = float(refill_cost)
+        self.drain_cost = float(drain_cost)
 
         self._task_library: List[RestaurantTask] = []
         self._task_library_index = 0
@@ -252,6 +281,7 @@ class RestaurantSymbolicEnv(Env):
         *,
         target_location: str | None = None,
         target_kind: str | None = None,
+        object_name: str | None = None,
         task_source: str = "external",
     ) -> None:
         if task_type not in self.task_type_index:
@@ -260,14 +290,16 @@ class RestaurantSymbolicEnv(Env):
             raise ValueError(f"Unknown target location: {target_location}")
         if target_kind is not None and target_kind not in self.object_kind_index:
             raise ValueError(f"Unknown target kind: {target_kind}")
-        self.task = RestaurantTask(task_type=task_type, target_location=target_location, target_kind=target_kind)
+        if object_name is not None and object_name not in self.object_name_index:
+            raise ValueError(f"Unknown object name: {object_name}")
+        self.task = RestaurantTask(task_type=task_type, target_location=target_location, target_kind=target_kind, object_name=object_name)
         self._task_source = task_source
         self._update_pending_auto_success()
 
     def get_action_meanings(self) -> List[str]:
         labels = [f"pick:{name}" for name in self.object_names]
         labels.extend(f"place:{name}" for name in self.locations)
-        labels.extend(["wash_held", "fill_water_held", "make_coffee_held", "fill_fruit_held"])
+        labels.extend(["wash_held", "fill_water_held", "make_coffee_held", "make_fruit_bowl_held", "pour_held", "refill_water", "drain"])
         return labels
 
     # ------------------------------------------------------------------
@@ -357,7 +389,10 @@ class RestaurantSymbolicEnv(Env):
         self._fill_action = self._wash_action + 1
         self._brew_action = self._wash_action + 2
         self._fruit_action = self._wash_action + 3
-        self.action_space = spaces.Discrete(self._fruit_action + 1)
+        self._pour_action = self._wash_action + 4
+        self._refill_action = self._wash_action + 5
+        self._drain_action = self._wash_action + 6
+        self.action_space = spaces.Discrete(self._drain_action + 1)
 
         self._held_slot = self.num_locations
         self._target_location_slot = self.num_locations
@@ -369,6 +404,7 @@ class RestaurantSymbolicEnv(Env):
             + len(self.task_types)
             + (self.num_locations + 1)
             + (len(self.object_kinds) + 1)
+            + (self.num_objects + 1)
         )
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
@@ -431,15 +467,19 @@ class RestaurantSymbolicEnv(Env):
                 continue
             target_location = item.get("target_location")
             target_kind = item.get("target_kind")
+            object_name = item.get("object_name")
             if target_location is not None and str(target_location) not in self.location_index:
                 continue
             if target_kind is not None and str(target_kind) not in self.object_kind_index:
+                continue
+            if object_name is not None and str(object_name) not in self.object_name_index:
                 continue
             parsed.append(
                 RestaurantTask(
                     task_type=task_type,
                     target_location=None if target_location is None else str(target_location),
                     target_kind=None if target_kind is None else str(target_kind),
+                    object_name=None if object_name is None else str(object_name),
                 )
             )
         return parsed
@@ -464,23 +504,31 @@ class RestaurantSymbolicEnv(Env):
                 task.task_type,
                 target_location=task.target_location,
                 target_kind=task.target_kind,
+                object_name=task.object_name,
                 task_source="library",
             )
             return
-        task_type = self._weighted_choice(self.task_distribution, self.task_types)
-        if task_type in {"serve_water", "make_coffee", "serve_fruit_bowl", "clear_containers"}:
-            target_location = self._weighted_choice(self.service_location_distribution, self.service_locations)
-            self.set_task(task_type, target_location=target_location, target_kind=None, task_source="iid")
+
+        # Uniform task sampling per author clarification
+        task_type = str(self._rng.choice(self.task_types))
+        if task_type in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
+            target_location = str(self._rng.choice(self.service_locations))
+            self.set_task(task_type, target_location=target_location, target_kind=None, object_name=None, task_source="iid")
             return
-        target_kind = self._weighted_choice(self.wash_kind_distribution, self.object_kinds)
-        self.set_task(task_type, target_location=None, target_kind=target_kind, task_source="iid")
+        if task_type == "pick_place":
+            object_name = str(self._rng.choice(self.object_names))
+            target_location = str(self._rng.choice(self.locations))
+            self.set_task(task_type, target_location=target_location, target_kind=None, object_name=object_name, task_source="iid")
+            return
+        target_kind = str(self._rng.choice(self.object_kinds))
+        self.set_task(task_type, target_location=None, target_kind=target_kind, object_name=None, task_source="iid")
 
     def _task_already_satisfied(self) -> bool:
         if self.task.task_type == "serve_water":
             assert self.task.target_location is not None
             return any(
                 obj.location == self.task.target_location
-                and obj.kind in {"mug", "glass"}
+                and obj.kind in {"cup", "mug"}
                 and obj.contents == "water"
                 for obj in self.state.objects.values()
             )
@@ -488,18 +536,27 @@ class RestaurantSymbolicEnv(Env):
             assert self.task.target_location is not None
             return any(
                 obj.location == self.task.target_location
-                and obj.kind == "mug"
+                and obj.kind in {"cup", "mug"}
                 and obj.contents == "coffee"
                 for obj in self.state.objects.values()
             )
-        if self.task.task_type == "serve_fruit_bowl":
+        if self.task.task_type == "make_fruit_bowl":
             assert self.task.target_location is not None
-            return any(
-                obj.location == self.task.target_location
-                and obj.kind == "bowl"
-                and obj.contents == "fruit"
-                for obj in self.state.objects.values()
-            )
+            # Check if there's a bowl with an apple in it at the target location
+            bowl_at_location = [
+                obj for obj in self.state.objects.values()
+                if obj.location == self.task.target_location and obj.kind == "bowl"
+            ]
+            for bowl_obj in bowl_at_location:
+                # Check if bowl contains apple (using contents field)
+                if bowl_obj.contents == "apple":
+                    return True
+            # Also check if we're holding a bowl with apple
+            if self.state.holding is not None:
+                held_obj = self.state.objects[self.state.holding]
+                if held_obj.kind == "bowl" and held_obj.contents == "apple":
+                    return True
+            return False
         if self.task.task_type == "clear_containers":
             assert self.task.target_location is not None
             return not any(obj.location == self.task.target_location for obj in self.state.objects.values())
@@ -512,6 +569,10 @@ class RestaurantSymbolicEnv(Env):
                 and obj.location in self.wash_ready_locations
                 for obj in self.state.objects.values()
             )
+        if self.task.task_type == "pick_place":
+            assert self.task.object_name is not None and self.task.target_location is not None
+            obj = self.state.objects.get(self.task.object_name)
+            return obj is not None and obj.location == self.task.target_location and self.state.holding is None
         raise ValueError(f"Unsupported task type: {self.task.task_type}")
 
     def _update_pending_auto_success(self) -> None:
@@ -535,6 +596,12 @@ class RestaurantSymbolicEnv(Env):
             return {"action_type": "brew", "obj_name": None, "dst_location": self.station_coffee}
         if action == self._fruit_action:
             return {"action_type": "fruit", "obj_name": None, "dst_location": self.station_fruit}
+        if action == self._pour_action:
+            return {"action_type": "pour", "obj_name": None, "dst_location": None}
+        if action == self._refill_action:
+            return {"action_type": "refill", "obj_name": None, "dst_location": self.station_water}
+        if action == self._drain_action:
+            return {"action_type": "drain", "obj_name": None, "dst_location": self.station_wash}
         return {"action_type": "unknown", "obj_name": None, "dst_location": None}
 
     def _execute_action(self, action: int) -> Tuple[float, bool]:
@@ -551,7 +618,13 @@ class RestaurantSymbolicEnv(Env):
         if action == self._brew_action:
             return self._make_coffee_held()
         if action == self._fruit_action:
-            return self._fill_fruit_held()
+            return self._make_fruit_bowl_held()
+        if action == self._pour_action:
+            return self._pour_held()
+        if action == self._refill_action:
+            return self._refill_water()
+        if action == self._drain_action:
+            return self._drain()
         raise ValueError(f"Unsupported action index {action}.")
 
     def _pick_object(self, obj_name: str) -> Tuple[float, bool]:
@@ -597,7 +670,7 @@ class RestaurantSymbolicEnv(Env):
         if self.state.holding is None:
             return 0.0, False
         obj = self.state.objects[self.state.holding]
-        if obj.kind not in {"mug", "glass"} or obj.dirty or obj.contents != "empty":
+        if obj.kind not in {"cup", "mug"} or obj.dirty or obj.contents != "empty":
             return 0.0, False
         travel = self._travel_cost(self.state.agent_location, self.station_water)
         self.state.agent_location = self.station_water
@@ -608,7 +681,7 @@ class RestaurantSymbolicEnv(Env):
         if self.state.holding is None:
             return 0.0, False
         obj = self.state.objects[self.state.holding]
-        if obj.kind != "mug" or obj.dirty or obj.contents != "empty":
+        if obj.kind not in {"cup", "mug"} or obj.dirty or obj.contents != "empty":
             return 0.0, False
         travel = self._travel_cost(self.state.agent_location, self.station_coffee)
         self.state.agent_location = self.station_coffee
@@ -616,15 +689,68 @@ class RestaurantSymbolicEnv(Env):
         return -(travel + self.brew_cost), True
 
     def _fill_fruit_held(self) -> Tuple[float, bool]:
+        """Make fruit bowl by putting an apple in a bowl."""
         if self.state.holding is None:
             return 0.0, False
         obj = self.state.objects[self.state.holding]
         if obj.kind != "bowl" or obj.dirty or obj.contents != "empty":
             return 0.0, False
-        travel = self._travel_cost(self.state.agent_location, self.station_fruit)
-        self.state.agent_location = self.station_fruit
-        obj.contents = "fruit"
-        return -(travel + self.fruit_cost), True
+
+        # Find an apple at current location
+        apple_name = None
+        for name, apple_obj in self.state.objects.items():
+            if apple_obj.kind == "apple" and apple_obj.location == self.state.agent_location:
+                apple_name = name
+                break
+
+        if apple_name is None:
+            return 0.0, False
+
+        # Put apple in bowl (represented by bowl's contents, not apple's location)
+        obj.contents = "apple"  # Bowl contains apple
+        return -(self.fruit_cost), True
+
+    def _make_fruit_bowl_held(self) -> Tuple[float, bool]:
+        """Alias for fill_fruit_held to maintain compatibility."""
+        return self._fill_fruit_held()
+
+    def _pour_held(self) -> Tuple[float, bool]:
+        """Pour contents from held object to another object at current location."""
+        if self.state.holding is None:
+            return 0.0, False
+        source_obj = self.state.objects[self.state.holding]
+        if source_obj.contents == "empty":
+            return 0.0, False
+
+        # Find a target object at current location that can receive contents
+        target_name = None
+        for name, obj in self.state.objects.items():
+            if name == self.state.holding:
+                continue
+            if obj.location == self.state.agent_location and obj.contents == "empty":
+                target_name = name
+                break
+
+        if target_name is None:
+            return 0.0, False
+
+        target_obj = self.state.objects[target_name]
+        # Transfer contents
+        target_obj.contents = source_obj.contents
+        source_obj.contents = "empty"
+        return -(self.pour_cost if hasattr(self, 'pour_cost') else 25.0), True
+
+    def _refill_water(self) -> Tuple[float, bool]:
+        """Refill water station (no-op in current implementation)."""
+        travel = self._travel_cost(self.state.agent_location, self.station_water)
+        self.state.agent_location = self.station_water
+        return -(travel + (self.refill_cost if hasattr(self, 'refill_cost') else 25.0)), True
+
+    def _drain(self) -> Tuple[float, bool]:
+        """Drain sink (no-op in current implementation)."""
+        travel = self._travel_cost(self.state.agent_location, self.station_wash)
+        self.state.agent_location = self.station_wash
+        return -(travel + (self.drain_cost if hasattr(self, 'drain_cost') else 25.0)), True
 
     # ------------------------------------------------------------------
     # Paper2 planner-cost bridge
@@ -632,14 +758,18 @@ class RestaurantSymbolicEnv(Env):
     def _configure_paper2_cost(self, cfg: Mapping[str, Any]) -> None:
         self.paper2_enabled = bool(cfg.get("enabled", False))
         fixed_cfg = cfg.get("fixed_costs", {})
+
+        # Always use PDDL costs per author clarification
         self.paper2_fixed_costs = {
-            "pick": float(fixed_cfg.get("pick", 100.0)),
-            "place": float(fixed_cfg.get("place", 100.0)),
-            "wash": float(fixed_cfg.get("wash", 100.0)),
-            "fill": float(fixed_cfg.get("fill", 100.0)),
-            "brew": float(fixed_cfg.get("brew", 100.0)),
-            "fruit": float(fixed_cfg.get("fruit", 100.0)),
+            "pick": get_pddl_cost("pick"),
+            "place": get_pddl_cost("place"),
+            "wash": get_pddl_cost("wash"),
+            "fill": get_pddl_cost("fill"),
+            "brew": get_pddl_cost("make-coffee"),
+            "fruit": get_pddl_cost("make-fruit-bowl"),
+            "pour": get_pddl_cost("pour"),
         }
+
         move_cfg = cfg.get("move", {})
         self.paper2_move_scale = float(move_cfg.get("scale", 1.0))
         grid_cfg = move_cfg.get("grid", {})
@@ -692,6 +822,27 @@ class RestaurantSymbolicEnv(Env):
         self._paper2_total_cost += step_cost
 
     def _dijkstra_distance(self, src_location: str, dst_location: str) -> float:
+        """Compute shortest path distance using Dijkstra's algorithm.
+
+        This method computes movement cost for paper2_cost evaluation. The grid
+        represents a symbolic approximation of ProcTHOR occupancy with the
+        following assumptions:
+
+        - Grid resolution: Each cell represents 0.1 ProcTHOR units
+        - Blocked cells: Obstacles that cannot be traversed
+        - Movement: 4-connected (up, down, left, right)
+        - Cost: 1.0 per grid cell step (scaled by paper2_move_scale)
+
+        Note: Full ProcTHOR occupancy grid integration is deferred. This symbolic
+        grid provides a reasonable approximation for paper2_cost evaluation.
+
+        Args:
+            src_location: Source location name
+            dst_location: Destination location name
+
+        Returns:
+            Shortest path distance in grid cells, or Manhattan distance as fallback
+        """
         src = self.paper2_location_cells.get(src_location)
         dst = self.paper2_location_cells.get(dst_location)
         if src is None or dst is None:
@@ -737,12 +888,12 @@ class RestaurantSymbolicEnv(Env):
         if location in self.dirty_drop_locations:
             return True, "empty"
         if location in self.service_locations:
-            if kind == "mug":
+            if kind in {"cup", "mug"}:
                 contents = str(self._rng.choice(["water", "coffee", "empty"], p=[0.35, 0.35, 0.30]))
-            elif kind == "glass":
-                contents = str(self._rng.choice(["water", "empty"], p=[0.7, 0.3]))
+            elif kind == "bowl":
+                contents = str(self._rng.choice(["spread", "empty"], p=[0.7, 0.3]))
             else:
-                contents = str(self._rng.choice(["fruit", "empty"], p=[0.7, 0.3]))
+                contents = "empty"
             dirty = contents != "empty" or bool(self._rng.random() < 0.4)
             return dirty, contents
         return False, "empty"
@@ -786,7 +937,12 @@ class RestaurantSymbolicEnv(Env):
             target_kind_vec[self._target_kind_slot] = 1.0
         else:
             target_kind_vec[self.object_kind_index[self.task.target_kind]] = 1.0
-        pieces.extend([task_type_vec, target_location_vec, target_kind_vec])
+        target_object_vec = np.zeros((self.num_objects + 1,), dtype=np.float32)
+        if self.task.object_name is None:
+            target_object_vec[-1] = 1.0
+        else:
+            target_object_vec[self.object_name_index[self.task.object_name]] = 1.0
+        pieces.extend([task_type_vec, target_location_vec, target_kind_vec, target_object_vec])
         return np.concatenate(pieces, axis=0)
 
     def _info(self, *, success: bool) -> Dict[str, Any]:
@@ -806,6 +962,7 @@ class RestaurantSymbolicEnv(Env):
                 "task_type": self.task.task_type,
                 "target_location": self.task.target_location,
                 "target_kind": self.task.target_kind,
+                "object_name": self.task.object_name,
             },
             "success": bool(success),
             "task_source": self._task_source,
@@ -836,17 +993,40 @@ class RestaurantSymbolicEnv(Env):
             if held is None:
                 return False
             obj = self.state.objects[held]
-            return obj.kind in {"mug", "glass"} and (not obj.dirty) and obj.contents == "empty"
+            return obj.kind in {"cup", "mug"} and (not obj.dirty) and obj.contents == "empty"
         if action == self._brew_action:
             if held is None:
                 return False
             obj = self.state.objects[held]
-            return obj.kind == "mug" and (not obj.dirty) and obj.contents == "empty"
+            return obj.kind in {"cup", "mug"} and (not obj.dirty) and obj.contents == "empty"
         if action == self._fruit_action:
             if held is None:
                 return False
             obj = self.state.objects[held]
-            return obj.kind == "bowl" and (not obj.dirty) and obj.contents == "empty"
+            if obj.kind != "bowl" or obj.dirty or obj.contents != "empty":
+                return False
+            # Check if there's an apple at current location
+            for name, apple_obj in self.state.objects.items():
+                if apple_obj.kind == "apple" and apple_obj.location == self.state.agent_location:
+                    return True
+            return False
+        if action == self._pour_action:
+            if held is None:
+                return False
+            source_obj = self.state.objects[held]
+            if source_obj.contents == "empty":
+                return False
+            # Check if there's a target object at current location
+            for name, obj in self.state.objects.items():
+                if name == held:
+                    continue
+                if obj.location == self.state.agent_location and obj.contents == "empty":
+                    return True
+            return False
+        if action == self._refill_action:
+            return True  # Always valid to refill water
+        if action == self._drain_action:
+            return True  # Always valid to drain sink
         return False
 
     # ------------------------------------------------------------------

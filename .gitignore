@@ -21,3 +21,7 @@ try.ipynb
 *.aux
 *.fdb_latexmk
 *.fls
+
+AGENTS.md
+CLAUDE.md
+.aider*

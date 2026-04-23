@@ -118,16 +118,16 @@ def task_goal_clauses(
 ) -> List[str]:
     if task.task_type == "serve_water":
         assert task.target_location is not None
-        candidates = [n for n, o in state.objects.items() if o.kind in {"mug", "glass"}]
+        candidates = [n for n, o in state.objects.items() if o.kind in {"cup", "mug"}]
         return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (water {o}))' for o in candidates])})"]
     if task.task_type == "make_coffee":
         assert task.target_location is not None
-        candidates = _objects_of_kind(state, "mug")
+        candidates = [n for n, o in state.objects.items() if o.kind in {"cup", "mug"}]
         return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (coffee {o}))' for o in candidates])})"]
-    if task.task_type == "serve_fruit_bowl":
+    if task.task_type == "make_fruit_bowl":
         assert task.target_location is not None
         candidates = _objects_of_kind(state, "bowl")
-        return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (fruit {o}))' for o in candidates])})"]
+        return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (apple {o}))' for o in candidates])})"]
     if task.task_type == "clear_containers":
         assert task.target_location is not None
         return [f"(not (at {o} {task.target_location}))" for o in state.objects.keys()]
@@ -180,10 +180,10 @@ def build_restaurant_problem_text(
         init_lines.append(f"(fruit-loc {env.station_fruit})")
 
     for name, obj in state.objects.items():
-        if obj.kind == "mug":
+        if obj.kind == "cup":
+            init_lines.append(f"(cup-kind {name})")
+        elif obj.kind == "mug":
             init_lines.append(f"(mug-kind {name})")
-        elif obj.kind == "glass":
-            init_lines.append(f"(glass-kind {name})")
         elif obj.kind == "bowl":
             init_lines.append(f"(bowl-kind {name})")
         if obj.location != "__held__":
@@ -196,8 +196,8 @@ def build_restaurant_problem_text(
             init_lines.append(f"(water {name})")
         elif obj.contents == "coffee":
             init_lines.append(f"(coffee {name})")
-        elif obj.contents == "fruit":
-            init_lines.append(f"(fruit {name})")
+        elif obj.contents == "apple":
+            init_lines.append(f"(apple {name})")
 
     goal_clauses = task_goal_clauses(
         state,
@@ -298,7 +298,7 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
         state.objects[args[0]].contents = "coffee"
         return
     if name == "fill-fruit":
-        state.objects[args[0]].contents = "fruit"
+        state.objects[args[0]].contents = "apple"
         return
 
 

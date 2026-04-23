@@ -72,7 +72,7 @@ class FastDownwardRestaurantPlanner:
         state: RestaurantWorldState,
         task: PaperRestaurantTask,
     ) -> List[GoalCandidate]:
-        if task.task_type in {"serve_water", "make_coffee", "serve_fruit_bowl", "wash_objects"}:
+        if task.task_type in {"serve_water", "make_coffee", "make_fruit_bowl", "wash_objects"}:
             names = self.generator.candidate_object_names(state, task)
             return [GoalCandidate(bound_object=name, note=f"bind:{name}") for name in names]
         if task.task_type == "pick_place":
@@ -113,9 +113,9 @@ class FastDownwardRestaurantPlanner:
         elif task.task_type == "make_coffee":
             assert task.target_location is not None and candidate.bound_object is not None
             self._serve_contents(working, candidate.bound_object, "coffee", task.target_location, actions, moved)
-        elif task.task_type == "serve_fruit_bowl":
+        elif task.task_type == "make_fruit_bowl":
             assert task.target_location is not None and candidate.bound_object is not None
-            self._serve_contents(working, candidate.bound_object, "fruit", task.target_location, actions, moved)
+            self._serve_contents(working, candidate.bound_object, "apple", task.target_location, actions, moved)
         elif task.task_type == "wash_objects":
             assert candidate.bound_object is not None
             self._wash_for_task(working, candidate.bound_object, actions, moved)
@@ -195,7 +195,7 @@ class FastDownwardRestaurantPlanner:
             self._fill_water_held(state, object_name, actions)
         elif desired_contents == "coffee":
             self._brew_coffee_held(state, object_name, actions)
-        elif desired_contents == "fruit":
+        elif desired_contents == "apple":
             self._fill_fruit_held(state, object_name, actions)
         else:
             raise ValueError(f"Unsupported contents goal: {desired_contents}")
@@ -344,7 +344,7 @@ class FastDownwardRestaurantPlanner:
     ) -> None:
         self._move_robot(state, "fruit_station", actions)
         obj = state.objects[object_name]
-        obj.contents = "fruit"
+        obj.contents = "apple"
         actions.append(PlanAction("fill_fruit", (object_name,), self.config.fruit_cost))
 
     def _move_robot(

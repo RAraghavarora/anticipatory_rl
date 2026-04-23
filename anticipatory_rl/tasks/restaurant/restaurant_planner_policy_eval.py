@@ -43,7 +43,7 @@ def _load_layouts(path: Path) -> List[Dict[str, Any]]:
 
 def _sample_task(env: RestaurantSymbolicEnv) -> RestaurantTask:
     ttype = env._weighted_choice(env.task_distribution, env.task_types)
-    if ttype in {"serve_water", "make_coffee", "serve_fruit_bowl", "clear_containers"}:
+    if ttype in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
         loc = env._weighted_choice(env.service_location_distribution, env.service_locations)
         return RestaurantTask(task_type=ttype, target_location=loc, target_kind=None)
     kind = env._weighted_choice(env.wash_kind_distribution, env.object_kinds)
