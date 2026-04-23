@@ -319,7 +319,8 @@ def evaluate(
         sequence_running_cost = 0.0
 
         for task_idx, _task in enumerate(sequence_tasks):
-            trajectory_frames: List[np.ndarray] = [_obs_to_rgb_uint8(obs)]
+            trajectory_eligible = not bool(current_task_auto)
+            trajectory_frames: List[np.ndarray] = [_obs_to_rgb_uint8(obs)] if trajectory_eligible else []
             trajectory_meta: Dict[str, Any] = {
                 "sequence_index": int(sequence_count),
                 "task_index": int(task_idx),
@@ -339,7 +340,8 @@ def evaluate(
                         generator=action_gen,
                     )
                 obs, reward, success, horizon, info = env.step(action)
-                trajectory_frames.append(_obs_to_rgb_uint8(obs))
+                if trajectory_eligible:
+                    trajectory_frames.append(_obs_to_rgb_uint8(obs))
                 total_steps += 1
                 task_steps += 1
                 task_return += float(reward)
@@ -357,7 +359,7 @@ def evaluate(
                     if horizon:
                         horizon_tasks += 1
                         trajectory_meta["outcome"] = "failure"
-                    if trajectory_log_dir is not None:
+                    if trajectory_log_dir is not None and trajectory_eligible:
                         if bool(success) and collected_trajectories["success"] is None:
                             collected_trajectories["success"] = {
                                 "frames": list(trajectory_frames),
