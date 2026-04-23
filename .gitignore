@@ -21,3 +21,5 @@ try.ipynb
 *.aux
 *.fdb_latexmk
 *.fls
+.cecli*
+.aider*

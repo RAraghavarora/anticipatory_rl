@@ -56,10 +56,11 @@ class ConvQNetwork(nn.Module):
 class ReplayBuffer:
     """Fixed-size array-backed replay to avoid Python-object memory blowups."""
 
-    def __init__(self, capacity: int, obs_shape: Tuple[int, ...]) -> None:
+    def __init__(self, capacity: int, obs_shape: Tuple[int, ...], num_actions: int) -> None:
         self.capacity = max(1, int(capacity))
         self.obs = np.empty((self.capacity, *obs_shape), dtype=np.uint8)
         self.next_obs = np.empty((self.capacity, *obs_shape), dtype=np.uint8)
+        self.next_action_masks = np.empty((self.capacity, int(num_actions)), dtype=bool)
         self.actions = np.empty(self.capacity, dtype=np.int64)
         self.rewards = np.empty(self.capacity, dtype=np.float32)
         self.dones = np.empty(self.capacity, dtype=bool)
@@ -77,12 +78,14 @@ class ReplayBuffer:
         action: int,
         reward: float,
         next_state: np.ndarray,
+        next_action_mask: np.ndarray,
         done: bool,
         task_boundary: bool,
     ) -> None:
         idx = self.pos
         self.obs[idx] = state
         self.next_obs[idx] = next_state
+        self.next_action_masks[idx] = np.asarray(next_action_mask, dtype=bool)
         self.actions[idx] = int(action)
         self.rewards[idx] = float(reward)
         self.dones[idx] = bool(done)
@@ -90,7 +93,10 @@ class ReplayBuffer:
         self.pos = (self.pos + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
 
-    def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def sample(
+        self,
+        batch_size: int,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         idxs = np.random.randint(0, self.size, size=batch_size)
         return (
             self.obs[idxs],
@@ -98,6 +104,7 @@ class ReplayBuffer:
             self.rewards[idxs],
             self.next_obs[idxs],
             self.dones[idxs],
+            self.next_action_masks[idxs],
         )
 
 
@@ -167,6 +174,69 @@ def _epsilon_by_step(step: int, start: float, final: float, decay: int) -> float
         return final
     frac = min(1.0, step / max(1, decay))
     return start + frac * (final - start)
+
+
+def _obs_to_rgb_uint8(obs: np.ndarray) -> np.ndarray:
+    rgb = np.clip(np.asarray(obs[:3], dtype=np.float32), 0.0, 1.0)
+    return np.rint(rgb.transpose(1, 2, 0) * 255.0).astype(np.uint8, copy=False)
+
+
+def _valid_action_mask(
+    env: Paper1BlockworldImageEnv,
+    info: Dict[str, Any],
+) -> np.ndarray:
+    mask = np.ones((env.action_space.n,), dtype=bool)
+    robot_x, robot_y = tuple(info["robot"])
+    mask[Paper1BlockworldImageEnv.MOVE_UP] = robot_y > 0
+    mask[Paper1BlockworldImageEnv.MOVE_DOWN] = robot_y < env.config.height - 1
+    mask[Paper1BlockworldImageEnv.MOVE_LEFT] = robot_x > 0
+    mask[Paper1BlockworldImageEnv.MOVE_RIGHT] = robot_x < env.config.width - 1
+    mask[Paper1BlockworldImageEnv.PICK] = bool(info.get("can_pick", False))
+    mask[Paper1BlockworldImageEnv.PLACE] = bool(info.get("can_place", False))
+    if not np.any(mask):
+        mask[:] = True
+    return mask
+
+
+def _masked_argmax(q_values: torch.Tensor, action_masks: np.ndarray) -> torch.Tensor:
+    masked = q_values.clone()
+    invalid = torch.tensor(np.asarray(action_masks) <= 0.0, dtype=torch.bool, device=q_values.device)
+    masked[invalid] = float("-inf")
+    return torch.argmax(masked, dim=1)
+
+
+def _sample_valid_actions(action_masks: np.ndarray) -> np.ndarray:
+    actions = np.empty((action_masks.shape[0],), dtype=np.int64)
+    for idx, mask in enumerate(action_masks):
+        valid = np.flatnonzero(mask)
+        if valid.size == 0:
+            valid = np.arange(mask.shape[0], dtype=np.int64)
+        actions[idx] = int(np.random.choice(valid))
+    return actions
+
+
+def _log_task_rgb_snapshot(
+    *,
+    run_dir: Path,
+    tb_writer: SummaryWriter | None,
+    obs: np.ndarray,
+    global_step: int,
+    task_number: int,
+    env_idx: int,
+    outcome: str,
+) -> None:
+    rgb = _obs_to_rgb_uint8(obs)
+    out_dir = run_dir / "task_snapshots" / outcome
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"step{global_step:08d}_task{task_number:06d}_env{env_idx}.png"
+    plt.imsave(out_path, rgb)
+    if tb_writer is not None:
+        tb_writer.add_image(
+            f"task_snapshots/{outcome}",
+            rgb.transpose(2, 0, 1),
+            global_step,
+            dataformats="CHW",
+        )
 
 
 def _paper_step_cost(
@@ -341,7 +411,7 @@ def train(args: argparse.Namespace) -> Path:
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
-    replay = ReplayBuffer(max(1, args.replay_size), obs_shape)
+    replay = ReplayBuffer(max(1, args.replay_size), obs_shape, env.action_space.n)
 
     num_envs = env.num_envs
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
@@ -376,6 +446,8 @@ def train(args: argparse.Namespace) -> Path:
     return_history: List[float] = []
     cost_history: List[float] = []
     task_length_history: List[int] = []
+    logged_success_images = 0
+    logged_horizon_images = 0
 
     progress = tqdm(total=args.total_steps, desc="Paper1 Blockworld DQN")
     while global_step < args.total_steps:
@@ -383,9 +455,13 @@ def train(args: argparse.Namespace) -> Path:
         with torch.no_grad():
             inp = torch.tensor(obs, dtype=torch.float32, device=device)
             q_values = q_net(inp)
-            greedy_actions = torch.argmax(q_values, dim=1).cpu().numpy()
+            action_masks = np.stack([
+                _valid_action_mask(env.envs[idx], infos[idx])
+                for idx in range(num_envs)
+            ])
+            greedy_actions = _masked_argmax(q_values, action_masks).cpu().numpy()
         random_mask = np.random.rand(num_envs) < epsilon
-        random_actions = np.asarray([env.action_space.sample() for _ in range(num_envs)], dtype=np.int64)
+        random_actions = _sample_valid_actions(action_masks)
         actions = np.where(random_mask, random_actions, greedy_actions).astype(np.int64)
 
         pre_infos = infos
@@ -441,17 +517,26 @@ def train(args: argparse.Namespace) -> Path:
         total_action_steps += int(num_envs)
 
         for idx in range(num_envs):
+            next_action_mask = _valid_action_mask(env.envs[idx], next_infos[idx])
             replay.add(
                 state=_encode_obs_storage(obs[idx]),
                 action=int(actions[idx]),
                 reward=float(rewards[idx]),
                 next_state=_encode_obs_storage(next_obs[idx]),
+                next_action_mask=next_action_mask,
                 done=bool(bootstrap_done_flags[idx]),
                 task_boundary=bool(task_done[idx]),
             )
 
         if len(replay) >= args.batch_size:
-            batch_states, batch_actions_np, batch_rewards_np, batch_next_states, batch_dones_np = replay.sample(args.batch_size)
+            (
+                batch_states,
+                batch_actions_np,
+                batch_rewards_np,
+                batch_next_states,
+                batch_dones_np,
+                batch_next_action_masks,
+            ) = replay.sample(args.batch_size)
             states = _decode_obs_batch(batch_states, device)
             batch_actions = torch.tensor(batch_actions_np, dtype=torch.int64, device=device).unsqueeze(1)
             batch_rewards = torch.tensor(batch_rewards_np, dtype=torch.float32, device=device).unsqueeze(1)
@@ -461,7 +546,7 @@ def train(args: argparse.Namespace) -> Path:
             q_selected = q_net(states).gather(1, batch_actions)
             with torch.no_grad():
                 next_online = q_net(next_states)
-                next_actions = torch.argmax(next_online, dim=1, keepdim=True)
+                next_actions = _masked_argmax(next_online, batch_next_action_masks).unsqueeze(1)
                 next_target = target_net(next_states).gather(1, next_actions)
                 targets = batch_rewards + args.gamma * (1.0 - dones) * next_target
 
@@ -490,6 +575,29 @@ def train(args: argparse.Namespace) -> Path:
                     total_horizon_tasks += 1
                 pos = int(tasks_since_reset[idx] - 1)
                 snapshot = pre_infos[idx]
+                if global_step >= args.task_image_log_start:
+                    if was_success and logged_success_images < args.task_image_log_limit:
+                        _log_task_rgb_snapshot(
+                            run_dir=run_dir,
+                            tb_writer=tb_writer,
+                            obs=obs[idx],
+                            global_step=global_step,
+                            task_number=total_tasks,
+                            env_idx=idx,
+                            outcome="success",
+                        )
+                        logged_success_images += 1
+                    elif bool(horizon[idx]) and logged_horizon_images < args.task_image_log_limit:
+                        _log_task_rgb_snapshot(
+                            run_dir=run_dir,
+                            tb_writer=tb_writer,
+                            obs=obs[idx],
+                            global_step=global_step,
+                            task_number=total_tasks,
+                            env_idx=idx,
+                            outcome="horizon",
+                        )
+                        logged_horizon_images += 1
                 if tb_writer is not None and args.tb_task_interval > 0 and total_tasks % args.tb_task_interval == 0:
                     tb_writer.add_scalar("task/return", float(task_return[idx]), total_tasks)
                     tb_writer.add_scalar("task/steps", float(task_steps[idx]), total_tasks)
@@ -638,6 +746,10 @@ def train(args: argparse.Namespace) -> Path:
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "num_envs": int(args.num_envs),
         "tb_log_dir": None if tb_log_dir_used is None else str(tb_log_dir_used),
+        "logged_success_images": int(logged_success_images),
+        "logged_horizon_images": int(logged_horizon_images),
+        "task_image_log_start": int(args.task_image_log_start),
+        "task_image_log_limit": int(args.task_image_log_limit),
     }
     _write_json(summary, run_dir / "train_summary.json")
     _write_json(task_records, run_dir / "task_records.json")
@@ -690,6 +802,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tb-task-interval", type=int, default=1)
     parser.add_argument("--tb-step-window", type=int, default=1000)
     parser.add_argument("--tb-task-window", type=int, default=100)
+    parser.add_argument("--task-image-log-start", type=int, default=800_000)
+    parser.add_argument("--task-image-log-limit", type=int, default=6)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output", type=Path, default=Path("paper1_blockworld_image_dqn.pt"))
