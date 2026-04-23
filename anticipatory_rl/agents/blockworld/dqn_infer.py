@@ -33,22 +33,6 @@ def _select_device() -> torch.device:
     return torch.device("cpu")
 
 
-def _sample_action_from_q(
-    q_values_row: torch.Tensor,
-    *,
-    temperature: float,
-    generator: torch.Generator,
-) -> int:
-    if temperature <= 0.0:
-        return int(torch.argmax(q_values_row).item())
-    logits = q_values_row / temperature
-    probs = torch.softmax(logits, dim=-1)
-    if not torch.isfinite(probs).all() or float(probs.sum()) <= 0.0:
-        return int(torch.argmax(q_values_row).item())
-    draw = torch.multinomial(probs.detach().float().cpu(), 1, generator=generator)
-    return int(draw.item())
-
-
 def _action_policy_label(temperature: float) -> str:
     return "argmax (greedy)" if temperature <= 0.0 else f"softmax (tau={float(temperature):g})"
 
@@ -56,6 +40,55 @@ def _action_policy_label(temperature: float) -> str:
 def _obs_to_rgb_uint8(obs: np.ndarray) -> np.ndarray:
     rgb = np.clip(np.asarray(obs[:3], dtype=np.float32), 0.0, 1.0)
     return np.rint(rgb.transpose(1, 2, 0) * 255.0).astype(np.uint8, copy=False)
+
+
+def _valid_action_mask(env: Paper1BlockworldImageEnv, info: Dict[str, Any]) -> np.ndarray:
+    mask = np.ones((env.action_space.n,), dtype=bool)
+    robot_x, robot_y = tuple(info["robot"])
+    mask[Paper1BlockworldImageEnv.MOVE_UP] = robot_y > 0
+    mask[Paper1BlockworldImageEnv.MOVE_DOWN] = robot_y < env.config.height - 1
+    mask[Paper1BlockworldImageEnv.MOVE_LEFT] = robot_x > 0
+    mask[Paper1BlockworldImageEnv.MOVE_RIGHT] = robot_x < env.config.width - 1
+    mask[Paper1BlockworldImageEnv.PICK] = bool(info.get("can_pick", False))
+    mask[Paper1BlockworldImageEnv.PLACE] = bool(info.get("can_place", False))
+    if not np.any(mask):
+        mask[:] = True
+    return mask
+
+
+def _masked_argmax(q_values: torch.Tensor, action_mask: np.ndarray) -> int:
+    masked = q_values.clone()
+    invalid = torch.tensor(np.asarray(action_mask) <= 0.0, dtype=torch.bool, device=q_values.device)
+    masked[invalid] = float("-inf")
+    return int(torch.argmax(masked).item())
+
+
+def _sample_action_from_q(
+    q_values_row: torch.Tensor,
+    *,
+    temperature: float,
+    generator: torch.Generator,
+    action_mask: np.ndarray | None = None,
+) -> int:
+    if temperature <= 0.0:
+        if action_mask is None:
+            return int(torch.argmax(q_values_row).item())
+        return _masked_argmax(q_values_row, action_mask)
+    logits = q_values_row / temperature
+    probs = torch.softmax(logits, dim=-1)
+    if not torch.isfinite(probs).all() or float(probs.sum()) <= 0.0:
+        if action_mask is None:
+            return int(torch.argmax(q_values_row).item())
+        return _masked_argmax(q_values_row, action_mask)
+    if action_mask is not None:
+        masked = probs.clone()
+        invalid = torch.tensor(np.asarray(action_mask) <= 0.0, dtype=torch.bool, device=probs.device)
+        masked[invalid] = 0.0
+        if not torch.isfinite(masked).all() or float(masked.sum()) <= 0.0:
+            return _masked_argmax(q_values_row, action_mask)
+        probs = masked / masked.sum()
+    draw = torch.multinomial(probs.detach().float().cpu(), 1, generator=generator)
+    return int(draw.item())
 
 
 def _save_gif(frames: List[np.ndarray], path: Path, fps: int) -> None:
@@ -338,12 +371,14 @@ def evaluate(
                 pre_info = info
                 auto_snapshot = bool(current_task_auto)
                 obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+                action_mask = _valid_action_mask(env, info)
                 with torch.no_grad():
                     q_values = model(obs_tensor).squeeze(0)
                     action = _sample_action_from_q(
                         q_values,
                         temperature=float(args.softmax_temperature),
                         generator=action_gen,
+                        action_mask=action_mask,
                     )
                 obs, reward, success, horizon, info = env.step(action)
                 if trajectory_eligible:
