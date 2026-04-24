@@ -30,7 +30,7 @@ def test_clear_candidate_expansion_includes_baseline_and_no_duplicates() -> None
     state = RestaurantWorldState(
         robot_location="pass_counter",
         holding=None,
-        objects={"glass_short": RestaurantObjectState("glass_short", "glass", "glass", "table_left", True, "water")},
+        objects={"cup_short": RestaurantObjectState("cup_short", "cup", "cup", "table_left", True, "water")},
     )
     for name, spec in config.object_specs.items():
         if name not in state.objects:
@@ -50,13 +50,13 @@ def test_clear_candidate_expansion_includes_baseline_and_no_duplicates() -> None
     assert len(signatures) == len(set(signatures))
 
 
-def test_service_counterfactual_prefers_glass_for_future_coffee() -> None:
+def test_service_counterfactual_prefers_cup_for_future_coffee() -> None:
     rng = random.Random(0)
     config = RestaurantWorldConfig.sample(rng)
     state = RestaurantWorldState(robot_location="prep_counter", holding=None, objects={})
     for name, spec in config.object_specs.items():
         location = "pantry_shelf"
-        if name in {"mug_red", "glass_short"}:
+        if name in {"mug_red", "cup_short"}:
             location = "prep_counter"
         state.objects[name] = RestaurantObjectState(name, spec.kind, spec.category, location, False, "empty")
 
@@ -77,5 +77,5 @@ def test_service_counterfactual_prefers_glass_for_future_coffee() -> None:
     anticipatory = experiment.solve_anticipatory(state, current_task, library)
 
     assert myopic.candidate.bound_object == "mug_red"
-    assert anticipatory.candidate.bound_object == "glass_short"
+    assert anticipatory.candidate.bound_object == "cup_short"
     assert estimator.estimate(anticipatory.final_state, library) < estimator.estimate(myopic.final_state, library)

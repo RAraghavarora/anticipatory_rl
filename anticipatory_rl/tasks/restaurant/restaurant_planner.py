@@ -139,6 +139,9 @@ def task_goal_clauses(
             for wloc in wash_ready_locations:
                 disj_terms.append(f"(and (at {o} {wloc}) (clean {o}) (empty {o}))")
         return [f"(or {' '.join(disj_terms)})"] if disj_terms else ["(and)"]
+    if task.task_type == "pick_place":
+        assert task.object_name is not None and task.target_location is not None
+        return [f"(and (at {task.object_name} {task.target_location}) (handfree))"]
     raise ValueError(f"Unsupported task type: {task.task_type}")
 
 

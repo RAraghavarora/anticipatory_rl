@@ -370,7 +370,7 @@ def train(args: argparse.Namespace) -> Path:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train DQN on the symbolic restaurant environment.")
-    parser.add_argument("--total-steps", type=int, default=200_000)
+    parser.add_argument("--total-steps", type=int, default=500_000)
     parser.add_argument("--replay-size", type=int, default=50_000)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--hidden-dim", type=int, default=256)
@@ -386,25 +386,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-reset-tasks",
         type=int,
-        default=None,
-        help="Physical env reset interval in tasks (default: same as tasks-per-episode).",
+        default=200,
+        help="Physical env reset interval in tasks.",
     )
     parser.add_argument(
         "--episode-step-limit",
         type=int,
-        default=0,
+        default=3000,
         help="Maximum primitive steps allowed between resets; <=0 disables.",
     )
     parser.add_argument("--max-steps-per-task", type=int, default=24)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=25.0)
-    parser.add_argument("--pick-cost", type=float, default=25.0)
-    parser.add_argument("--place-cost", type=float, default=25.0)
-    parser.add_argument("--wash-cost", type=float, default=25.0)
-    parser.add_argument("--fill-cost", type=float, default=25.0)
-    parser.add_argument("--brew-cost", type=float, default=25.0)
-    parser.add_argument("--fruit-cost", type=float, default=25.0)
+    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
+    parser.add_argument("--pick-cost", type=float, default=1.0)
+    parser.add_argument("--place-cost", type=float, default=1.0)
+    parser.add_argument("--wash-cost", type=float, default=2.0)
+    parser.add_argument("--fill-cost", type=float, default=1.0)
+    parser.add_argument("--brew-cost", type=float, default=2.0)
+    parser.add_argument("--fruit-cost", type=float, default=2.0)
     parser.add_argument(
         "--config-path",
         type=Path,

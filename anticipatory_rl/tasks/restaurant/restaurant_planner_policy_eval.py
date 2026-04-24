@@ -23,6 +23,7 @@ from anticipatory_rl.tasks.restaurant_planner import (
     solve_restaurant_task_with_fd,
     task_goal_clauses,
 )
+from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task
 
 
 @dataclass
@@ -39,15 +40,6 @@ def _load_layouts(path: Path) -> List[Dict[str, Any]]:
     if isinstance(payload, list):
         return [x for x in payload if isinstance(x, dict)]
     raise ValueError(f"Unsupported layout corpus format: {path}")
-
-
-def _sample_task(env: RestaurantSymbolicEnv) -> RestaurantTask:
-    ttype = env._weighted_choice(env.task_distribution, env.task_types)
-    if ttype in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
-        loc = env._weighted_choice(env.service_location_distribution, env.service_locations)
-        return RestaurantTask(task_type=ttype, target_location=loc, target_kind=None)
-    kind = env._weighted_choice(env.wash_kind_distribution, env.object_kinds)
-    return RestaurantTask(task_type=ttype, target_location=None, target_kind=kind)
 
 
 def _build_episode_specs(
@@ -74,7 +66,7 @@ def _build_episode_specs(
         initial_state = RestaurantPlannerState.from_env(env)
         tasks: List[RestaurantTask] = []
         for _ in range(task_sequence_length):
-            tasks.append(_sample_task(env))
+            tasks.append(sample_task(env))
         specs.append(EpisodeSpec(layout=layout, initial_state=initial_state, tasks=tasks))
     return specs
 
@@ -178,7 +170,7 @@ def evaluate_policy(
                 )
             else:
                 assert model is not None
-                fut = [_sample_task(env) for _ in range(anticipatory_followups)]
+                fut = [sample_task(env) for _ in range(anticipatory_followups)]
                 result = _pick_anticipatory_plan(
                     env=env,
                     state=state,

@@ -689,7 +689,10 @@ class RestaurantSymbolicEnv(Env):
         return -(travel + self.brew_cost), True
 
     def _fill_fruit_held(self) -> Tuple[float, bool]:
-        """Make fruit bowl by putting an apple in a bowl."""
+        """Make fruit bowl by putting an apple in a bowl.
+
+        Travel to the fruit station and set the held bowl's contents to 'apple'.
+        """
         if self.state.holding is None:
             return 0.0, False
         obj = self.state.objects[self.state.holding]

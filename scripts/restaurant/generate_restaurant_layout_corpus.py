@@ -29,14 +29,14 @@ def _base_locations() -> List[Dict[str, Any]]:
 def _category_to_kind(category: str) -> str:
     mapping = {
         "mug": "mug",
-        "glass": "glass",
-        "cup": "mug",
+        "cup": "cup",
+        "glass": "cup",
         "bowl": "bowl",
         "plate": "bowl",
         "saucer": "bowl",
-        "jar": "glass",
-        "pitcher": "glass",
-        "carafe": "glass",
+        "jar": "jar",
+        "pitcher": "jar",
+        "carafe": "jar",
     }
     return mapping.get(category, "bowl")
 
@@ -44,7 +44,6 @@ def _category_to_kind(category: str) -> str:
 def _build_categories() -> List[str]:
     return [
         "mug",
-        "glass",
         "cup",
         "bowl",
         "plate",
@@ -63,7 +62,7 @@ def _build_categories() -> List[str]:
         "salad_bowl",
         "latte_mug",
         "espresso_cup",
-        "water_glass",
+        "water_cup",
         "coffee_mug",
         "fruit_bowl",
         "serving_bowl",
@@ -112,9 +111,9 @@ def _all_task_templates() -> List[Tuple[str, str | None, str | None]]:
     for loc in ("pass_counter", "table_left", "table_right"):
         tasks.append(("serve_water", loc, None))
         tasks.append(("make_coffee", loc, None))
-        tasks.append(("serve_fruit_bowl", loc, None))
+        tasks.append(("make_fruit_bowl", loc, None))
         tasks.append(("clear_containers", loc, None))
-    for kind in ("mug", "glass", "bowl"):
+    for kind in ("mug", "cup", "bowl"):
         tasks.append(("wash_objects", None, kind))
     return tasks
 
@@ -177,22 +176,22 @@ def generate_corpus(args: argparse.Namespace) -> Dict[str, Any]:
             "wash_ready_locations": ["dish_rack", "kitchen_counter"],
             "dirty_drop_locations": ["sink", "bus_tub"],
             "stations": {"water": "water_station", "coffee": "coffee_machine", "fruit": "fruit_station", "wash": "sink"},
-            "object_kinds": ["mug", "glass", "bowl"],
-            "contents": ["empty", "water", "coffee", "fruit"],
-            "task_types": ["serve_water", "make_coffee", "serve_fruit_bowl", "clear_containers", "wash_objects"],
+            "object_kinds": ["cup", "mug", "bowl"],
+            "contents": ["empty", "water", "coffee", "spread", "apple"],
+            "task_types": ["serve_water", "make_coffee", "make_fruit_bowl", "clear_containers", "wash_objects"],
             "object_specs": _build_object_specs(lrng, categories, args.min_objects, args.max_objects),
             "task_distribution": {
                 "serve_water": 0.28,
                 "make_coffee": 0.24,
-                "serve_fruit_bowl": 0.18,
+                "make_fruit_bowl": 0.18,
                 "clear_containers": 0.15,
                 "wash_objects": 0.15,
             },
             "service_location_distribution": {"pass_counter": 0.34, "table_left": 0.33, "table_right": 0.33},
-            "wash_kind_distribution": {"mug": 0.34, "glass": 0.33, "bowl": 0.33},
+            "wash_kind_distribution": {"cup": 0.34, "mug": 0.33, "bowl": 0.33},
             "reset_location_distribution": {
                 "mug": {"kitchen_counter": 0.25, "dish_rack": 0.20, "sink": 0.10, "pass_counter": 0.15, "table_left": 0.15, "table_right": 0.15},
-                "glass": {"kitchen_counter": 0.20, "dish_rack": 0.25, "sink": 0.10, "pass_counter": 0.15, "table_left": 0.15, "table_right": 0.10, "bus_tub": 0.05},
+                "cup": {"kitchen_counter": 0.20, "dish_rack": 0.25, "sink": 0.10, "pass_counter": 0.15, "table_left": 0.15, "table_right": 0.10, "bus_tub": 0.05},
                 "bowl": {"kitchen_counter": 0.20, "dish_rack": 0.20, "sink": 0.10, "fruit_station": 0.10, "pass_counter": 0.15, "table_left": 0.15, "table_right": 0.10},
             },
             "task_library": _build_task_library(lrng, args.min_tasks_per_layout, args.max_tasks_per_layout),

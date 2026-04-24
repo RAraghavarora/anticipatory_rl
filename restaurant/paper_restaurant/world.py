@@ -391,7 +391,7 @@ class RestaurantWorldGenerator:
     def support_locations_for_kind(self, kind: str) -> Tuple[str, ...]:
         if kind == "mug":
             return ("dish_rack", "prep_counter", "pass_counter", "kitchen_counter")
-        #
+        elif kind == "cup":
             return ("dish_rack", "pass_counter", "service_shelf", "kitchen_counter")
         if kind == "bowl":
             return ("dish_rack", "fruit_station", "pass_counter", "service_shelf")
@@ -428,7 +428,7 @@ class RestaurantWorldGenerator:
     def _sample_initial_location(self, spec: ObjectSpec, rng: random.Random) -> str:
         if spec.kind == "mug":
             candidates = ("dish_rack", "kitchen_counter", "prep_counter", "table_left", "table_center")
-        elif spec.kind == "glass":
+        elif spec.kind == "cup":
             candidates = ("dish_rack", "service_shelf", "table_left", "table_center", "table_right")
         elif spec.kind == "bowl":
             candidates = ("dish_rack", "fruit_station", "table_center", "table_right")
@@ -452,7 +452,7 @@ class RestaurantWorldGenerator:
             return True, "empty"
         if spec.kind == "mug":
             contents = rng.choices(["empty", "water", "coffee"], weights=[0.55, 0.20, 0.25], k=1)[0]
-        elif spec.kind == "glass":
+        elif spec.kind == "cup":
             contents = rng.choices(["empty", "water"], weights=[0.75, 0.25], k=1)[0]
         elif spec.kind == "bowl":
             contents = rng.choices(["empty", "apple"], weights=[0.70, 0.30], k=1)[0]
@@ -468,7 +468,7 @@ class RestaurantWorldGenerator:
             tasks.append(PaperRestaurantTask("make_coffee", target_location=location))
             tasks.append(PaperRestaurantTask("make_fruit_bowl", target_location=location))
             tasks.append(PaperRestaurantTask("clear_containers", target_location=location))
-        washable = sorted({spec.kind for spec in self.config.object_specs.values() if spec.kind in {"mug", "glass", "bowl", "plate"}})
+        washable = sorted({spec.kind for spec in self.config.object_specs.values() if spec.kind in {"mug", "cup", "bowl", "plate"}})
         for kind in washable:
             tasks.append(PaperRestaurantTask("wash_objects", target_kind=kind))
         for name, spec in self.config.object_specs.items():

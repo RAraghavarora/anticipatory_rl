@@ -36,9 +36,9 @@ def _location_feature(
             0.0,  # empty
             0.0,  # water
             0.0,  # coffee
-            0.0,  # fruit
+            0.0,  # apple
             0.0,  # mug
-            0.0,  # glass
+            0.0,  # cup
             0.0,  # bowl
         ],
         dtype=np.float32,
@@ -67,9 +67,9 @@ def _object_feature(
             1.0 if obj.contents == "empty" else 0.0,
             1.0 if obj.contents == "water" else 0.0,
             1.0 if obj.contents == "coffee" else 0.0,
-            1.0 if obj.contents == "fruit" else 0.0,
+            1.0 if obj.contents == "apple" else 0.0,
             1.0 if obj.kind == "mug" else 0.0,
-            1.0 if obj.kind == "glass" else 0.0,
+            1.0 if obj.kind == "cup" else 0.0,
             1.0 if obj.kind == "bowl" else 0.0,
         ],
         dtype=np.float32,

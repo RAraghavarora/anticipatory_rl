@@ -35,11 +35,11 @@ ATTRIBUTE_NAMES = (
     "empty",
     "contains_water",
     "contains_coffee",
-    "contains_fruit",
+    "contains_apple",
     "wash_source",
     "water_source",
     "coffee_source",
-    "fruit_source",
+    "apple_source",
 )
 
 
@@ -237,7 +237,7 @@ def encode_state_as_graph(
             1.0 if spec.wash_source else 0.0,
             1.0 if spec.water_source else 0.0,
             1.0 if spec.coffee_source else 0.0,
-            1.0 if spec.fruit_source else 0.0,
+            1.0 if spec.apple_source else 0.0,
         ]
         set_node(
             idx,
@@ -258,7 +258,7 @@ def encode_state_as_graph(
             1.0 if obj.contents == "empty" else 0.0,
             1.0 if obj.contents == "water" else 0.0,
             1.0 if obj.contents == "coffee" else 0.0,
-            1.0 if obj.contents == "fruit" else 0.0,
+            1.0 if obj.contents == "apple" else 0.0,
             0.0,
             0.0,
             0.0,

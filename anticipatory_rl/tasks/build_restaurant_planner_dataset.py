@@ -18,6 +18,7 @@ from anticipatory_rl.tasks.restaurant_planner import (
     RestaurantPlannerState,
     solve_restaurant_task_with_fd,
 )
+from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task
 
 
 def _load_layouts(path: Path) -> List[Dict[str, Any]]:
@@ -27,18 +28,6 @@ def _load_layouts(path: Path) -> List[Dict[str, Any]]:
     if isinstance(payload, list):
         return [x for x in payload if isinstance(x, dict)]
     raise ValueError(f"Unsupported layout corpus format: {path}")
-
-
-def _sample_task(env: RestaurantSymbolicEnv) -> RestaurantTask:
-    if random.random() < 0.8:
-        ttype = env._weighted_choice(env.task_distribution, env.task_types)
-    else:
-        ttype = random.choice(list(env.task_types))
-    if ttype in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
-        target_location = env._weighted_choice(env.service_location_distribution, env.service_locations)
-        return RestaurantTask(task_type=ttype, target_location=target_location, target_kind=None)
-    target_kind = env._weighted_choice(env.wash_kind_distribution, env.object_kinds)
-    return RestaurantTask(task_type=ttype, target_location=None, target_kind=target_kind)
 
 
 def _build_one_row(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,7 +56,7 @@ def _build_one_row(job: Dict[str, Any]) -> Dict[str, Any]:
     label_costs: List[float] = []
     fail_count = 0
     for _k in range(int(job["followup_samples"])):
-        task = _sample_task(env)
+        task = sample_task(env, uniform_task_type_prob=0.2)
         result = solve_restaurant_task_with_fd(
             env,
             state,
