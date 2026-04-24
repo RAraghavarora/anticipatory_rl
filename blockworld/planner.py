@@ -268,9 +268,9 @@ class FastDownwardBlockworldPlanner:
                 coord = self._coord_from_loc(block_loc)
                 if state.robot != robot_coord:
                     raise RuntimeError(f"Robot not at expected pick source {robot_loc}.")
-                if not self._is_adjacent(robot_coord, coord):
+                if robot_coord != coord:
                     raise RuntimeError(
-                        f"Robot at {robot_loc} is not adjacent to pick location {block_loc}."
+                        f"Robot at {robot_loc} is not on pick location {block_loc}."
                     )
                 if state.holding is not None:
                     raise RuntimeError("Cannot pick while already holding a block.")
@@ -290,9 +290,9 @@ class FastDownwardBlockworldPlanner:
                 coord = self._coord_from_loc(loc)
                 if state.robot != robot_coord:
                     raise RuntimeError(f"Robot not at expected place source {robot_loc}.")
-                if not self._is_adjacent(robot_coord, coord):
+                if robot_coord != coord:
                     raise RuntimeError(
-                        f"Robot at {robot_loc} is not adjacent to place location {loc}."
+                        f"Robot at {robot_loc} is not on place location {loc}."
                     )
                 if state.holding != block:
                     raise RuntimeError(f"Robot is not holding {block}.")
@@ -334,7 +334,3 @@ class FastDownwardBlockworldPlanner:
     def _coord_from_loc(loc: str) -> Coord:
         _, x, y = loc.split("_")
         return int(x), int(y)
-
-    @staticmethod
-    def _is_adjacent(src: Coord, dst: Coord) -> bool:
-        return abs(src[0] - dst[0]) + abs(src[1] - dst[1]) == 1

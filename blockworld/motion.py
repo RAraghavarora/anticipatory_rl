@@ -20,10 +20,11 @@ class MotionPath:
 
 class LazyPRMMotionPlanner:
     """
-    Small in-repo Lazy PRM over unoccupied cell centers.
+    Small in-repo Lazy PRM over cell centers.
 
-    Empty region tiles are traversable. Occupied object tiles are obstacles.
-    Interest poses are the current robot cell plus cells adjacent to region tiles.
+    Region tiles remain traversable even when occupied because manipulation
+    semantics require the robot to stand on the object/destination tile.
+    Interest poses are the current robot cell plus region tiles.
     """
 
     def __init__(
@@ -36,7 +37,6 @@ class LazyPRMMotionPlanner:
         self.config = config
         self.state = state
         self.k_neighbors = max(4, k_neighbors)
-        self.blocked_tiles = set(state.placements.values())
         self.sample_nodes = tuple(sorted(self._build_sample_nodes()))
         self._candidate_edges = self._build_candidate_edges()
         self._edge_validity: Dict[Tuple[Coord, Coord], bool] = {}
@@ -110,7 +110,6 @@ class LazyPRMMotionPlanner:
 
     def _build_sample_nodes(self) -> Iterable[Coord]:
         traversable = set(self.config.all_cells)
-        traversable -= self.blocked_tiles
         traversable.discard(self.state.robot)  # added back explicitly to preserve ordering
         yield self.state.robot
         for coord in sorted(traversable):
@@ -159,10 +158,6 @@ class LazyPRMMotionPlanner:
         return True
 
     def _point_hits_obstacle(self, point: Point) -> bool:
-        x, y = point
-        for tile_x, tile_y in self.blocked_tiles:
-            if tile_x <= x <= tile_x + 1 and tile_y <= y <= tile_y + 1:
-                return True
         return False
 
     @staticmethod

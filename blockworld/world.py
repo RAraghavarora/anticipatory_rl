@@ -203,11 +203,7 @@ class WorldConfig:
 
     @property
     def manipulation_cells(self) -> Tuple[Coord, ...]:
-        cells = set()
-        for tile in self.region_cells:
-            for neighbor in self.neighbors(tile):
-                cells.add(neighbor)
-        return tuple(sorted(cells))
+        return tuple(sorted(self.region_cells))
 
     def is_floor_connected(self) -> bool:
         cells = set(self.all_cells)
@@ -285,11 +281,7 @@ class WorldConfig:
         return tuple(sorted(cells))
 
     def placeable_tiles_for_region(self, region: str) -> Tuple[Coord, ...]:
-        return tuple(
-            tile
-            for tile in self.region_tiles[region]
-            if self.access_cells_for_tile(tile)
-        )
+        return tuple(self.region_tiles[region])
 
     def neighbors(self, coord: Coord) -> Tuple[Coord, ...]:
         x, y = coord

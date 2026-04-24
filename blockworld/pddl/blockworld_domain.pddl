@@ -1,5 +1,5 @@
 (define (domain paper1-blockworld)
-  (:requirements :typing :negative-preconditions :action-costs)
+  (:requirements :typing :negative-preconditions :action-costs :equality)
 
   (:types
     robot
@@ -37,7 +37,7 @@
     :parameters (?bot - robot ?robotloc - location ?b - block ?blockloc - location ?region - region)
     :precondition (and
       (at ?bot ?robotloc)
-      (adjacent ?robotloc ?blockloc)
+      (= ?robotloc ?blockloc)
       (on ?b ?blockloc)
       (in-region ?b ?region)
       (belongs ?blockloc ?region)
@@ -56,7 +56,7 @@
     :precondition (and
       (holding ?bot ?b)
       (at ?bot ?robotloc)
-      (adjacent ?robotloc ?loc)
+      (= ?robotloc ?loc)
       (clear ?loc)
       (belongs ?loc ?region)
       (region-empty ?region))
