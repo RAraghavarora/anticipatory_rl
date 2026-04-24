@@ -199,11 +199,7 @@ class WorldConfig:
 
     @property
     def manipulation_cells(self) -> Tuple[Coord, ...]:
-        cells = set()
-        for tile in self.region_cells:
-            for neighbor in self.neighbors(tile):
-                cells.add(neighbor)
-        return tuple(sorted(cells))
+        return tuple(sorted(self.region_cells))
 
     def region_for_coord(self, coord: Coord) -> str | None:
         for region, coords in self.region_tiles.items():
