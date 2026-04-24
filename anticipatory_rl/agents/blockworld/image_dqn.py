@@ -18,12 +18,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from PIL import Image
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 from anticipatory_rl.envs.blockworld.env import (
     Paper1BlockworldImageEnv,
 )
+from blockworld.planner import FastDownwardBlockworldPlanner, PlanningFailure
+from blockworld.world import Task as PlannerTask
+from blockworld.world import WorldConfig as PlannerWorldConfig, WorldState as PlannerWorldState
 
 
 class ConvQNetwork(nn.Module):
@@ -181,6 +185,12 @@ def _obs_to_rgb_uint8(obs: np.ndarray) -> np.ndarray:
     return np.rint(rgb.transpose(1, 2, 0) * 255.0).astype(np.uint8, copy=False)
 
 
+def _save_trajectory_frames(frames: Sequence[np.ndarray], out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx, frame in enumerate(frames):
+        Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(out_dir / f"frame_{idx:04d}.png")
+
+
 def _valid_action_mask(
     env: Paper1BlockworldImageEnv,
     info: Dict[str, Any],
@@ -213,6 +223,178 @@ def _sample_valid_actions(action_masks: np.ndarray) -> np.ndarray:
             valid = np.arange(mask.shape[0], dtype=np.int64)
         actions[idx] = int(np.random.choice(valid))
     return actions
+
+
+def _planner_config_from_env(env: Paper1BlockworldImageEnv) -> PlannerWorldConfig:
+    return PlannerWorldConfig(
+        width=int(env.config.width),
+        height=int(env.config.height),
+        region_size=int(env.config.region_size),
+        move_cost=int(env.config.move_cost),
+        pick_cost=int(env.config.pick_cost),
+        place_cost=int(env.config.place_cost),
+        region_layout=tuple(env.config.region_anchors.items()),
+        block_colors=tuple(env.config.block_color_map.items()),
+    )
+
+
+def _planner_state_from_env(env: Paper1BlockworldImageEnv) -> PlannerWorldState:
+    return PlannerWorldState(
+        robot=env.state.robot,
+        placements=dict(env.state.placements),
+        holding=env.state.holding,
+    )
+
+
+def _move_action_from_coords(src: Tuple[int, int], dst: Tuple[int, int]) -> int:
+    dx = dst[0] - src[0]
+    dy = dst[1] - src[1]
+    if dx == 1 and dy == 0:
+        return Paper1BlockworldImageEnv.MOVE_RIGHT
+    if dx == -1 and dy == 0:
+        return Paper1BlockworldImageEnv.MOVE_LEFT
+    if dx == 0 and dy == 1:
+        return Paper1BlockworldImageEnv.MOVE_DOWN
+    if dx == 0 and dy == -1:
+        return Paper1BlockworldImageEnv.MOVE_UP
+    raise ValueError(f"Planner move not adjacent: src={src} dst={dst}")
+
+
+def _path_actions(src: Tuple[int, int], dst: Tuple[int, int]) -> List[int]:
+    actions: List[int] = []
+    current = src
+    while current != dst:
+        cx, cy = current
+        dx = dst[0] - cx
+        dy = dst[1] - cy
+        if dx != 0:
+            step = (cx + (1 if dx > 0 else -1), cy)
+        else:
+            step = (cx, cy + (1 if dy > 0 else -1))
+        actions.append(_move_action_from_coords(current, step))
+        current = step
+    return actions
+
+
+def _expand_plan_to_env_actions(
+    plan_actions: Sequence[Tuple[str, Tuple[str, ...]]],
+) -> List[int]:
+    expanded: List[int] = []
+    for name, args in plan_actions:
+        if name == "move":
+            _, src, dst = args
+            src_coord = FastDownwardBlockworldPlanner._coord_from_loc(src)
+            dst_coord = FastDownwardBlockworldPlanner._coord_from_loc(dst)
+            expanded.extend(_path_actions(src_coord, dst_coord))
+            continue
+        if name == "pick":
+            _, robot_loc, _, block_loc, _ = args
+            robot_coord = FastDownwardBlockworldPlanner._coord_from_loc(robot_loc)
+            block_coord = FastDownwardBlockworldPlanner._coord_from_loc(block_loc)
+            if robot_coord != block_coord:
+                expanded.extend(_path_actions(robot_coord, block_coord))
+            expanded.append(Paper1BlockworldImageEnv.PICK)
+            continue
+        if name == "place":
+            _, robot_loc, _, loc, _ = args
+            robot_coord = FastDownwardBlockworldPlanner._coord_from_loc(robot_loc)
+            place_coord = FastDownwardBlockworldPlanner._coord_from_loc(loc)
+            if robot_coord != place_coord:
+                expanded.extend(_path_actions(robot_coord, place_coord))
+            expanded.append(Paper1BlockworldImageEnv.PLACE)
+            continue
+        raise ValueError(f"Unsupported planner action: {name}")
+    return expanded
+
+
+def _seed_replay_with_planner(
+    *,
+    replay: ReplayBuffer,
+    make_env,
+    args: argparse.Namespace,
+    run_dir: Path | None = None,
+) -> int:
+    num_tasks = max(0, int(args.planner_seed_tasks))
+    if num_tasks == 0:
+        return 0
+    seeded_transitions = 0
+    saved_trajectories = 0
+    rng = random.Random(args.seed + 9_917)
+    for task_idx in range(num_tasks):
+        env = make_env()
+        seed = args.seed + 40_001 * (task_idx + 1)
+        obs, info = env.reset(seed=seed)
+        attempts = 0
+        while attempts < 20:
+            task = rng.choice(env.task_library)
+            env.current_task = task
+            env._update_pending_auto_success()
+            if not env._pending_auto_success:
+                break
+            attempts += 1
+        if env._pending_auto_success:
+            continue
+        obs = env._obs()
+        info = env._info()
+
+        planner_config = _planner_config_from_env(env)
+        planner_state = _planner_state_from_env(env)
+        planner = FastDownwardBlockworldPlanner(planner_config)
+        planner_task = PlannerTask(assignments=tuple(task.assignments))
+        try:
+            result = planner.plan_for_task(planner_state, planner_task)
+        except PlanningFailure as exc:
+            print(f"[planner-seed] task={task_idx} planning failed: {exc}")
+            continue
+        if not result.actions:
+            continue
+
+        action_sequence = _expand_plan_to_env_actions(result.actions)
+        pre_obs = obs
+        trajectory_frames: List[np.ndarray] = [_obs_to_rgb_uint8(obs)]
+        trajectory_actions: List[int] = []
+        trajectory_outcome = "incomplete"
+        for action in action_sequence:
+            next_obs, reward, success, horizon, next_info = env.step(int(action))
+            next_action_mask = _valid_action_mask(env, next_info)
+            done = bool(success or horizon)
+            replay.add(
+                state=_encode_obs_storage(pre_obs),
+                action=int(action),
+                reward=float(reward),
+                next_state=_encode_obs_storage(next_obs),
+                next_action_mask=next_action_mask,
+                done=done,
+                task_boundary=done,
+            )
+            seeded_transitions += 1
+            trajectory_actions.append(int(action))
+            trajectory_frames.append(_obs_to_rgb_uint8(next_obs))
+            pre_obs = next_obs
+            if done:
+                trajectory_outcome = "success" if bool(success) else "horizon"
+                break
+        if run_dir is not None and saved_trajectories < max(0, int(args.planner_seed_save_limit)):
+            traj_dir = run_dir / "planner_seed_trajectories" / f"task_{task_idx:04d}"
+            _save_trajectory_frames(trajectory_frames, traj_dir)
+            _write_json(
+                {
+                    "task_index": int(task_idx),
+                    "seed": int(seed),
+                    "task_assignments": [list(item) for item in task.assignments],
+                    "planner_actions": [
+                        {"name": str(name), "args": list(action_args)}
+                        for name, action_args in result.actions
+                    ],
+                    "env_action_sequence": [int(action) for action in trajectory_actions],
+                    "num_frames": int(len(trajectory_frames)),
+                    "num_transitions_added": int(len(trajectory_actions)),
+                    "outcome": trajectory_outcome,
+                },
+                traj_dir / "metadata.json",
+            )
+            saved_trajectories += 1
+    return seeded_transitions
 
 
 def _log_task_rgb_snapshot(
@@ -412,6 +594,9 @@ def train(args: argparse.Namespace) -> Path:
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
     replay = ReplayBuffer(max(1, args.replay_size), obs_shape, env.action_space.n)
+    seeded = _seed_replay_with_planner(replay=replay, make_env=make_env, args=args, run_dir=run_dir)
+    if seeded > 0:
+        print(f"[planner-seed] added {seeded} transitions to replay")
 
     num_envs = env.num_envs
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
@@ -808,6 +993,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output", type=Path, default=Path("paper1_blockworld_image_dqn.pt"))
     parser.add_argument("--log-rss-every", type=int, default=1000)
+    parser.add_argument(
+        "--planner-seed-tasks",
+        type=int,
+        default=10,
+        help="Seed replay with planner rollouts for this many tasks (0 disables).",
+    )
+    parser.add_argument(
+        "--planner-seed-save-limit",
+        type=int,
+        default=10,
+        help="Save RGB PNG frame sequences for up to this many planner-seeded trajectories (0 disables).",
+    )
     return parser
 
 

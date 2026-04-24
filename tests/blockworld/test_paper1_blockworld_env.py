@@ -51,7 +51,7 @@ def test_boundary_move_penalized_noop() -> None:
             "task": Task((("a", "blue"),)),
         },
     )
-    assert obs.shape[0] == 8
+    assert obs.shape[0] == 5
     _, reward, success, horizon, _ = env.step(env.MOVE_LEFT)
     assert reward == -6.0
     assert not success

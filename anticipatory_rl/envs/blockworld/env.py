@@ -430,7 +430,7 @@ class Paper1BlockworldImageEnv(Env):
         self.observation_space = spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(8, self.render_size, self.render_size),
+            shape=(5, self.render_size, self.render_size),
             dtype=np.float32,
         )
 
@@ -443,7 +443,7 @@ class Paper1BlockworldImageEnv(Env):
         self._task_steps = 0
         self._py_rng = random.Random()
         self._rgb_canvas = np.zeros((3, self.render_size, self.render_size), dtype=np.float32)
-        self._obs_canvas = np.zeros((8, self.render_size, self.render_size), dtype=np.float32)
+        self._obs_canvas = np.zeros((5, self.render_size, self.render_size), dtype=np.float32)
         self._rebuild_static_canvas()
 
     def reset(self, *, seed: int | None = None, options: Dict | None = None):
@@ -731,10 +731,6 @@ class Paper1BlockworldImageEnv(Env):
         assignments = self.current_task.assignments
         self._fill_target_block_mask(obs[3], assignments[0][0])
         self._fill_target_region_mask(obs[4], assignments[0][1])
-        if len(assignments) > 1:
-            self._fill_target_block_mask(obs[5], assignments[1][0])
-            self._fill_target_region_mask(obs[6], assignments[1][1])
-            obs[7].fill(1.0)
         return obs.copy()
 
     def _info(self, success: bool | None = None) -> Dict[str, object]:
