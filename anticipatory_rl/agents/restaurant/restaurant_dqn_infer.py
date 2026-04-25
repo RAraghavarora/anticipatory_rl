@@ -19,8 +19,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from .restaurant_dqn import RestaurantQNetwork
-from anticipatory_rl.envs.restaurant.restaurant_symbolic_env import (
+from .dqn import RestaurantQNetwork, _extract_masks, _masked_choice
+from anticipatory_rl.envs.restaurant.env import (
     CONFIG_PATH as DEFAULT_RESTAURANT_CONFIG_PATH,
     RestaurantSymbolicEnv,
     TASK_TYPES,
@@ -110,7 +110,7 @@ def parse_args() -> argparse.Namespace:
 def make_env(args: argparse.Namespace) -> RestaurantSymbolicEnv:
     return RestaurantSymbolicEnv(
         config_path=args.config_path,
-        max_task_steps=args.max_task_steps,
+        max_steps_per_task=args.max_task_steps,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
         travel_cost_scale=args.travel_cost_scale,
@@ -129,13 +129,85 @@ def _load_model(state_path: Path, args: argparse.Namespace, device: torch.device
     obs, _ = env.reset(seed=args.seed)
     model = RestaurantQNetwork(
         input_dim=int(np.asarray(obs).shape[0]),
-        action_dim=int(env.action_space.n),
+        action_type_dim=int(env.action_space["action_type"].n),
+        object_dim=int(env.action_space["object1"].n),
+        location_dim=int(env.action_space["location"].n),
         hidden_dim=args.hidden_dim,
     ).to(device)
     state_dict = torch.load(state_path, map_location=device)
     model.load_state_dict(state_dict)
     model.eval()
     return model
+
+
+def _sample_masked_index(
+    logits: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    temperature: float,
+    generator: torch.Generator,
+) -> int:
+    valid = torch.nonzero(mask > 0.0, as_tuple=False).squeeze(-1)
+    if valid.numel() == 0:
+        return int(torch.argmax(logits).item())
+    if temperature <= 0.0:
+        return _masked_choice(logits, mask)
+    masked_logits = logits.clone()
+    masked_logits[mask <= 0.0] = float("-inf")
+    probs = torch.softmax(masked_logits / temperature, dim=-1)
+    if not torch.isfinite(probs).all() or float(probs.nansum()) <= 0.0:
+        return _masked_choice(logits, mask)
+    draw = torch.multinomial(probs.detach().float().cpu(), 1, generator=generator)
+    return int(draw.item())
+
+
+def _sample_structured_action(
+    model: RestaurantQNetwork,
+    obs: np.ndarray,
+    info: Dict[str, Any],
+    *,
+    temperature: float,
+    generator: torch.Generator,
+    device: torch.device,
+) -> Dict[str, int]:
+    masks = _extract_masks(info)
+    obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+    with torch.no_grad():
+        heads = model(obs_tensor)
+        action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device)
+        action_type = _sample_masked_index(
+            heads["action_type"].squeeze(0),
+            action_type_mask,
+            temperature=temperature,
+            generator=generator,
+        )
+        object1_mask = torch.tensor(masks["valid_object1_mask"][action_type], dtype=torch.float32, device=device)
+        object1 = _sample_masked_index(
+            heads["object1"].squeeze(0),
+            object1_mask,
+            temperature=temperature,
+            generator=generator,
+        )
+        location_mask = torch.tensor(masks["valid_location_mask"][action_type], dtype=torch.float32, device=device)
+        location = _sample_masked_index(
+            heads["location"].squeeze(0),
+            location_mask,
+            temperature=temperature,
+            generator=generator,
+        )
+        object2_mask = torch.tensor(masks["valid_object2_mask"][action_type, object1], dtype=torch.float32, device=device)
+        object2 = _sample_masked_index(
+            heads["object2"].squeeze(0),
+            object2_mask,
+            temperature=temperature,
+            generator=generator,
+        )
+    return {
+        "action_type": int(action_type),
+        "object1": int(object1),
+        "location": int(location),
+        "object2": int(object2),
+    }
 
 
 def _summarize_by_task_type(task_records: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
@@ -260,19 +332,14 @@ def evaluate(
             break
         task_snapshot = dict(info.get("task", {}))
         auto_snapshot = bool(current_task_auto_satisfied)
-        valid_mask = np.asarray(info.get("valid_action_mask"), dtype=np.float32)
-        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-        with torch.no_grad():
-            q_values = model(obs_tensor).squeeze(0)
-            invalid = torch.tensor(valid_mask <= 0.0, dtype=torch.bool, device=device)
-            if not bool(invalid.all().item()):
-                q_values = q_values.clone()
-                q_values[invalid] = float("-inf")
-            action = _sample_action_from_q(
-                q_values,
-                temperature=float(args.softmax_temperature),
-                generator=action_gen,
-            )
+        action = _sample_structured_action(
+            model,
+            obs,
+            info,
+            temperature=float(args.softmax_temperature),
+            generator=action_gen,
+            device=device,
+        )
 
         obs, reward, success, truncated, info = env.step(action)
         total_steps += 1

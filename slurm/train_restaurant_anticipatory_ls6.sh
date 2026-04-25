@@ -28,30 +28,10 @@ echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostnam
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
-CONFIG_PATH=anticipatory_rl/configs/restaurant_symbolic.yaml
-
-srun python -m anticipatory_rl.agents.restaurant.restaurant_dqn \
-  --config-path "${CONFIG_PATH}" \
+srun python -m anticipatory_rl.agents.restaurant.dqn \
   --run-label restaurant_capacity_anticipatory \
-  --total-steps 500000 \
-  --replay-size 50000 \
-  --batch-size 128 \
-  --hidden-dim 256 \
-  --lr 3e-4 \
-  --gamma 0.99 \
-  --tasks-per-reset 200 \
+  --tasks-per-episode 200 \
   --env-reset-tasks 200 \
-  --episode-step-limit 3000 \
-  --max-task-steps 24 \
-  --success-reward 15 \
-  --invalid-action-penalty 6 \
-  --travel-cost-scale 1.0 \
-  --pick-cost 1.0 \
-  --place-cost 1.0 \
-  --wash-cost 2.0 \
-  --fill-cost 1.0 \
-  --brew-cost 2.0 \
-  --fruit-cost 2.0 \
   --seed 0
 
 date

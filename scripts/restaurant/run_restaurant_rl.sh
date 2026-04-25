@@ -15,7 +15,7 @@ python scripts/validate_restaurant_layout_corpus.py \
   --corpus-path "${CORPUS_PATH}"
 
 for SEED in $(seq "${SEED_FROM}" "${SEED_TO}"); do
-  python -m anticipatory_rl.agents.restaurant_dqn \
+  python -m anticipatory_rl.agents.restaurant.dqn \
     --run-label paper2_medium_myo_seed"${SEED}" \
     --config-path anticipatory_rl/configs/restaurant_symbolic.yaml \
     --layout-corpus "${CORPUS_PATH}" \
@@ -25,7 +25,7 @@ for SEED in $(seq "${SEED_FROM}" "${SEED_TO}"); do
     --total-steps 500000 \
     --seed "${SEED}"
 
-  python -m anticipatory_rl.agents.restaurant_dqn \
+  python -m anticipatory_rl.agents.restaurant.dqn \
     --run-label paper2_medium_ant_seed"${SEED}" \
     --config-path anticipatory_rl/configs/restaurant_symbolic.yaml \
     --layout-corpus "${CORPUS_PATH}" \

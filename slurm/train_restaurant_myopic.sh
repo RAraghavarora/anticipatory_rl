@@ -17,13 +17,16 @@
 #SBATCH --error=slurm_logs/%x.%j.err
 
 set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
+mkdir -p slurm_logs
+
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 
 source /u/rarora1/ant_env/bin/activate
 
-python -m anticipatory_rl.agents.restaurant.restaurant_dqn \
+python -m anticipatory_rl.agents.restaurant.dqn \
   --run-label restaurant_capacity_myopic
 
 echo "Job finished at $(date -Is)"

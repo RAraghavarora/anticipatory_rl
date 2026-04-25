@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 import numpy as np
 from tqdm import tqdm
 
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv, RestaurantTask
+from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
 from anticipatory_rl.tasks.restaurant_graph import build_restaurant_graph
 from anticipatory_rl.tasks.restaurant_planner import (
     RestaurantPlannerState,

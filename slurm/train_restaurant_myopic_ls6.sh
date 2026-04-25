@@ -22,13 +22,13 @@ mkdir -p slurm_logs
 
 module load cuda/12.2
 source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
-conda activate thesis 
+conda activate thesis
 
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
 echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
-srun python -m anticipatory_rl.agents.restaurant.restaurant_dqn \
+srun python -m anticipatory_rl.agents.restaurant.dqn \
   --run-label restaurant_capacity_myopic
 
 date

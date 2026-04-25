@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from anticipatory_rl.agents.train_restaurant_apcost_gnn import APCostEstimator
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv, RestaurantTask
+from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
 from anticipatory_rl.tasks.restaurant_graph import build_restaurant_graph
 from anticipatory_rl.tasks.restaurant_planner import (
     PlannerResult,

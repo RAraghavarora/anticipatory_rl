@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv
+from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
 
 
 def _argmax_name(vec: np.ndarray, names: List[str], *, empty_name: str | None = None) -> str:

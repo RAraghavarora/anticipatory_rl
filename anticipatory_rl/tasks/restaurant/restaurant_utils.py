@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from anticipatory_rl.envs.restaurant_symbolic_env import RestaurantSymbolicEnv, RestaurantTask
+from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
 
 
 def sample_task(
