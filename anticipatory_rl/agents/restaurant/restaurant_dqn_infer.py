@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--softmax-temperature", type=float, default=0.0)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
-    parser.add_argument("--max-task-steps", type=int, default=24)
+    parser.add_argument("--max-task-steps", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--travel-cost-scale", type=float, default=1.0)

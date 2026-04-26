@@ -580,18 +580,27 @@ class RestaurantSymbolicEnv(Env):
             )
             return
 
-        task_type = str(self._rng.choice(self.task_types))
-        if task_type in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
-            target_location = str(self._rng.choice(self.service_locations))
-            self.set_task(task_type, target_location=target_location, task_source="iid")
-            return
-        if task_type == "pick_place":
-            object_name = str(self._rng.choice(self.object_names))
-            target_location = str(self._rng.choice(self.locations))
-            self.set_task(task_type, target_location=target_location, object_name=object_name, task_source="iid")
-            return
-        target_kind = str(self._rng.choice(self.object_kinds))
-        self.set_task(task_type, target_kind=target_kind, task_source="iid")
+        # Current RL training is constrained to non-auto pick-place tasks.
+        # This avoids impossible/too-long task families while we validate the
+        # factorized PDDL-style action model.
+        candidate_objects = [
+            name
+            for name in self.object_names
+            if self.state.objects[name].location is not None
+        ]
+        if not candidate_objects:
+            raise RuntimeError("No placeable objects available for pick_place task sampling.")
+        for _ in range(max(1, len(candidate_objects) * max(1, self.num_locations))):
+            object_name = str(self._rng.choice(candidate_objects))
+            current_location = self.state.objects[object_name].location
+            target_candidates = [loc for loc in self.locations if loc != current_location]
+            if not target_candidates:
+                continue
+            target_location = str(self._rng.choice(target_candidates))
+            self.set_task("pick_place", target_location=target_location, object_name=object_name, task_source="iid")
+            if not self._pending_auto_success:
+                return
+        raise RuntimeError("Unable to sample a non-auto pick_place task.")
 
     def _task_already_satisfied(self) -> bool:
         if self.task.task_type == "serve_water":

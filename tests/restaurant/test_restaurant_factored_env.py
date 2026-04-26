@@ -33,6 +33,13 @@ def _make_clean_state(env: RestaurantSymbolicEnv, *, agent_location: str, holdin
 
 
 class RestaurantFactoredEnvTests(unittest.TestCase):
+    def test_reset_samples_non_auto_pick_place_tasks(self) -> None:
+        env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
+        for seed in range(20):
+            _, info = env.reset(seed=seed)
+            self.assertEqual(info["task"]["task_type"], "pick_place")
+            self.assertFalse(info["next_auto_satisfied"])
+
     def test_factored_action_masks_exposed(self) -> None:
         env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
         _, info = env.reset(seed=0)

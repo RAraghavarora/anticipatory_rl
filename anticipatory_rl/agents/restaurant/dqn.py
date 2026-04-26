@@ -589,7 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tasks-per-episode", type=int, default=1)
     parser.add_argument("--env-reset-tasks", type=int, default=200, help="Physical env reset interval in tasks.")
     parser.add_argument("--episode-step-limit", type=int, default=3000, help="Maximum primitive steps allowed between resets; <=0 disables.")
-    parser.add_argument("--max-steps-per-task", type=int, default=24)
+    parser.add_argument("--max-steps-per-task", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--travel-cost-scale", type=float, default=1.0)
