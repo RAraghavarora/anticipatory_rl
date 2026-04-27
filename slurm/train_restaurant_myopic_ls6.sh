@@ -12,7 +12,7 @@
 #SBATCH -n 1
 #SBATCH --ntasks-per-node=1
 #SBATCH -t 48:00:00
-#SBATCH -A IRI23005
+#SBATCH -A ASC26023
 #SBATCH --export=ALL
 
 set -euo pipefail
@@ -21,7 +21,7 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p slurm_logs
 
 module load cuda/12.2
-source /work/10110/raghavaurora/ls6/miniconda3/etc/profile.d/conda.sh
+source /work/11373/raghavaurora2/ls6/miniconda3/etc/profile.d/conda.sh
 conda activate thesis
 
 echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
