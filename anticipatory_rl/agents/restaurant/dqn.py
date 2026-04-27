@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, Dict, List, Mapping
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -74,6 +77,24 @@ class AimLogger:
         if callable(close):
             close()
 
+    def track_text(self, text: str, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
+        if self._run is None:
+            return
+        try:
+            from aim import Text  # type: ignore
+            self._run.track(Text(text), name=name, step=step, context=dict(context or {}))
+        except Exception:
+            self._run.track(text, name=name, step=step, context=dict(context or {}))
+
+    def track_image(self, image_path: Path, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
+        if self._run is None:
+            return
+        try:
+            from aim import Image  # type: ignore
+            self._run.track(Image(str(image_path)), name=name, step=step, context=dict(context or {}))
+        except Exception:
+            self._run.track(str(image_path), name=name, step=step, context=dict(context or {}))
+
 
 def _select_device() -> torch.device:
     if torch.backends.mps.is_available():
@@ -137,6 +158,17 @@ class Transition:
     task_boundary: bool = False
 
 
+@dataclass
+class OptimizeStats:
+    loss: float
+    q_selected_mean: float
+    q_selected_abs_max: float
+    target_mean: float
+    target_abs_max: float
+    td_abs_mean: float
+    grad_norm: float
+
+
 class ReplayBuffer:
     def __init__(self, capacity: int) -> None:
         self.capacity = max(1, int(capacity))
@@ -195,6 +227,93 @@ def _compose_q_values(
     q = q + heads["location"].gather(1, location) * LOCATION_ACTION_MASK.to(action_types.device)[action_types.squeeze(1)].unsqueeze(1)
     q = q + heads["object2"].gather(1, object2) * OBJECT2_ACTION_MASK.to(action_types.device)[action_types.squeeze(1)].unsqueeze(1)
     return q
+
+
+def _action_to_string(env: RestaurantSymbolicEnv, action: Mapping[str, int]) -> str:
+    action_type = ACTION_TYPES[int(action["action_type"])]
+    object1 = int(action["object1"])
+    location = int(action["location"])
+    object2 = int(action["object2"])
+    object1_name = "none" if object1 >= env.num_objects else env.object_names[object1]
+    location_name = "none" if location >= env.num_locations else env.locations[location]
+    object2_name = "none" if object2 >= env.num_objects else env.object_names[object2]
+    return f"{action_type}(object1={object1_name}, location={location_name}, object2={object2_name})"
+
+
+def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[str, object]) -> Dict[str, int]:
+    assert task.get("task_type") == "pick_place"
+    object_name = str(task["object_name"])
+    target_location = str(task["target_location"])
+    obj_idx = env.object_name_index[object_name]
+    loc_idx = env.location_index[target_location]
+    obj = env.state.objects[object_name]
+    if env.state.holding == object_name:
+        if env.state.agent_location != target_location:
+            return {
+                "action_type": env.action_type_index["move"],
+                "object1": env.none_object_index,
+                "location": loc_idx,
+                "object2": env.none_object_index,
+            }
+        return {
+            "action_type": env.action_type_index["place"],
+            "object1": env.none_object_index,
+            "location": loc_idx,
+            "object2": env.none_object_index,
+        }
+    if env.state.holding is not None and env.state.holding != object_name:
+        held_target = env.state.agent_location
+        return {
+            "action_type": env.action_type_index["place"],
+            "object1": env.none_object_index,
+            "location": env.location_index[held_target],
+            "object2": env.none_object_index,
+        }
+    if obj.location != env.state.agent_location:
+        assert obj.location is not None
+        return {
+            "action_type": env.action_type_index["move"],
+            "object1": env.none_object_index,
+            "location": env.location_index[obj.location],
+            "object2": env.none_object_index,
+        }
+    return {
+        "action_type": env.action_type_index["pick"],
+        "object1": obj_idx,
+        "location": env.none_location_index,
+        "object2": env.none_object_index,
+    }
+
+
+def _classify_pick_place_failure(env: RestaurantSymbolicEnv, task: Mapping[str, object], actions: List[Mapping[str, int]]) -> str:
+    object_name = str(task["object_name"])
+    target_location = str(task["target_location"])
+    picked = False
+    placed_at_target = False
+    touched_object = False
+    reached_object = False
+    for action in actions:
+        action_type = ACTION_TYPES[int(action["action_type"])]
+        obj_idx = int(action["object1"])
+        loc_idx = int(action["location"])
+        object1_name = None if obj_idx >= env.num_objects else env.object_names[obj_idx]
+        location_name = None if loc_idx >= env.num_locations else env.locations[loc_idx]
+        if action_type == "move" and location_name == env.state.objects[object_name].location:
+            reached_object = True
+        if action_type == "pick" and object1_name == object_name:
+            touched_object = True
+            picked = True
+        if action_type == "place" and location_name == target_location and picked:
+            placed_at_target = True
+    if not actions:
+        return "no_actions"
+    if not touched_object:
+        return "wrong_object_or_move"
+    if touched_object and not picked:
+        return "failed_pick"
+    if picked and not placed_at_target:
+        return "picked_but_failed_place"
+    return "timeout_or_mask_issue"
 
 
 def _select_action(
@@ -271,7 +390,7 @@ def _optimize(
     optimizer: optim.Optimizer,
     args: argparse.Namespace,
     device: torch.device,
-) -> float | None:
+) -> OptimizeStats | None:
     if len(replay) < args.batch_size:
         return None
     batch = replay.sample(args.batch_size)
@@ -303,12 +422,187 @@ def _optimize(
         next_q = _compose_q_values(next_target, next_action_type, next_object1, next_location, next_object2)
         targets = rewards + args.gamma * (1.0 - dones) * next_q
 
+    td = q_values - targets
     loss = nn.functional.smooth_l1_loss(q_values, targets)
     optimizer.zero_grad()
     loss.backward()
-    nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
+    grad_norm_t = nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
     optimizer.step()
-    return float(loss.item())
+    return OptimizeStats(
+        loss=float(loss.item()),
+        q_selected_mean=float(q_values.mean().item()),
+        q_selected_abs_max=float(q_values.abs().max().item()),
+        target_mean=float(targets.mean().item()),
+        target_abs_max=float(targets.abs().max().item()),
+        td_abs_mean=float(td.abs().mean().item()),
+        grad_norm=float(grad_norm_t.item() if hasattr(grad_norm_t, "item") else grad_norm_t),
+    )
+
+
+def _plot_post_train_trajectories(trajectory_records: List[Dict[str, object]], output_path: Path) -> None:
+    if not trajectory_records:
+        return
+    xs = list(range(1, len(trajectory_records) + 1))
+    steps = [int(record["steps"]) for record in trajectory_records]
+    success = [1.0 if bool(record["success"]) else 0.0 for record in trajectory_records]
+    oracle_steps = [int(record["oracle_steps"]) for record in trajectory_records]
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
+    axes[0].plot(xs, steps, label="policy_steps", color="#1f3b73")
+    axes[0].plot(xs, oracle_steps, label="oracle_steps", color="#c2410c", alpha=0.8)
+    axes[0].set_ylabel("Steps")
+    axes[0].set_title("Post-train rollout trajectories")
+    axes[0].grid(alpha=0.3)
+    axes[0].legend()
+    axes[1].step(xs, success, where="mid", color="#047857")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].set_ylabel("Success")
+    axes[1].set_xlabel("Trajectory index")
+    axes[1].grid(alpha=0.3)
+    fig.savefig(output_path, dpi=140, bbox_inches="tight", facecolor="#fafafa")
+    plt.close(fig)
+
+
+def _run_post_train_inference(
+    q_net: RestaurantQNetwork,
+    args: argparse.Namespace,
+    device: torch.device,
+    run_dir: Path,
+    aim_logger: AimLogger,
+) -> Dict[str, object]:
+    env = RestaurantSymbolicEnv(
+        config_path=args.config_path,
+        max_steps_per_task=args.max_steps_per_task,
+        success_reward=args.success_reward,
+        invalid_action_penalty=args.invalid_action_penalty,
+        travel_cost_scale=args.travel_cost_scale,
+        pick_cost=args.pick_cost,
+        place_cost=args.place_cost,
+        wash_cost=args.wash_cost,
+        fill_cost=args.fill_cost,
+        brew_cost=args.brew_cost,
+        fruit_cost=args.fruit_cost,
+        rng_seed=args.seed + 1_000_000,
+    )
+    trajectory_dir = run_dir / "post_train_infer"
+    trajectory_dir.mkdir(parents=True, exist_ok=True)
+    q_net.eval()
+
+    trajectory_records: List[Dict[str, object]] = []
+    failure_breakdown: Dict[str, int] = {}
+    action_type_counts = {name: 0 for name in ACTION_TYPES}
+    question_counters = {
+        "wrong_object_choice": 0,
+        "failed_to_move_to_object": 0,
+        "failed_after_pick": 0,
+        "place_selection_wrong": 0,
+        "mask_or_timeout_issue": 0,
+    }
+
+    for traj_idx in range(args.post_train_eval_tasks):
+        obs, info = env.reset(seed=args.seed + 50_000 + traj_idx)
+        task = dict(info.get("task", {}))
+        actions: List[Dict[str, int]] = []
+        readable_actions: List[str] = []
+        total_reward = 0.0
+        success = False
+        truncated = False
+        for _ in range(args.post_train_eval_max_steps):
+            masks = _extract_masks(info)
+            action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
+            actions.append(dict(action))
+            readable_actions.append(_action_to_string(env, action))
+            action_type_counts[ACTION_TYPES[int(action["action_type"])]] += 1
+            obs, reward, success, truncated, info = env.step(action)
+            total_reward += float(reward)
+            if success or truncated:
+                break
+
+        oracle_actions: List[str] = []
+        oracle_env = RestaurantSymbolicEnv(
+            config_path=args.config_path,
+            max_steps_per_task=args.max_steps_per_task,
+            success_reward=args.success_reward,
+            invalid_action_penalty=args.invalid_action_penalty,
+            travel_cost_scale=args.travel_cost_scale,
+            pick_cost=args.pick_cost,
+            place_cost=args.place_cost,
+            wash_cost=args.wash_cost,
+            fill_cost=args.fill_cost,
+            brew_cost=args.brew_cost,
+            fruit_cost=args.fruit_cost,
+            rng_seed=args.seed + 1_000_000,
+        )
+        oracle_obs, oracle_info = oracle_env.reset(seed=args.seed + 50_000 + traj_idx)
+        del oracle_obs, oracle_info
+        oracle_success = False
+        oracle_steps = 0
+        for _ in range(args.post_train_eval_max_steps):
+            oracle_action = _choose_oracle_pick_place_action(oracle_env, task)
+            oracle_actions.append(_action_to_string(oracle_env, oracle_action))
+            _, _, oracle_success, oracle_truncated, _ = oracle_env.step(oracle_action)
+            oracle_steps += 1
+            if oracle_success or oracle_truncated:
+                break
+
+        failure_reason = "success" if success else _classify_pick_place_failure(env, task, actions)
+        failure_breakdown[failure_reason] = failure_breakdown.get(failure_reason, 0) + 1
+        if not success:
+            if failure_reason == "wrong_object_or_move":
+                question_counters["wrong_object_choice"] += 1
+                question_counters["failed_to_move_to_object"] += 1
+            elif failure_reason == "picked_but_failed_place":
+                question_counters["failed_after_pick"] += 1
+                question_counters["place_selection_wrong"] += 1
+            else:
+                question_counters["mask_or_timeout_issue"] += 1
+
+        trajectory_records.append(
+            {
+                "trajectory_index": traj_idx,
+                "task": task,
+                "success": bool(success),
+                "truncated": bool(truncated),
+                "steps": len(actions),
+                "return": total_reward,
+                "failure_reason": failure_reason,
+                "actions": readable_actions,
+                "oracle_success": bool(oracle_success),
+                "oracle_steps": oracle_steps,
+                "oracle_actions": oracle_actions,
+            }
+        )
+
+    summary = {
+        "num_trajectories": len(trajectory_records),
+        "success_rate": float(np.mean([1.0 if record["success"] else 0.0 for record in trajectory_records])) if trajectory_records else 0.0,
+        "avg_steps": float(np.mean([record["steps"] for record in trajectory_records])) if trajectory_records else 0.0,
+        "avg_return": float(np.mean([record["return"] for record in trajectory_records])) if trajectory_records else 0.0,
+        "oracle_success_rate": float(np.mean([1.0 if record["oracle_success"] else 0.0 for record in trajectory_records])) if trajectory_records else 0.0,
+        "oracle_avg_steps": float(np.mean([record["oracle_steps"] for record in trajectory_records])) if trajectory_records else 0.0,
+        "failure_breakdown": failure_breakdown,
+        "action_type_counts": action_type_counts,
+        "debug_questions": question_counters,
+    }
+    summary_path = trajectory_dir / "trajectory_summary.json"
+    trajectories_path = trajectory_dir / "trajectories.json"
+    plot_path = trajectory_dir / "trajectory_plot.png"
+    with summary_path.open("w", encoding="utf-8") as fh:
+        json.dump(summary, fh, indent=2)
+    with trajectories_path.open("w", encoding="utf-8") as fh:
+        json.dump(trajectory_records, fh, indent=2)
+    _plot_post_train_trajectories(trajectory_records[: args.post_train_plot_trajectories], plot_path)
+    aim_logger.set_metadata("post_train_infer", summary)
+    aim_logger.track_text(json.dumps(summary, indent=2), name="post_train_summary", step=args.total_steps)
+    for record in trajectory_records[: args.post_train_log_trajectories]:
+        aim_logger.track_text(
+            json.dumps(record, indent=2),
+            name="trajectory_trace",
+            step=int(record["trajectory_index"]),
+            context={"task_type": str(record["task"].get("task_type", "unknown"))},
+        )
+    if plot_path.exists():
+        aim_logger.track_image(plot_path, name="post_train_trajectory_plot", step=args.total_steps)
+    return summary
 
 
 def train(args: argparse.Namespace) -> Path:
@@ -371,6 +665,8 @@ def train(args: argparse.Namespace) -> Path:
 
     task_return = 0.0
     task_steps = 0
+    current_task_actions: List[Dict[str, int]] = []
+    current_task_action_strings: List[str] = []
     total_tasks = 0
     tasks_completed = 0
     current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
@@ -385,6 +681,15 @@ def train(args: argparse.Namespace) -> Path:
     loss_history: List[float] = []
     step_reward_history: List[float] = []
     task_records: List[Dict[str, float | int | bool | str | None]] = []
+    optimize_stats_history: List[OptimizeStats] = []
+    action_type_counts = {name: 0 for name in ACTION_TYPES}
+    question_counters = {
+        "wrong_object_choice": 0,
+        "failed_to_move_to_object": 0,
+        "failed_after_pick": 0,
+        "place_selection_wrong": 0,
+        "mask_or_timeout_issue": 0,
+    }
 
     progress = tqdm(range(args.total_steps), desc="Restaurant DQN", unit="step")
     for global_step in progress:
@@ -398,6 +703,9 @@ def train(args: argparse.Namespace) -> Path:
         current_task_auto_snapshot = bool(current_task_auto_satisfied)
         masks = _extract_masks(info)
         action = _select_action(q_net, obs, masks, epsilon, device)
+        current_task_actions.append(dict(action))
+        current_task_action_strings.append(_action_to_string(env, action))
+        action_type_counts[ACTION_TYPES[int(action["action_type"])]] += 1
         next_obs, reward, success, truncated, next_info = env.step(action)
         task_return += float(reward)
         task_steps += 1
@@ -450,10 +758,17 @@ def train(args: argparse.Namespace) -> Path:
             )
         )
 
-        loss_value = _optimize(q_net, target_net, replay, optimizer, args, device)
-        if loss_value is not None:
-            loss_history.append(loss_value)
-            aim_logger.track(loss_value, name="loss", step=global_step, context={"subset": "train"})
+        optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device)
+        if optimize_stats is not None:
+            optimize_stats_history.append(optimize_stats)
+            loss_history.append(optimize_stats.loss)
+            aim_logger.track(optimize_stats.loss, name="loss", step=global_step, context={"subset": "train"})
+            aim_logger.track(optimize_stats.q_selected_mean, name="q_selected_mean", step=global_step)
+            aim_logger.track(optimize_stats.q_selected_abs_max, name="q_selected_abs_max", step=global_step)
+            aim_logger.track(optimize_stats.target_mean, name="target_mean", step=global_step)
+            aim_logger.track(optimize_stats.target_abs_max, name="target_abs_max", step=global_step)
+            aim_logger.track(optimize_stats.td_abs_mean, name="td_abs_mean", step=global_step)
+            aim_logger.track(optimize_stats.grad_norm, name="grad_norm", step=global_step)
 
         if args.tau < 1.0:
             with torch.no_grad():
@@ -488,11 +803,39 @@ def train(args: argparse.Namespace) -> Path:
                     "task_type_after": task_info.get("task_type"),
                     "target_location_after": task_info.get("target_location"),
                     "target_kind_after": task_info.get("target_kind"),
+                    "actions": list(current_task_action_strings),
                 }
             )
             task_return = 0.0
             task_steps = 0
             current_task_auto_satisfied = bool(next_info.get("next_auto_satisfied", False))
+            if not success:
+                failure_reason = "timeout_or_mask_issue"
+                if current_task_snapshot.get("task_type") == "pick_place":
+                    failure_reason = _classify_pick_place_failure(env, current_task_snapshot, current_task_actions)
+                    if failure_reason == "wrong_object_or_move":
+                        question_counters["wrong_object_choice"] += 1
+                        question_counters["failed_to_move_to_object"] += 1
+                    elif failure_reason == "picked_but_failed_place":
+                        question_counters["failed_after_pick"] += 1
+                        question_counters["place_selection_wrong"] += 1
+                    else:
+                        question_counters["mask_or_timeout_issue"] += 1
+                aim_logger.track_text(
+                    json.dumps(
+                        {
+                            "task": current_task_snapshot,
+                            "steps": int(task_records[-1]["steps"]),
+                            "return": float(task_records[-1]["return"]),
+                            "failure_reason": failure_reason,
+                            "actions": current_task_action_strings,
+                        },
+                        indent=2,
+                    ),
+                    name="failed_task_trace",
+                    step=total_tasks,
+                    context={"task_type": current_task_snapshot.get("task_type", "unknown")},
+                )
             aim_logger.track(
                 float(task_records[-1]["return"]),
                 name="task_return",
@@ -511,6 +854,8 @@ def train(args: argparse.Namespace) -> Path:
                 step=total_tasks,
                 context={"task_type": current_task_snapshot.get("task_type", "unknown")},
             )
+            current_task_actions = []
+            current_task_action_strings = []
 
         if env_reset_flag or trunc_reset_flag:
             episode_index += 1
@@ -518,16 +863,26 @@ def train(args: argparse.Namespace) -> Path:
             obs, info = env.reset(seed=reset_seed)
             current_task_auto_satisfied = bool(info.get("next_auto_satisfied", False))
             env_tasks_since_reset = 0
+            current_task_actions = []
+            current_task_action_strings = []
         if episode_done_flag or trunc_reset_flag:
             steps_since_reset = 0
 
         avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
         success_rate = float(np.mean(recent_success)) if recent_success else 0.0
         auto_rate = float(np.mean(recent_auto)) if recent_auto else 0.0
+        non_auto_success_rate = 0.0
+        if recent_success:
+            denom = max(1e-8, 1.0 - auto_rate)
+            non_auto_success_rate = max(0.0, min(1.0, (success_rate - auto_rate) / denom))
         avg_loss = float(np.mean(loss_history[-100:])) if loss_history else 0.0
         aim_logger.track(epsilon, name="epsilon", step=global_step)
         aim_logger.track(success_rate, name="success_rate_rolling", step=global_step, context={"window": 100})
         aim_logger.track(auto_rate, name="auto_rate_rolling", step=global_step, context={"window": 100})
+        aim_logger.track(non_auto_success_rate, name="non_auto_success_rate_rolling", step=global_step, context={"window": 100})
+        aim_logger.track(len(replay) / max(1, replay.capacity), name="replay_fill_fraction", step=global_step)
+        for action_name, count in action_type_counts.items():
+            aim_logger.track(count / max(1, global_step + 1), name="action_type_fraction", step=global_step, context={"action_type": action_name})
         if recent_returns:
             aim_logger.track(avg_return, name="avg_task_return_rolling", step=global_step, context={"window": 100})
         if loss_history:
@@ -551,11 +906,27 @@ def train(args: argparse.Namespace) -> Path:
         "tasks_completed": int(tasks_completed),
         "tasks_attempted": int(total_tasks),
         "success_rate": float(tasks_completed / max(1, total_tasks)),
+        "non_auto_success_rate": float(
+            max(
+                0.0,
+                (tasks_completed - sum(1 for r in task_records if bool(r["auto_satisfied"] and r["success"])))
+                / max(1, sum(1 for r in task_records if not bool(r["auto_satisfied"]))),
+            )
+        ) if task_records else 0.0,
         "avg_task_return": float(np.mean([r["return"] for r in task_records])) if task_records else 0.0,
         "avg_task_steps": float(np.mean([r["steps"] for r in task_records])) if task_records else 0.0,
         "auto_rate": float(np.mean([1.0 if r["auto_satisfied"] else 0.0 for r in task_records])) if task_records else 0.0,
         "reward_per_step": float(np.mean(step_reward_history)) if step_reward_history else 0.0,
         "mean_loss": float(np.mean(loss_history)) if loss_history else 0.0,
+        "mean_q_selected": float(np.mean([s.q_selected_mean for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "max_abs_q_selected": float(np.max([s.q_selected_abs_max for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "mean_target_q": float(np.mean([s.target_mean for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "max_abs_target_q": float(np.max([s.target_abs_max for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "mean_td_abs": float(np.mean([s.td_abs_mean for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "mean_grad_norm": float(np.mean([s.grad_norm for s in optimize_stats_history])) if optimize_stats_history else 0.0,
+        "replay_fill_fraction_final": float(len(replay) / max(1, replay.capacity)),
+        "action_type_counts": action_type_counts,
+        "debug_questions": question_counters,
         "tasks_per_episode": int(args.tasks_per_episode),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "seed": int(args.seed),
@@ -566,6 +937,8 @@ def train(args: argparse.Namespace) -> Path:
         json.dump(task_records, fh, indent=2)
     with (run_dir / "train_args.json").open("w", encoding="utf-8") as fh:
         json.dump(vars(args), fh, indent=2, default=str)
+    post_train_summary = _run_post_train_inference(q_net, args, device, run_dir, aim_logger)
+    summary["post_train_inference"] = post_train_summary
     aim_logger.set_metadata("summary", summary)
     aim_logger.set_metadata("checkpoint_path", str(output_path))
     aim_logger.close()
@@ -603,6 +976,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output-name", type=str, default="restaurant_dqn.pt")
+    parser.add_argument("--post-train-eval-tasks", type=int, default=25)
+    parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
+    parser.add_argument("--post-train-log-trajectories", type=int, default=10)
+    parser.add_argument("--post-train-plot-trajectories", type=int, default=25)
     return parser
 
 

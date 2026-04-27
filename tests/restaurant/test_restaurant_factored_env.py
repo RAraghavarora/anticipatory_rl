@@ -115,6 +115,10 @@ class RestaurantFactoredEnvTests(unittest.TestCase):
                     seed=0,
                     run_label="pytest_restaurant_factored",
                     output_name="restaurant_dqn.pt",
+                    post_train_eval_tasks=2,
+                    post_train_eval_max_steps=8,
+                    post_train_log_trajectories=1,
+                    post_train_plot_trajectories=2,
                 )
                 checkpoint = restaurant_dqn.train(args)
                 self.assertTrue(checkpoint.exists())

@@ -29,7 +29,12 @@ echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 srun python -m anticipatory_rl.agents.restaurant.dqn \
-  --run-label restaurant_capacity_myopic
+  --run-label rest_pick_log \
+  --total-steps 500_000 \
+  --replay-size 100_000 \
+  --hidden-dim 512 \
+  --epsilon-decay 250_000 \
+  --epsilon-final 0.1
 
 date
 echo "Job finished"
