@@ -740,6 +740,7 @@ def train(args: argparse.Namespace) -> Path:
             env_tasks_since_reset = 0
 
         next_masks = _extract_masks(next_info)
+        transition_done = bool(bootstrap_done or truncated)
         replay.push(
             Transition(
                 state=np.array(obs, dtype=np.float32, copy=True),
@@ -749,7 +750,7 @@ def train(args: argparse.Namespace) -> Path:
                 object2=int(action["object2"]),
                 reward=float(reward),
                 next_state=np.array(next_obs, dtype=np.float32, copy=True),
-                done=bool(bootstrap_done),
+                done=transition_done,
                 next_action_type_mask=np.array(next_masks["valid_action_type_mask"], dtype=np.float32, copy=True),
                 next_object1_mask=np.array(next_masks["valid_object1_mask"], dtype=np.float32, copy=True),
                 next_location_mask=np.array(next_masks["valid_location_mask"], dtype=np.float32, copy=True),
