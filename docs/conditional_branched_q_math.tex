@@ -1,0 +1,294 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+
+\title{Conditional Branched Autoregressive Q for Restaurant Actions}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Setup}
+
+Let the structured restaurant action be
+\[
+a = (t, x, y, z),
+\]
+where
+\begin{itemize}
+  \item $t \in \mathcal{T}(s)$ is the action type,
+  \item $x \in \mathcal{X}(s,t)$ is the first argument,
+  \item $y \in \mathcal{Y}(s,t,x)$ is the second argument,
+  \item $z \in \mathcal{Z}(s,t,x,y)$ is the third argument.
+\end{itemize}
+
+For the current restaurant environment, the mapping is
+\[
+t = \texttt{action\_type}, \qquad
+x = \texttt{object1}, \qquad
+y = \texttt{location}, \qquad
+z = \texttt{object2}.
+\]
+
+The valid sets $\mathcal{T}(s)$, $\mathcal{X}(s,t)$, $\mathcal{Y}(s,t,x)$, and $\mathcal{Z}(s,t,x,y)$ are induced by the environment masks.
+
+\section*{Conditional Branched Joint Q}
+
+We define a joint action-value function
+\[
+Q(s,a) = Q(s,t,x,y,z),
+\]
+and parameterize it autoregressively as
+\begin{equation}
+\label{eq:autoregressive-q}
+Q(s,t,x,y,z)
+= q_t(s,t)
++ q_x(s,t,x)
++ q_y(s,t,x,y)
++ q_z(s,t,x,y,z).
+\end{equation}
+
+This is a \emph{joint} Q-function because it scores the full structured action. It is also \emph{autoregressive} because each later term is conditioned on earlier choices.
+
+\paragraph{Interpretation.}
+\begin{itemize}
+  \item $q_t(s,t)$ scores the choice of action type.
+  \item $q_x(s,t,x)$ scores the first argument given the action type.
+  \item $q_y(s,t,x,y)$ scores the second argument given previous choices.
+  \item $q_z(s,t,x,y,z)$ scores the final argument given previous choices.
+\end{itemize}
+
+Unlike the current unconditional additive factorization, the argument terms are not shared independently across incompatible action types.
+
+\section*{Suffix Value Functions}
+
+Define the optimal suffix values recursively:
+\begin{align}
+V_x(s,t)
+&=
+\max_{x \in \mathcal{X}(s,t)}
+\left[
+q_x(s,t,x) + V_y(s,t,x)
+\right], \\
+V_y(s,t,x)
+&=
+\max_{y \in \mathcal{Y}(s,t,x)}
+\left[
+q_y(s,t,x,y) + V_z(s,t,x,y)
+\right], \\
+V_z(s,t,x,y)
+&=
+\max_{z \in \mathcal{Z}(s,t,x,y)}
+q_z(s,t,x,y,z).
+\end{align}
+
+These are not separate environment values. They are the optimal continuation values induced by the autoregressive decomposition in Equation~\eqref{eq:autoregressive-q}.
+
+\section*{Greedy Decoding}
+
+The greedy action under this model is obtained by backward-consistent sequential maximization.
+
+First choose the action type:
+\begin{equation}
+\label{eq:greedy-type}
+t^*
+=
+\arg\max_{t \in \mathcal{T}(s)}
+\left[
+q_t(s,t) + V_x(s,t)
+\right].
+\end{equation}
+
+Then choose the first argument:
+\begin{equation}
+\label{eq:greedy-x}
+x^*
+=
+\arg\max_{x \in \mathcal{X}(s,t^*)}
+\left[
+q_x(s,t^*,x) + V_y(s,t^*,x)
+\right].
+\end{equation}
+
+Then choose the second argument:
+\begin{equation}
+\label{eq:greedy-y}
+y^*
+=
+\arg\max_{y \in \mathcal{Y}(s,t^*,x^*)}
+\left[
+q_y(s,t^*,x^*,y) + V_z(s,t^*,x^*,y)
+\right].
+\end{equation}
+
+Finally choose the third argument:
+\begin{equation}
+\label{eq:greedy-z}
+z^*
+=
+\arg\max_{z \in \mathcal{Z}(s,t^*,x^*,y^*)}
+q_z(s,t^*,x^*,y^*,z).
+\end{equation}
+
+This yields the greedy action
+\[
+a^* = (t^*,x^*,y^*,z^*).
+\]
+
+\paragraph{Key property.}
+The decoder is now mathematically aligned with the model:
+\[
+a^* \in \arg\max_a Q(s,a).
+\]
+That alignment is the main reason to prefer this formulation over unconditional branch-wise argmax.
+
+\section*{Bellman Target}
+
+For a transition $(s,a,r,s',d)$ with terminal flag $d \in \{0,1\}$, the standard Q-learning target is
+\begin{equation}
+\label{eq:bellman-target}
+\hat{Q}(s,a)
+=
+r + \gamma (1-d) \max_{a'} Q_{\mathrm{tgt}}(s',a').
+\end{equation}
+
+Under the autoregressive factorization, the greedy next action is
+\[
+a'_* = (t'_*,x'_*,y'_*,z'_*),
+\]
+where each component is chosen by the same suffix-maximizing decoder as in Equations~\eqref{eq:greedy-type}--\eqref{eq:greedy-z}, but using $s'$ and the valid masks at $s'$.
+
+Therefore
+\begin{equation}
+\label{eq:target-expanded}
+\max_{a'} Q_{\mathrm{tgt}}(s',a')
+=
+Q_{\mathrm{tgt}}(s',t'_*,x'_*,y'_*,z'_*).
+\end{equation}
+
+For Double DQN, one would choose $a'_*$ using the online network and evaluate it using the target network:
+\begin{equation}
+\label{eq:double-dqn-target}
+\hat{Q}(s,a)
+=
+r + \gamma (1-d) Q_{\mathrm{tgt}}(s',a'_*),
+\qquad
+a'_* \in \arg\max_{a'} Q_{\mathrm{online}}(s',a').
+\end{equation}
+
+\section*{Model Architecture}
+
+One suitable conditional branched architecture is:
+\begin{align}
+h(s) &= f_{\theta}(s), \\
+q_t(s,t) &= g_t(h(s), t), \\
+q_x(s,t,x) &= g_x(h(s), \phi_t(t), x), \\
+q_y(s,t,x,y) &= g_y(h(s), \phi_t(t), \phi_x(x), y), \\
+q_z(s,t,x,y,z) &= g_z(h(s), \phi_t(t), \phi_x(x), \phi_y(y), z),
+\end{align}
+where
+\begin{itemize}
+  \item $f_{\theta}$ is a shared state encoder,
+  \item $\phi_t, \phi_x, \phi_y$ are learned embeddings of earlier choices,
+  \item $g_t, g_x, g_y, g_z$ are stage-specific heads.
+\end{itemize}
+
+This is ``branched'' in the implementation sense, but the branches are conditional rather than independent.
+
+\section*{Optional Dueling-Style Form}
+
+If desired, a dueling-style decomposition can be added in a way that remains compatible with the autoregressive joint Q semantics. The clean version is to use a single state-value baseline
+\[
+V(s),
+\]
+followed by centered conditional advantage terms at each stage:
+\begin{align}
+V(s) &= f_{\mathrm{value}}(h(s)), \\
+A_t(s,t) &= g_t(h(s), t), \\
+A_x(s,t,x) &= g_x(h(s), \phi_t(t), x), \\
+A_y(s,t,x,y) &= g_y(h(s), \phi_t(t), \phi_x(x), y), \\
+A_z(s,t,x,y,z) &= g_z(h(s), \phi_t(t), \phi_x(x), \phi_y(y), z).
+\end{align}
+
+The corresponding stage contributions are
+\begin{align}
+q_t(s,t)
+&=
+V(s)
++
+\Bigl(
+A_t(s,t) - \bar{A}_t(s)
+\Bigr), \\
+q_x(s,t,x)
+&=
+A_x(s,t,x) - \bar{A}_x(s,t), \\
+q_y(s,t,x,y)
+&=
+A_y(s,t,x,y) - \bar{A}_y(s,t,x), \\
+q_z(s,t,x,y,z)
+&=
+A_z(s,t,x,y,z) - \bar{A}_z(s,t,x,y),
+\end{align}
+where the centered baselines are computed over the valid masked choices at each stage:
+\begin{align}
+\bar{A}_t(s)
+&=
+\frac{1}{|\mathcal{T}(s)|}
+\sum_{t' \in \mathcal{T}(s)} A_t(s,t'), \\
+\bar{A}_x(s,t)
+&=
+\frac{1}{|\mathcal{X}(s,t)|}
+\sum_{x' \in \mathcal{X}(s,t)} A_x(s,t,x'), \\
+\bar{A}_y(s,t,x)
+&=
+\frac{1}{|\mathcal{Y}(s,t,x)|}
+\sum_{y' \in \mathcal{Y}(s,t,x)} A_y(s,t,x,y'), \\
+\bar{A}_z(s,t,x,y)
+&=
+\frac{1}{|\mathcal{Z}(s,t,x,y)|}
+\sum_{z' \in \mathcal{Z}(s,t,x,y)} A_z(s,t,x,y,z').
+\end{align}
+
+The full joint Q remains
+\[
+Q(s,t,x,y,z)
+= q_t(s,t) + q_x(s,t,x) + q_y(s,t,x,y) + q_z(s,t,x,y,z).
+\]
+
+\paragraph{Why this is better than stage-specific value heads.}
+It is tempting to introduce separate learned value terms such as $V_x(s,t)$ or $V_y(s,t,x)$ and then add them to the stage contributions. However, that creates an identifiability problem: if two learned terms have the same conditioning context and are simply added together, the model can shift mass between them without changing the total Q-value. Using a single global baseline $V(s)$ plus centered conditional advantages avoids that redundancy.
+
+\paragraph{Interpretation.}
+The terms $q_t, q_x, q_y, q_z$ should be understood as centered incremental contributions to the total joint Q-value, not as independent Bellman Q-functions. The actual continuation value after fixing a prefix is still given by the suffix maximization defined earlier in the note.
+
+This can improve optimization, but it does not change the main semantic requirement: later stages must be conditioned on earlier ones, and decoding must remain aligned with the joint autoregressive Q.
+
+\section*{Restaurant-Specific Instantiation}
+
+For the current environment, a natural specialization is
+\begin{equation}
+\label{eq:restaurant-q}
+Q(s,\texttt{type},\texttt{obj1},\texttt{loc},\texttt{obj2})
+=
+q_{\mathrm{type}}(s,\texttt{type})
++ q_{\mathrm{obj1}}(s,\texttt{type},\texttt{obj1})
++ q_{\mathrm{loc}}(s,\texttt{type},\texttt{obj1},\texttt{loc})
++ q_{\mathrm{obj2}}(s,\texttt{type},\texttt{obj1},\texttt{loc},\texttt{obj2}).
+\end{equation}
+
+For action types that do not use some arguments, the corresponding valid set is a singleton containing the ``none'' token, so the same equations still apply without case-splitting.
+
+\section*{Why This Fixes the Current Design Problem}
+
+The current unconditional factorization effectively assumes that argument scores are reusable across unrelated action types. In contrast, the conditional branched model ensures:
+\begin{itemize}
+  \item object preferences are action-type dependent,
+  \item location preferences are conditioned on the action type and earlier arguments,
+  \item the greedy decoder is consistent with the modeled Q-function,
+  \item the Bellman target is computed with respect to the same joint action semantics used at inference time.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,113 @@
+<svg width="1800" height="1100" viewBox="0 0 1800 1100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#365BC9"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#28A77B"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#DF7F30"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7A5AD6"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#C44652"/>
+    </marker>
+    <style>
+      .title { font: 700 44px Arial, Helvetica, sans-serif; fill: #1C2536; }
+      .eq { font: 28px Menlo, Consolas, monospace; fill: #1C2536; }
+      .boxTitle { font: 700 28px Arial, Helvetica, sans-serif; }
+      .body { font: 22px Arial, Helvetica, sans-serif; fill: #5F6E8A; }
+      .small { font: 18px Arial, Helvetica, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" fill="#F8F9FC"/>
+
+  <text x="900" y="78" text-anchor="middle" class="title">Conditional Branched Autoregressive Q Network</text>
+
+  <rect x="130" y="125" width="1540" height="90" rx="20" fill="#FFFFFF" stroke="#D7DCE6" stroke-width="2"/>
+  <text x="900" y="175" text-anchor="middle" class="eq">Q(s, t, x, y, z) = q_t(s, t) + q_x(s, t, x) + q_y(s, t, x, y) + q_z(s, t, x, y, z)</text>
+  <text x="900" y="205" text-anchor="middle" class="body">Each later branch is conditioned on earlier choices</text>
+
+  <rect x="110" y="300" width="230" height="95" rx="24" fill="#E6EFFF" stroke="#365BC9" stroke-width="3"/>
+  <text x="225" y="338" text-anchor="middle" class="boxTitle" fill="#365BC9">State</text>
+  <text x="225" y="372" text-anchor="middle" class="boxTitle" fill="#365BC9">input s</text>
+
+  <rect x="420" y="280" width="280" height="135" rx="24" fill="#F0F4FC" stroke="#8291AF" stroke-width="3"/>
+  <text x="560" y="336" text-anchor="middle" class="boxTitle" fill="#1C2536">Shared state encoder</text>
+  <text x="560" y="374" text-anchor="middle" class="boxTitle" fill="#1C2536">h = f_theta(s)</text>
+
+  <line x1="340" y1="348" x2="420" y2="348" stroke="#365BC9" stroke-width="6" marker-end="url(#arrowBlue)"/>
+
+  <rect x="780" y="265" width="280" height="140" rx="24" fill="#E8EFFF" stroke="#365BC9" stroke-width="3"/>
+  <text x="920" y="323" text-anchor="middle" class="boxTitle" fill="#365BC9">Type branch</text>
+  <text x="920" y="360" text-anchor="middle" class="boxTitle" fill="#365BC9">q_t(s, t)</text>
+  <text x="798" y="433" class="body">chooses t</text>
+
+  <rect x="1090" y="265" width="280" height="140" rx="24" fill="#E9F8F1" stroke="#28A77B" stroke-width="3"/>
+  <text x="1230" y="323" text-anchor="middle" class="boxTitle" fill="#28A77B">Object1 branch</text>
+  <text x="1230" y="360" text-anchor="middle" class="boxTitle" fill="#28A77B">q_x(s, t, x)</text>
+  <text x="1108" y="433" class="body">conditioned on: h, t</text>
+
+  <rect x="1400" y="265" width="280" height="140" rx="24" fill="#FCF1E7" stroke="#DF7F30" stroke-width="3"/>
+  <text x="1540" y="323" text-anchor="middle" class="boxTitle" fill="#DF7F30">Location branch</text>
+  <text x="1540" y="360" text-anchor="middle" class="boxTitle" fill="#DF7F30">q_y(s, t, x, y)</text>
+  <text x="1418" y="433" class="body">conditioned on: h, t, x</text>
+
+  <rect x="1360" y="565" width="280" height="140" rx="24" fill="#F1ECFC" stroke="#7A5AD6" stroke-width="3"/>
+  <text x="1500" y="623" text-anchor="middle" class="boxTitle" fill="#7A5AD6">Object2 branch</text>
+  <text x="1500" y="660" text-anchor="middle" class="boxTitle" fill="#7A5AD6">q_z(s, t, x, y, z)</text>
+  <text x="1378" y="733" class="body">conditioned on: h, t, x, y</text>
+
+  <line x1="700" y1="348" x2="780" y2="335" stroke="#365BC9" stroke-width="5" marker-end="url(#arrowBlue)"/>
+  <line x1="700" y1="348" x2="1090" y2="335" stroke="#28A77B" stroke-width="5" marker-end="url(#arrowGreen)"/>
+  <line x1="700" y1="348" x2="1400" y2="335" stroke="#DF7F30" stroke-width="5" marker-end="url(#arrowOrange)"/>
+  <path d="M 700 348 C 980 348, 1180 380, 1360 625" stroke="#7A5AD6" stroke-width="5" fill="none" marker-end="url(#arrowPurple)"/>
+
+  <line x1="1060" y1="320" x2="1090" y2="320" stroke="#28A77B" stroke-width="5" marker-end="url(#arrowGreen)"/>
+  <text x="1068" y="288" class="small" fill="#28A77B">embed(t)</text>
+
+  <line x1="1370" y1="320" x2="1400" y2="320" stroke="#DF7F30" stroke-width="5" marker-end="url(#arrowOrange)"/>
+  <text x="1377" y="288" class="small" fill="#DF7F30">embed(x)</text>
+
+  <line x1="1540" y1="405" x2="1540" y2="565" stroke="#7A5AD6" stroke-width="5" marker-end="url(#arrowPurple)"/>
+  <text x="1552" y="475" class="small" fill="#7A5AD6">embed(y)</text>
+
+  <rect x="805" y="445" width="230" height="65" rx="16" fill="#FFFFFF" stroke="#365BC9" stroke-width="2"/>
+  <text x="920" y="485" text-anchor="middle" class="body" fill="#365BC9">score over valid t</text>
+
+  <rect x="1115" y="445" width="230" height="65" rx="16" fill="#FFFFFF" stroke="#28A77B" stroke-width="2"/>
+  <text x="1230" y="485" text-anchor="middle" class="body" fill="#28A77B">score over valid x | t</text>
+
+  <rect x="1425" y="445" width="230" height="65" rx="16" fill="#FFFFFF" stroke="#DF7F30" stroke-width="2"/>
+  <text x="1540" y="485" text-anchor="middle" class="body" fill="#DF7F30">score over valid y | t, x</text>
+
+  <rect x="1060" y="745" width="230" height="65" rx="16" fill="#FFFFFF" stroke="#7A5AD6" stroke-width="2"/>
+  <text x="1175" y="785" text-anchor="middle" class="body" fill="#7A5AD6">score over valid z | t, x, y</text>
+
+  <line x1="920" y1="405" x2="920" y2="445" stroke="#365BC9" stroke-width="4" marker-end="url(#arrowBlue)"/>
+  <line x1="1230" y1="405" x2="1230" y2="445" stroke="#28A77B" stroke-width="4" marker-end="url(#arrowGreen)"/>
+  <line x1="1540" y1="405" x2="1540" y2="445" stroke="#DF7F30" stroke-width="4" marker-end="url(#arrowOrange)"/>
+  <line x1="1500" y1="705" x2="1175" y2="745" stroke="#7A5AD6" stroke-width="4" marker-end="url(#arrowPurple)"/>
+
+  <rect x="640" y="845" width="520" height="135" rx="24" fill="#F5F7FB" stroke="#C44652" stroke-width="3"/>
+  <text x="900" y="902" text-anchor="middle" class="boxTitle" fill="#C44652">Additive joint action-value composition</text>
+  <text x="900" y="944" text-anchor="middle" class="boxTitle" fill="#C44652">Q(s, t, x, y, z) = q_t + q_x + q_y + q_z</text>
+
+  <line x1="920" y1="510" x2="830" y2="845" stroke="#365BC9" stroke-width="4" marker-end="url(#arrowBlue)"/>
+  <line x1="1230" y1="510" x2="930" y2="845" stroke="#28A77B" stroke-width="4" marker-end="url(#arrowGreen)"/>
+  <line x1="1540" y1="510" x2="1030" y2="845" stroke="#DF7F30" stroke-width="4" marker-end="url(#arrowOrange)"/>
+  <line x1="1175" y1="810" x2="1080" y2="845" stroke="#7A5AD6" stroke-width="4" marker-end="url(#arrowPurple)"/>
+
+  <rect x="1230" y="820" width="450" height="190" rx="24" fill="#FFF9F0" stroke="#BE9146" stroke-width="3"/>
+  <text x="1455" y="870" text-anchor="middle" class="boxTitle" fill="#9C6E24">Greedy decoder</text>
+  <text x="1265" y="915" class="body" fill="#9C6E24">1. choose t*</text>
+  <text x="1265" y="952" class="body" fill="#9C6E24">2. choose x* given t*</text>
+  <text x="1265" y="989" class="body" fill="#9C6E24">3. choose y* given t*, x*</text>
+  <text x="1265" y="1026" class="body" fill="#9C6E24">4. choose z* given t*, x*, y*</text>
+
+  <text x="900" y="1064" text-anchor="middle" class="body">Independent branches would ignore these conditional arrows. This model does not.</text>
+</svg>

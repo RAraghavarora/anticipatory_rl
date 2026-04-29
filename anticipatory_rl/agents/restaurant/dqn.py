@@ -19,21 +19,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
-
-
-OBJECT1_ACTION_MASK = torch.tensor(
-    [1.0 if "object1" in ACTION_HEADS[name] else 0.0 for name in ACTION_TYPES],
-    dtype=torch.float32,
-)
-LOCATION_ACTION_MASK = torch.tensor(
-    [1.0 if "location" in ACTION_HEADS[name] else 0.0 for name in ACTION_TYPES],
-    dtype=torch.float32,
-)
-OBJECT2_ACTION_MASK = torch.tensor(
-    [1.0 if "object2" in ACTION_HEADS[name] else 0.0 for name in ACTION_TYPES],
-    dtype=torch.float32,
-)
+from anticipatory_rl.envs.restaurant.env import ACTION_TYPES, RestaurantSymbolicEnv
 
 
 class AimLogger:
@@ -149,6 +135,10 @@ class Transition:
     location: int
     object2: int
     reward: float
+    action_type_mask: np.ndarray
+    object1_mask: np.ndarray
+    location_mask: np.ndarray
+    object2_mask: np.ndarray
     next_state: np.ndarray
     done: bool
     next_action_type_mask: np.ndarray
@@ -194,38 +184,133 @@ class RestaurantQNetwork(nn.Module):
         hidden_dim: int = 256,
     ) -> None:
         super().__init__()
+        self.action_type_dim = int(action_type_dim)
+        self.object_dim = int(object_dim)
+        self.location_dim = int(location_dim)
+        self.prefix_embed_dim = max(16, hidden_dim // 8)
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
-        self.action_type_head = nn.Linear(hidden_dim, action_type_dim)
-        self.object1_head = nn.Linear(hidden_dim, object_dim)
-        self.location_head = nn.Linear(hidden_dim, location_dim)
-        self.object2_head = nn.Linear(hidden_dim, object_dim)
+        self.value_head = nn.Linear(hidden_dim, 1)
+        self.action_type_adv_head = nn.Linear(hidden_dim, action_type_dim)
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        encoded = self.encoder(x)
-        return {
-            "action_type": self.action_type_head(encoded),
-            "object1": self.object1_head(encoded),
-            "location": self.location_head(encoded),
-            "object2": self.object2_head(encoded),
-        }
+        self.action_type_embed = nn.Embedding(action_type_dim, self.prefix_embed_dim)
+        self.object_embed = nn.Embedding(object_dim, self.prefix_embed_dim)
+        self.location_embed = nn.Embedding(location_dim, self.prefix_embed_dim)
+
+        self.object1_adv_head = nn.Sequential(
+            nn.Linear(hidden_dim + self.prefix_embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, object_dim),
+        )
+        self.location_adv_head = nn.Sequential(
+            nn.Linear(hidden_dim + 2 * self.prefix_embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, location_dim),
+        )
+        self.object2_adv_head = nn.Sequential(
+            nn.Linear(hidden_dim + 3 * self.prefix_embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, object_dim),
+        )
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        return self.encoder(x)
+
+    def action_type_scores(self, encoded: torch.Tensor, action_type_mask: torch.Tensor) -> torch.Tensor:
+        value = self.value_head(encoded)
+        advantages = self.action_type_adv_head(encoded)
+        centered = advantages - _masked_mean(advantages, action_type_mask)
+        return value + centered
+
+    def object1_scores(
+        self,
+        encoded: torch.Tensor,
+        action_types: torch.Tensor,
+        object1_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        prefix = torch.cat([encoded, self.action_type_embed(action_types.squeeze(1))], dim=1)
+        advantages = self.object1_adv_head(prefix)
+        return advantages - _masked_mean(advantages, object1_mask)
+
+    def location_scores(
+        self,
+        encoded: torch.Tensor,
+        action_types: torch.Tensor,
+        object1: torch.Tensor,
+        location_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        prefix = torch.cat(
+            [
+                encoded,
+                self.action_type_embed(action_types.squeeze(1)),
+                self.object_embed(object1.squeeze(1)),
+            ],
+            dim=1,
+        )
+        advantages = self.location_adv_head(prefix)
+        return advantages - _masked_mean(advantages, location_mask)
+
+    def object2_scores(
+        self,
+        encoded: torch.Tensor,
+        action_types: torch.Tensor,
+        object1: torch.Tensor,
+        location: torch.Tensor,
+        object2_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        prefix = torch.cat(
+            [
+                encoded,
+                self.action_type_embed(action_types.squeeze(1)),
+                self.object_embed(object1.squeeze(1)),
+                self.location_embed(location.squeeze(1)),
+            ],
+            dim=1,
+        )
+        advantages = self.object2_adv_head(prefix)
+        return advantages - _masked_mean(advantages, object2_mask)
+
+
+def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    masked_sum = (values * mask).sum(dim=1, keepdim=True)
+    denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+    return masked_sum / denom
 
 
 def _compose_q_values(
-    heads: Dict[str, torch.Tensor],
+    q_net: RestaurantQNetwork,
+    encoded: torch.Tensor,
     action_types: torch.Tensor,
     object1: torch.Tensor,
     location: torch.Tensor,
     object2: torch.Tensor,
+    action_type_masks: torch.Tensor,
+    object1_masks: torch.Tensor,
+    location_masks: torch.Tensor,
+    object2_masks: torch.Tensor,
 ) -> torch.Tensor:
-    q = heads["action_type"].gather(1, action_types)
-    q = q + heads["object1"].gather(1, object1) * OBJECT1_ACTION_MASK.to(action_types.device)[action_types.squeeze(1)].unsqueeze(1)
-    q = q + heads["location"].gather(1, location) * LOCATION_ACTION_MASK.to(action_types.device)[action_types.squeeze(1)].unsqueeze(1)
-    q = q + heads["object2"].gather(1, object2) * OBJECT2_ACTION_MASK.to(action_types.device)[action_types.squeeze(1)].unsqueeze(1)
+    action_type_scores = q_net.action_type_scores(encoded, action_type_masks)
+    q = action_type_scores.gather(1, action_types)
+
+    chosen_object1_masks = object1_masks[torch.arange(encoded.shape[0], device=encoded.device), action_types.squeeze(1)]
+    object1_scores = q_net.object1_scores(encoded, action_types, chosen_object1_masks)
+    q = q + object1_scores.gather(1, object1)
+
+    chosen_location_masks = location_masks[torch.arange(encoded.shape[0], device=encoded.device), action_types.squeeze(1)]
+    location_scores = q_net.location_scores(encoded, action_types, object1, chosen_location_masks)
+    q = q + location_scores.gather(1, location)
+
+    chosen_object2_masks = object2_masks[
+        torch.arange(encoded.shape[0], device=encoded.device),
+        action_types.squeeze(1),
+        object1.squeeze(1),
+    ]
+    object2_scores = q_net.object2_scores(encoded, action_types, object1, location, chosen_object2_masks)
+    q = q + object2_scores.gather(1, object2)
     return q
 
 
@@ -336,45 +421,92 @@ def _select_action(
         }
     with torch.no_grad():
         state_t = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-        heads = q_net(state_t)
-        action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device)
-        action_type = _masked_choice(heads["action_type"].squeeze(0), action_type_mask)
-        object1_mask = torch.tensor(masks["valid_object1_mask"][action_type], dtype=torch.float32, device=device)
-        object1 = _masked_choice(heads["object1"].squeeze(0), object1_mask)
-        location_mask = torch.tensor(masks["valid_location_mask"][action_type], dtype=torch.float32, device=device)
-        location = _masked_choice(heads["location"].squeeze(0), location_mask)
-        object2_mask = torch.tensor(masks["valid_object2_mask"][action_type, object1], dtype=torch.float32, device=device)
-        object2 = _masked_choice(heads["object2"].squeeze(0), object2_mask)
+        encoded = q_net.encode(state_t)
+        action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        object1_masks = torch.tensor(masks["valid_object1_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        location_masks = torch.tensor(masks["valid_location_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        object2_masks = torch.tensor(masks["valid_object2_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        action_type, object1, location, object2 = _select_greedy_actions_batch(
+            q_net,
+            encoded,
+            action_type_mask,
+            object1_masks,
+            location_masks,
+            object2_masks,
+        )
         return {
-            "action_type": int(action_type),
-            "object1": int(object1),
-            "location": int(location),
-            "object2": int(object2),
+            "action_type": int(action_type.item()),
+            "object1": int(object1.item()),
+            "location": int(location.item()),
+            "object2": int(object2.item()),
         }
 
 
 def _select_greedy_actions_batch(
-    heads: Dict[str, torch.Tensor],
+    q_net: RestaurantQNetwork,
+    encoded: torch.Tensor,
     action_type_masks: torch.Tensor,
     object1_masks: torch.Tensor,
     location_masks: torch.Tensor,
     object2_masks: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    batch_size = heads["action_type"].shape[0]
+    batch_size = encoded.shape[0]
     chosen_action_type: List[int] = []
     chosen_object1: List[int] = []
     chosen_location: List[int] = []
     chosen_object2: List[int] = []
     for idx in range(batch_size):
-        action_type = _masked_choice(heads["action_type"][idx], action_type_masks[idx])
-        object1 = _masked_choice(heads["object1"][idx], object1_masks[idx, action_type])
-        location = _masked_choice(heads["location"][idx], location_masks[idx, action_type])
-        object2 = _masked_choice(heads["object2"][idx], object2_masks[idx, action_type, object1])
+        encoded_i = encoded[idx : idx + 1]
+        type_mask_i = action_type_masks[idx : idx + 1]
+        type_scores = q_net.action_type_scores(encoded_i, type_mask_i).squeeze(0)
+        valid_types = torch.nonzero(type_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
+        best_total = None
+        best_choice = None
+        for action_type_t in valid_types.tolist():
+            action_type_tensor = torch.tensor([[action_type_t]], dtype=torch.int64, device=encoded.device)
+            object1_mask_i = object1_masks[idx, action_type_t].unsqueeze(0)
+            object1_scores = q_net.object1_scores(encoded_i, action_type_tensor, object1_mask_i).squeeze(0)
+            valid_object1 = torch.nonzero(object1_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
+            for object1_t in valid_object1.tolist():
+                object1_tensor = torch.tensor([[object1_t]], dtype=torch.int64, device=encoded.device)
+                location_mask_i = location_masks[idx, action_type_t].unsqueeze(0)
+                location_scores = q_net.location_scores(encoded_i, action_type_tensor, object1_tensor, location_mask_i).squeeze(0)
+                valid_location = torch.nonzero(location_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
+                for location_t in valid_location.tolist():
+                    location_tensor = torch.tensor([[location_t]], dtype=torch.int64, device=encoded.device)
+                    object2_mask_i = object2_masks[idx, action_type_t, object1_t].unsqueeze(0)
+                    object2_scores = q_net.object2_scores(
+                        encoded_i,
+                        action_type_tensor,
+                        object1_tensor,
+                        location_tensor,
+                        object2_mask_i,
+                    ).squeeze(0)
+                    valid_object2 = torch.nonzero(object2_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
+                    if valid_object2.numel() == 0:
+                        continue
+                    best_object2_idx = _masked_choice(object2_scores, object2_mask_i.squeeze(0))
+                    total_score = (
+                        float(type_scores[action_type_t].item())
+                        + float(object1_scores[object1_t].item())
+                        + float(location_scores[location_t].item())
+                        + float(object2_scores[best_object2_idx].item())
+                    )
+                    if best_total is None or total_score > best_total:
+                        best_total = total_score
+                        best_choice = (action_type_t, object1_t, location_t, best_object2_idx)
+        if best_choice is None:
+            action_type = _masked_choice(type_scores, type_mask_i.squeeze(0))
+            object1 = _random_valid_index(object1_masks[idx, action_type].detach().cpu().numpy())
+            location = _random_valid_index(location_masks[idx, action_type].detach().cpu().numpy())
+            object2 = _random_valid_index(object2_masks[idx, action_type, object1].detach().cpu().numpy())
+        else:
+            action_type, object1, location, object2 = best_choice
         chosen_action_type.append(action_type)
         chosen_object1.append(object1)
         chosen_location.append(location)
         chosen_object2.append(object2)
-    device = heads["action_type"].device
+    device = encoded.device
     return (
         torch.tensor(chosen_action_type, dtype=torch.int64, device=device).unsqueeze(1),
         torch.tensor(chosen_object1, dtype=torch.int64, device=device).unsqueeze(1),
@@ -400,6 +532,10 @@ def _optimize(
     location = torch.tensor([t.location for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
     object2 = torch.tensor([t.object2 for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
     rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
+    action_type_masks = torch.tensor(np.stack([t.action_type_mask for t in batch]), dtype=torch.float32, device=device)
+    object1_masks = torch.tensor(np.stack([t.object1_mask for t in batch]), dtype=torch.float32, device=device)
+    location_masks = torch.tensor(np.stack([t.location_mask for t in batch]), dtype=torch.float32, device=device)
+    object2_masks = torch.tensor(np.stack([t.object2_mask for t in batch]), dtype=torch.float32, device=device)
     next_states = torch.tensor(np.stack([t.next_state for t in batch]), dtype=torch.float32, device=device)
     dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
     next_action_type_masks = torch.tensor(np.stack([t.next_action_type_mask for t in batch]), dtype=torch.float32, device=device)
@@ -407,19 +543,42 @@ def _optimize(
     next_location_masks = torch.tensor(np.stack([t.next_location_mask for t in batch]), dtype=torch.float32, device=device)
     next_object2_masks = torch.tensor(np.stack([t.next_object2_mask for t in batch]), dtype=torch.float32, device=device)
 
-    heads = q_net(states)
-    q_values = _compose_q_values(heads, action_type, object1, location, object2)
+    encoded = q_net.encode(states)
+    q_values = _compose_q_values(
+        q_net,
+        encoded,
+        action_type,
+        object1,
+        location,
+        object2,
+        action_type_masks,
+        object1_masks,
+        location_masks,
+        object2_masks,
+    )
     with torch.no_grad():
-        next_online = q_net(next_states)
+        next_online = q_net.encode(next_states)
         next_action_type, next_object1, next_location, next_object2 = _select_greedy_actions_batch(
+            q_net,
             next_online,
             next_action_type_masks,
             next_object1_masks,
             next_location_masks,
             next_object2_masks,
         )
-        next_target = target_net(next_states)
-        next_q = _compose_q_values(next_target, next_action_type, next_object1, next_location, next_object2)
+        next_target = target_net.encode(next_states)
+        next_q = _compose_q_values(
+            target_net,
+            next_target,
+            next_action_type,
+            next_object1,
+            next_location,
+            next_object2,
+            next_action_type_masks,
+            next_object1_masks,
+            next_location_masks,
+            next_object2_masks,
+        )
         targets = rewards + args.gamma * (1.0 - dones) * next_q
 
     td = q_values - targets
@@ -749,6 +908,10 @@ def train(args: argparse.Namespace) -> Path:
                 location=int(action["location"]),
                 object2=int(action["object2"]),
                 reward=float(reward),
+                action_type_mask=np.array(masks["valid_action_type_mask"], dtype=np.float32, copy=True),
+                object1_mask=np.array(masks["valid_object1_mask"], dtype=np.float32, copy=True),
+                location_mask=np.array(masks["valid_location_mask"], dtype=np.float32, copy=True),
+                object2_mask=np.array(masks["valid_object2_mask"], dtype=np.float32, copy=True),
                 next_state=np.array(next_obs, dtype=np.float32, copy=True),
                 done=transition_done,
                 next_action_type_mask=np.array(next_masks["valid_action_type_mask"], dtype=np.float32, copy=True),
