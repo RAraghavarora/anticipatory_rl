@@ -173,32 +173,62 @@ def _sample_structured_action(
     masks = _extract_masks(info)
     obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
     with torch.no_grad():
-        heads = model(obs_tensor)
-        action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device)
+        action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        object1_masks = torch.tensor(masks["valid_object1_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        location_masks = torch.tensor(masks["valid_location_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        object2_masks = torch.tensor(masks["valid_object2_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+
+        if temperature <= 0.0:
+            action_type, object1, location, object2 = model(
+                obs_tensor,
+                action_type_masks=action_type_mask,
+                object1_masks=object1_masks,
+                location_masks=location_masks,
+                object2_masks=object2_masks,
+                decode_greedy=True,
+            )
+            return {
+                "action_type": int(action_type.item()),
+                "object1": int(object1.item()),
+                "location": int(location.item()),
+                "object2": int(object2.item()),
+            }
+
+        encoded = model.encode(obs_tensor)
+        action_type_scores = model.action_type_scores(encoded, action_type_mask)
         action_type = _sample_masked_index(
-            heads["action_type"].squeeze(0),
-            action_type_mask,
+            action_type_scores.squeeze(0),
+            action_type_mask.squeeze(0),
             temperature=temperature,
             generator=generator,
         )
-        object1_mask = torch.tensor(masks["valid_object1_mask"][action_type], dtype=torch.float32, device=device)
+        action_type_tensor = torch.tensor([[action_type]], dtype=torch.int64, device=device)
+
+        object1_mask = object1_masks[:, action_type, :]
+        object1_scores = model.object1_scores(encoded, action_type_tensor, object1_mask)
         object1 = _sample_masked_index(
-            heads["object1"].squeeze(0),
-            object1_mask,
+            object1_scores.squeeze(0),
+            object1_mask.squeeze(0),
             temperature=temperature,
             generator=generator,
         )
-        location_mask = torch.tensor(masks["valid_location_mask"][action_type], dtype=torch.float32, device=device)
+        object1_tensor = torch.tensor([[object1]], dtype=torch.int64, device=device)
+
+        location_mask = location_masks[:, action_type, :]
+        location_scores = model.location_scores(encoded, action_type_tensor, object1_tensor, location_mask)
         location = _sample_masked_index(
-            heads["location"].squeeze(0),
-            location_mask,
+            location_scores.squeeze(0),
+            location_mask.squeeze(0),
             temperature=temperature,
             generator=generator,
         )
-        object2_mask = torch.tensor(masks["valid_object2_mask"][action_type, object1], dtype=torch.float32, device=device)
+        location_tensor = torch.tensor([[location]], dtype=torch.int64, device=device)
+
+        object2_mask = object2_masks[:, action_type, object1, :]
+        object2_scores = model.object2_scores(encoded, action_type_tensor, object1_tensor, location_tensor, object2_mask)
         object2 = _sample_masked_index(
-            heads["object2"].squeeze(0),
-            object2_mask,
+            object2_scores.squeeze(0),
+            object2_mask.squeeze(0),
             temperature=temperature,
             generator=generator,
         )

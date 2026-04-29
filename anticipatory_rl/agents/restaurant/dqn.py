@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from anticipatory_rl.envs.restaurant.env import ACTION_TYPES, RestaurantSymbolicEnv
+from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
 
 
 class AimLogger:
@@ -118,6 +118,15 @@ def _masked_choice(values: torch.Tensor, mask: torch.Tensor) -> int:
     masked = values.clone()
     masked[mask <= 0.0] = float("-inf")
     return int(torch.argmax(masked).item())
+
+
+def _masked_argmax(values: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    neg_inf = torch.finfo(values.dtype).min
+    masked_values = values.masked_fill(mask <= 0.0, neg_inf)
+    indices = torch.argmax(masked_values, dim=1)
+    best = masked_values.gather(1, indices.unsqueeze(1)).squeeze(1)
+    valid = (mask > 0.0).any(dim=1)
+    return indices, best.masked_fill(~valid, neg_inf)
 
 
 def _random_valid_index(mask: np.ndarray) -> int:
@@ -273,6 +282,52 @@ class RestaurantQNetwork(nn.Module):
         )
         advantages = self.object2_adv_head(prefix)
         return advantages - _masked_mean(advantages, object2_mask)
+
+    def forward(
+        self,
+        states: torch.Tensor,
+        *,
+        action_types: torch.Tensor | None = None,
+        object1: torch.Tensor | None = None,
+        location: torch.Tensor | None = None,
+        object2: torch.Tensor | None = None,
+        action_type_masks: torch.Tensor | None = None,
+        object1_masks: torch.Tensor | None = None,
+        location_masks: torch.Tensor | None = None,
+        object2_masks: torch.Tensor | None = None,
+        decode_greedy: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        encoded = self.encode(states)
+        if decode_greedy:
+            if action_type_masks is None or object1_masks is None or location_masks is None or object2_masks is None:
+                raise ValueError("decode_greedy requires all action masks.")
+            return _select_greedy_actions_batch(
+                self,
+                encoded,
+                action_type_masks,
+                object1_masks,
+                location_masks,
+                object2_masks,
+            )
+
+        if action_types is None:
+            return encoded
+        if object1 is None or location is None or object2 is None:
+            raise ValueError("compose_q mode requires object1, location, and object2 tensors.")
+        if action_type_masks is None or object1_masks is None or location_masks is None or object2_masks is None:
+            raise ValueError("compose_q mode requires all action masks.")
+        return _compose_q_values(
+            self,
+            encoded,
+            action_types,
+            object1,
+            location,
+            object2,
+            action_type_masks,
+            object1_masks,
+            location_masks,
+            object2_masks,
+        )
 
 
 def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -450,68 +505,165 @@ def _select_greedy_actions_batch(
     location_masks: torch.Tensor,
     object2_masks: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    batch_size = encoded.shape[0]
-    chosen_action_type: List[int] = []
-    chosen_object1: List[int] = []
-    chosen_location: List[int] = []
-    chosen_object2: List[int] = []
-    for idx in range(batch_size):
-        encoded_i = encoded[idx : idx + 1]
-        type_mask_i = action_type_masks[idx : idx + 1]
-        type_scores = q_net.action_type_scores(encoded_i, type_mask_i).squeeze(0)
-        valid_types = torch.nonzero(type_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
-        best_total = None
-        best_choice = None
-        for action_type_t in valid_types.tolist():
-            action_type_tensor = torch.tensor([[action_type_t]], dtype=torch.int64, device=encoded.device)
-            object1_mask_i = object1_masks[idx, action_type_t].unsqueeze(0)
-            object1_scores = q_net.object1_scores(encoded_i, action_type_tensor, object1_mask_i).squeeze(0)
-            valid_object1 = torch.nonzero(object1_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
-            for object1_t in valid_object1.tolist():
-                object1_tensor = torch.tensor([[object1_t]], dtype=torch.int64, device=encoded.device)
-                location_mask_i = location_masks[idx, action_type_t].unsqueeze(0)
-                location_scores = q_net.location_scores(encoded_i, action_type_tensor, object1_tensor, location_mask_i).squeeze(0)
-                valid_location = torch.nonzero(location_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
-                for location_t in valid_location.tolist():
-                    location_tensor = torch.tensor([[location_t]], dtype=torch.int64, device=encoded.device)
-                    object2_mask_i = object2_masks[idx, action_type_t, object1_t].unsqueeze(0)
-                    object2_scores = q_net.object2_scores(
-                        encoded_i,
-                        action_type_tensor,
-                        object1_tensor,
-                        location_tensor,
-                        object2_mask_i,
-                    ).squeeze(0)
-                    valid_object2 = torch.nonzero(object2_mask_i.squeeze(0) > 0.0, as_tuple=False).squeeze(-1)
-                    if valid_object2.numel() == 0:
-                        continue
-                    best_object2_idx = _masked_choice(object2_scores, object2_mask_i.squeeze(0))
-                    total_score = (
-                        float(type_scores[action_type_t].item())
-                        + float(object1_scores[object1_t].item())
-                        + float(location_scores[location_t].item())
-                        + float(object2_scores[best_object2_idx].item())
-                    )
-                    if best_total is None or total_score > best_total:
-                        best_total = total_score
-                        best_choice = (action_type_t, object1_t, location_t, best_object2_idx)
-        if best_choice is None:
-            action_type = _masked_choice(type_scores, type_mask_i.squeeze(0))
+    device = encoded.device
+    batch_size, hidden_dim = encoded.shape
+    action_type_dim = action_type_masks.shape[1]
+    object_dim = object1_masks.shape[2]
+    location_dim = location_masks.shape[2]
+
+    if batch_size == 0:
+        empty = torch.empty((0, 1), dtype=torch.int64, device=device)
+        return empty, empty, empty, empty
+
+    action_type_scores = q_net.action_type_scores(encoded, action_type_masks)
+    none_object = object_dim - 1
+    none_location = location_dim - 1
+    none_object_tensor = torch.full((batch_size, 1), none_object, dtype=torch.int64, device=device)
+    none_location_tensor = torch.full((batch_size, 1), none_location, dtype=torch.int64, device=device)
+
+    best_total = torch.full((batch_size,), torch.finfo(action_type_scores.dtype).min, dtype=action_type_scores.dtype, device=device)
+    best_action_type = torch.full((batch_size,), none_object, dtype=torch.int64, device=device)
+    best_object1 = torch.full((batch_size,), none_object, dtype=torch.int64, device=device)
+    best_location = torch.full((batch_size,), none_location, dtype=torch.int64, device=device)
+    best_object2 = torch.full((batch_size,), none_object, dtype=torch.int64, device=device)
+
+    action_type_ids = torch.arange(action_type_dim, dtype=torch.int64, device=device)
+    object_ids = torch.arange(object_dim, dtype=torch.int64, device=device)
+    location_ids = torch.arange(location_dim, dtype=torch.int64, device=device)
+
+    for action_type_t, action_name in enumerate(ACTION_TYPES):
+        type_valid = action_type_masks[:, action_type_t] > 0.0
+        if not torch.any(type_valid):
+            continue
+        action_type_tensor = torch.full((batch_size, 1), action_type_t, dtype=torch.int64, device=device)
+        action_type_component = action_type_scores[:, action_type_t]
+        heads = ACTION_HEADS[action_name]
+
+        if heads == ("object1",):
+            object1_mask = object1_masks[:, action_type_t, :]
+            object1_scores = q_net.object1_scores(encoded, action_type_tensor, object1_mask)
+            candidate_object1, object1_component = _masked_argmax(object1_scores, object1_mask)
+
+            location_mask = location_masks[:, action_type_t, :]
+            location_scores = q_net.location_scores(encoded, action_type_tensor, candidate_object1.unsqueeze(1), location_mask)
+            location_component = location_scores[:, none_location]
+
+            object2_mask = object2_masks[torch.arange(batch_size, device=device), action_type_t, candidate_object1, :]
+            object2_scores = q_net.object2_scores(
+                encoded,
+                action_type_tensor,
+                candidate_object1.unsqueeze(1),
+                none_location_tensor,
+                object2_mask,
+            )
+            object2_component = object2_scores[:, none_object]
+
+            total = action_type_component + object1_component + location_component + object2_component
+            should_update = type_valid & (total > best_total)
+            best_total = torch.where(should_update, total, best_total)
+            best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
+            best_object1 = torch.where(should_update, candidate_object1, best_object1)
+            best_location = torch.where(should_update, torch.full_like(best_location, none_location), best_location)
+            best_object2 = torch.where(should_update, torch.full_like(best_object2, none_object), best_object2)
+            continue
+
+        if heads == ("location",):
+            object1_mask = object1_masks[:, action_type_t, :]
+            object1_scores = q_net.object1_scores(encoded, action_type_tensor, object1_mask)
+            object1_component = object1_scores[:, none_object]
+
+            location_mask = location_masks[:, action_type_t, :]
+            location_scores = q_net.location_scores(encoded, action_type_tensor, none_object_tensor, location_mask)
+            candidate_location, location_component = _masked_argmax(location_scores, location_mask)
+
+            object2_mask = object2_masks[:, action_type_t, none_object, :]
+            object2_scores = q_net.object2_scores(
+                encoded,
+                action_type_tensor,
+                none_object_tensor,
+                candidate_location.unsqueeze(1),
+                object2_mask,
+            )
+            object2_component = object2_scores[:, none_object]
+
+            total = action_type_component + object1_component + location_component + object2_component
+            should_update = type_valid & (total > best_total)
+            best_total = torch.where(should_update, total, best_total)
+            best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
+            best_object1 = torch.where(should_update, torch.full_like(best_object1, none_object), best_object1)
+            best_location = torch.where(should_update, candidate_location, best_location)
+            best_object2 = torch.where(should_update, torch.full_like(best_object2, none_object), best_object2)
+            continue
+
+        if heads == ("object1", "object2"):
+            object1_mask = object1_masks[:, action_type_t, :]
+            object1_scores = q_net.object1_scores(encoded, action_type_tensor, object1_mask)
+
+            object_ids_b = object_ids.view(1, object_dim).expand(batch_size, object_dim)
+            location_mask = location_masks[:, action_type_t, :].unsqueeze(1).expand(batch_size, object_dim, location_dim).reshape(-1, location_dim)
+            location_scores = q_net.location_scores(
+                encoded.unsqueeze(1).expand(batch_size, object_dim, hidden_dim).reshape(-1, hidden_dim),
+                action_type_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
+                object_ids_b.reshape(-1, 1),
+                location_mask,
+            ).reshape(batch_size, object_dim, location_dim)
+            location_component = location_scores[:, :, none_location]
+
+            object2_scores = q_net.object2_scores(
+                encoded.unsqueeze(1).expand(batch_size, object_dim, hidden_dim).reshape(-1, hidden_dim),
+                action_type_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
+                object_ids_b.reshape(-1, 1),
+                none_location_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
+                object2_masks[:, action_type_t, :, :].reshape(-1, object_dim),
+            ).reshape(batch_size, object_dim, object_dim)
+
+            total_scores = (
+                action_type_component.unsqueeze(1).unsqueeze(2)
+                + object1_scores.unsqueeze(2)
+                + location_component.unsqueeze(2)
+                + object2_scores
+            )
+            valid_combo = (
+                type_valid.unsqueeze(1).unsqueeze(2)
+                & (object1_mask > 0.0).unsqueeze(2)
+                & (object2_masks[:, action_type_t, :, :] > 0.0)
+            )
+            neg_inf = torch.finfo(total_scores.dtype).min
+            total_scores = total_scores.masked_fill(~valid_combo, neg_inf)
+            flat_scores = total_scores.reshape(batch_size, -1)
+            best_pair_flat = torch.argmax(flat_scores, dim=1)
+            pair_valid = valid_combo.reshape(batch_size, -1).any(dim=1)
+            candidate_object1 = torch.div(best_pair_flat, object_dim, rounding_mode="floor")
+            candidate_object2 = torch.remainder(best_pair_flat, object_dim)
+            total = flat_scores.gather(1, best_pair_flat.unsqueeze(1)).squeeze(1)
+            should_update = pair_valid & (total > best_total)
+            best_total = torch.where(should_update, total, best_total)
+            best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
+            best_object1 = torch.where(should_update, candidate_object1, best_object1)
+            best_location = torch.where(should_update, torch.full_like(best_location, none_location), best_location)
+            best_object2 = torch.where(should_update, candidate_object2, best_object2)
+            continue
+
+        raise ValueError(f"Unsupported action signature for decoder: {heads}")
+
+    has_valid = best_total > torch.finfo(best_total.dtype).min / 2
+    fallback_indices = torch.nonzero(~has_valid, as_tuple=False).squeeze(-1)
+    if fallback_indices.numel() > 0:
+        for idx in fallback_indices.tolist():
+            action_type = _masked_choice(action_type_scores[idx], action_type_masks[idx])
             object1 = _random_valid_index(object1_masks[idx, action_type].detach().cpu().numpy())
             location = _random_valid_index(location_masks[idx, action_type].detach().cpu().numpy())
             object2 = _random_valid_index(object2_masks[idx, action_type, object1].detach().cpu().numpy())
-        else:
-            action_type, object1, location, object2 = best_choice
-        chosen_action_type.append(action_type)
-        chosen_object1.append(object1)
-        chosen_location.append(location)
-        chosen_object2.append(object2)
-    device = encoded.device
+            best_action_type[idx] = int(action_type)
+            best_object1[idx] = int(object1)
+            best_location[idx] = int(location)
+            best_object2[idx] = int(object2)
+
     return (
-        torch.tensor(chosen_action_type, dtype=torch.int64, device=device).unsqueeze(1),
-        torch.tensor(chosen_object1, dtype=torch.int64, device=device).unsqueeze(1),
-        torch.tensor(chosen_location, dtype=torch.int64, device=device).unsqueeze(1),
-        torch.tensor(chosen_object2, dtype=torch.int64, device=device).unsqueeze(1),
+        best_action_type.unsqueeze(1),
+        best_object1.unsqueeze(1),
+        best_location.unsqueeze(1),
+        best_object2.unsqueeze(1),
     )
 
 
@@ -543,41 +695,36 @@ def _optimize(
     next_location_masks = torch.tensor(np.stack([t.next_location_mask for t in batch]), dtype=torch.float32, device=device)
     next_object2_masks = torch.tensor(np.stack([t.next_object2_mask for t in batch]), dtype=torch.float32, device=device)
 
-    encoded = q_net.encode(states)
-    q_values = _compose_q_values(
-        q_net,
-        encoded,
-        action_type,
-        object1,
-        location,
-        object2,
-        action_type_masks,
-        object1_masks,
-        location_masks,
-        object2_masks,
+    q_values = q_net(
+        states,
+        action_types=action_type,
+        object1=object1,
+        location=location,
+        object2=object2,
+        action_type_masks=action_type_masks,
+        object1_masks=object1_masks,
+        location_masks=location_masks,
+        object2_masks=object2_masks,
     )
     with torch.no_grad():
-        next_online = q_net.encode(next_states)
-        next_action_type, next_object1, next_location, next_object2 = _select_greedy_actions_batch(
-            q_net,
-            next_online,
-            next_action_type_masks,
-            next_object1_masks,
-            next_location_masks,
-            next_object2_masks,
+        next_action_type, next_object1, next_location, next_object2 = q_net(
+            next_states,
+            action_type_masks=next_action_type_masks,
+            object1_masks=next_object1_masks,
+            location_masks=next_location_masks,
+            object2_masks=next_object2_masks,
+            decode_greedy=True,
         )
-        next_target = target_net.encode(next_states)
-        next_q = _compose_q_values(
-            target_net,
-            next_target,
-            next_action_type,
-            next_object1,
-            next_location,
-            next_object2,
-            next_action_type_masks,
-            next_object1_masks,
-            next_location_masks,
-            next_object2_masks,
+        next_q = target_net(
+            next_states,
+            action_types=next_action_type,
+            object1=next_object1,
+            location=next_location,
+            object2=next_object2,
+            action_type_masks=next_action_type_masks,
+            object1_masks=next_object1_masks,
+            location_masks=next_location_masks,
+            object2_masks=next_object2_masks,
         )
         targets = rewards + args.gamma * (1.0 - dones) * next_q
 
