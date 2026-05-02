@@ -540,25 +540,47 @@ def _select_greedy_actions_batch(
         heads = ACTION_HEADS[action_name]
 
         if heads == ("object1",):
+            # Full within-type joint argmax over object1.
+            # The sentinel-dependent components (location at none_location and
+            # object2 at none_object) vary with the choice of object1 due to
+            # conditional embeddings.  Computing the full sum for every valid
+            # object1 eliminates the approximation gap.
             object1_mask = object1_masks[:, action_type_t, :]
             object1_scores = q_net.object1_scores(encoded, action_type_tensor, object1_mask)
-            candidate_object1, object1_component = _masked_argmax(object1_scores, object1_mask)
 
-            location_mask = location_masks[:, action_type_t, :]
-            location_scores = q_net.location_scores(encoded, action_type_tensor, candidate_object1.unsqueeze(1), location_mask)
-            location_component = location_scores[:, none_location]
+            # location(none_location) for every candidate object1.
+            object_ids_b = object_ids.view(1, object_dim).expand(batch_size, object_dim)
+            location_mask = location_masks[:, action_type_t, :].unsqueeze(1).expand(batch_size, object_dim, location_dim).reshape(-1, location_dim)
+            location_scores = q_net.location_scores(
+                encoded.unsqueeze(1).expand(batch_size, object_dim, hidden_dim).reshape(-1, hidden_dim),
+                action_type_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
+                object_ids_b.reshape(-1, 1),
+                location_mask,
+            ).reshape(batch_size, object_dim, location_dim)
+            location_component = location_scores[:, :, none_location]
 
-            object2_mask = object2_masks[torch.arange(batch_size, device=device), action_type_t, candidate_object1, :]
+            # object2(none_object) for every candidate object1.
+            object2_mask = object2_masks[:, action_type_t, :, :].reshape(batch_size * object_dim, object_dim)
             object2_scores = q_net.object2_scores(
-                encoded,
-                action_type_tensor,
-                candidate_object1.unsqueeze(1),
-                none_location_tensor,
+                encoded.unsqueeze(1).expand(batch_size, object_dim, hidden_dim).reshape(-1, hidden_dim),
+                action_type_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
+                object_ids_b.reshape(-1, 1),
+                none_location_tensor.unsqueeze(1).expand(batch_size, object_dim, 1).reshape(-1, 1),
                 object2_mask,
-            )
-            object2_component = object2_scores[:, none_object]
+            ).reshape(batch_size, object_dim, object_dim)
+            object2_component = object2_scores[:, :, none_object]
 
-            total = action_type_component + object1_component + location_component + object2_component
+            total_scores = (
+                action_type_component.unsqueeze(1)
+                + object1_scores
+                + location_component
+                + object2_component
+            )
+            neg_inf = torch.finfo(total_scores.dtype).min
+            valid_o1 = object1_mask > 0.0
+            total_scores = total_scores.masked_fill(~valid_o1, neg_inf)
+            candidate_object1 = torch.argmax(total_scores, dim=1)
+            total = total_scores.gather(1, candidate_object1.unsqueeze(1)).squeeze(1)
             should_update = type_valid & (total > best_total)
             best_total = torch.where(should_update, total, best_total)
             best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
@@ -568,25 +590,40 @@ def _select_greedy_actions_batch(
             continue
 
         if heads == ("location",):
+            # Full within-type joint argmax over location.
+            # The sentinel-dependent component (object2 at none_object) varies
+            # with the choice of location due to conditional embeddings.
             object1_mask = object1_masks[:, action_type_t, :]
             object1_scores = q_net.object1_scores(encoded, action_type_tensor, object1_mask)
             object1_component = object1_scores[:, none_object]
 
+            # location scores for every candidate location.
             location_mask = location_masks[:, action_type_t, :]
             location_scores = q_net.location_scores(encoded, action_type_tensor, none_object_tensor, location_mask)
-            candidate_location, location_component = _masked_argmax(location_scores, location_mask)
 
-            object2_mask = object2_masks[:, action_type_t, none_object, :]
+            # object2(none_object) for every candidate location.
+            location_ids_b = location_ids.view(1, location_dim).expand(batch_size, location_dim)
+            object2_mask = object2_masks[:, action_type_t, none_object, :].unsqueeze(1).expand(batch_size, location_dim, object_dim).reshape(-1, object_dim)
             object2_scores = q_net.object2_scores(
-                encoded,
-                action_type_tensor,
-                none_object_tensor,
-                candidate_location.unsqueeze(1),
+                encoded.unsqueeze(1).expand(batch_size, location_dim, hidden_dim).reshape(-1, hidden_dim),
+                action_type_tensor.unsqueeze(1).expand(batch_size, location_dim, 1).reshape(-1, 1),
+                none_object_tensor.unsqueeze(1).expand(batch_size, location_dim, 1).reshape(-1, 1),
+                location_ids_b.reshape(-1, 1),
                 object2_mask,
-            )
-            object2_component = object2_scores[:, none_object]
+            ).reshape(batch_size, location_dim, object_dim)
+            object2_component = object2_scores[:, :, none_object]
 
-            total = action_type_component + object1_component + location_component + object2_component
+            total_scores = (
+                action_type_component.unsqueeze(1)
+                + object1_component.unsqueeze(1)
+                + location_scores
+                + object2_component
+            )
+            neg_inf = torch.finfo(total_scores.dtype).min
+            valid_loc = location_mask > 0.0
+            total_scores = total_scores.masked_fill(~valid_loc, neg_inf)
+            candidate_location = torch.argmax(total_scores, dim=1)
+            total = total_scores.gather(1, candidate_location.unsqueeze(1)).squeeze(1)
             should_update = type_valid & (total > best_total)
             best_total = torch.where(should_update, total, best_total)
             best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
