@@ -1,27 +1,35 @@
 #!/bin/bash
-#SBATCH --job-name=rest_sf_myopic
-#SBATCH --output=slurm_logs/rest_sf_myopic_%j.out
-#SBATCH --error=slurm_logs/rest_sf_myopic_%j.err
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH --gres=gpu:a100:1
-#SBATCH --time=24:00:00
-#SBATCH --partition=gypsum
+# Submit from repo root so relative paths resolve.
 
-# Load modules
-module load anaconda3/2021.05
-module load cuda/11.8
+#================================================
+# SBATCH (TACC Lonestar6)
+#================================================
+#SBATCH -J rest_sf_myopic_ls6
+#SBATCH -o slurm_logs/%x.o%j
+#SBATCH -e slurm_logs/%x.e%j
+#SBATCH -p gpu-a100
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH --ntasks-per-node=1
+#SBATCH -t 48:00:00
+#SBATCH -A ASC26023
+#SBATCH --export=ALL
 
-# Activate conda environment
-source /home/aurora/miniconda3/etc/profile.d/conda.sh
+set -euo pipefail
+
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
+mkdir -p slurm_logs
+
+module load cuda/12.2
+source /work/11373/raghavaurora2/ls6/miniconda3/etc/profile.d/conda.sh
 conda activate thesis
 
-# Navigate to code directory
-cd /home/aurora/raghav/raghav/anticipatory_rl
+echo "Job: ${SLURM_JOB_NAME:-unknown}  id=${SLURM_JOB_ID:-local}  node=$(hostname)  started=$(date -Is)"
+echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
+echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 # Run training with myopic mode (no bootstrapping at task success)
-python -m anticipatory_rl.agents.restaurant.sf_dqn \
+srun python -m anticipatory_rl.agents.restaurant.sf_dqn \
     --total-steps 500000 \
     --sf-dim 64 \
     --myopic \
@@ -29,4 +37,5 @@ python -m anticipatory_rl.agents.restaurant.sf_dqn \
     --output-name "restaurant_sf_myopic.pt" \
     --run-label "sf_myopic_$(date +%Y%m%d_%H%M%S)"
 
-echo "Training completed at $(date)"
+date
+echo "Job finished"
