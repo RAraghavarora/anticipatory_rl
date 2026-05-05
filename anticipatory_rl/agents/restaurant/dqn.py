@@ -86,8 +86,15 @@ def _select_device() -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
-        # Use an explicit CUDA ordinal so we do not depend on torch's current
-        # device state from launchers that may pre-set an invalid global index.
+        # Some launchers/scheduler environments can leave torch with an invalid
+        # current CUDA ordinal. Force-bind to the first visible GPU.
+        try:
+            torch.cuda.set_device(0)
+        except Exception as exc:  # pragma: no cover - depends on runtime CUDA state
+            raise RuntimeError(
+                "CUDA is available but failed to select cuda:0. "
+                "Check CUDA_VISIBLE_DEVICES and launcher-provided GPU rank env vars."
+            ) from exc
         return torch.device("cuda:0")
     return torch.device("cpu")
 
