@@ -1,0 +1,118 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,amsfonts}
+\usepackage{bm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\title{Successor Features for Anticipatory RL in Restaurant Domain}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+This document formalizes the Successor Features (SF) approach implemented for the restaurant domain with structured actions. Successor Features decompose the action-value function as:
+
+\begin{equation}
+Q(s, a, \tau) = \bm{\psi}(s, a)^\top \mathbf{w}(\tau)
+\end{equation}
+
+where $\bm{\psi}(s, a) \in \mathbb{R}^d$ are the successor features of state-action pair $(s,a)$ and $\mathbf{w}(\tau) \in \mathbb{R}^d$ is the task-dependent weight vector for task $\tau$.
+
+\subsection{Anticipatory Value in Closed Form}
+
+A key advantage of the SF representation is that the anticipatory value becomes computable analytically:
+
+\begin{equation}
+V_{\text{AP}}(s) = \mathbb{E}_{\tau}[Q(s, a^*(s, \tau), \tau)] = \mathbb{E}_{\tau}[\bm{\psi}(s, a^*(s, \tau))^\top \mathbf{w}(\tau)]
+\end{equation}
+
+For a fixed policy that selects $a^*(s, \tau) = \arg\max_a \bm{\psi}(s, a)^\top \mathbf{w}(\tau)$, and if tasks follow a distribution $p(\tau)$ with known expectation $\bar{\mathbf{w}} = \mathbb{E}_{\tau \sim p(\tau)}[\mathbf{w}(\tau)]$, then:
+
+\begin{equation}
+V_{\text{AP}}(s) = \bm{\psi}(s, a^*(s, \bar{\mathbf{w}}))^\top \bar{\mathbf{w}}
+\end{equation}
+
+where $a^*(s, \bar{\mathbf{w}}) = \arg\max_a \bm{\psi}(s, a)^\top \bar{\mathbf{w}}$. This provides a direct closed-form estimate of the degree of future preparedness.
+
+\section{Structured Action Representation}
+
+In the restaurant domain, actions are structured 4-tuples:
+\begin{equation}
+a = (t, x, y, z) = (\text{action\_type}, \text{object1}, \text{location}, \text{object2}),
+\end{equation}
+where valid combinations are induced by state-dependent masks:
+\begin{align}
+t &\in \mathcal{T}(s) \subset \mathcal{A}_{\text{type}} \\
+x &\in \mathcal{X}(s, t) \subset \mathcal{A}_{\text{obj1}} \\
+y &\in \mathcal{Y}(s, t, x) \subset \mathcal{A}_{\text{loc}} \\
+z &\in \mathcal{Z}(s, t, x, y) \subset \mathcal{A}_{\text{obj2}}
+\end{align}
+
+\subsection{Conditional Branching in Successor Features}
+
+To preserve the conditional nature of valid actions, we parameterize the successor feature vector as a conditional cascade:
+
+\begin{align}
+\bm{\psi}(s, a) &= \bm{\psi}_t(s, t) + \bm{\psi}_x(s, t, x) + \bm{\psi}_y(s, t, x, y) + \bm{\psi}_z(s, t, x, y, z)
+\end{align}
+
+Each conditional feature component is computed as:
+
+\begin{align}
+\bm{\psi}_t(s, t) &= f_t(\text{encode}(s), \text{embed}(t)) \\
+\bm{\psi}_x(s, t, x) &= f_x(\text{encode}(s), \text{embed}(t), \text{embed}(x)) \\
+\bm{\psi}_y(s, t, x, y) &= f_y(\text{encode}(s), \text{embed}(t), \text{embed}(x), \text{embed}(y)) \\
+\bm{\psi}_z(s, t, x, y, z) &= f_z(\text{encode}(s), \text{embed}(t), \text{embed}(x), \text{embed}(y), \text{embed}(z))
+\end{align}
+
+where each $f_i$ is a neural network that maps to the $d$-dimensional SF space.
+
+\section{Task Embedding}
+
+The task weight vector is computed from the task specification:
+
+\begin{equation}
+\mathbf{w}(\tau) = f_{\text{task}}(\text{onehot}(\tau))
+\end{equation}
+
+For restaurant tasks with structure $\tau = \{\text{task\_type}, \text{target\_location}, \text{target\_kind}, \text{object\_name}\}$, the one-hot encoding concatenates one-hot vectors for each component:
+
+\begin{equation}
+\text{onehot}(\tau) = [\text{onehot}(\tau_{\text{type}}); \text{onehot}(\tau_{\text{loc}}); \text{onehot}(\tau_{\text{kind}}); \text{onehot}(\tau_{\text{name}})]
+\end{equation}
+
+\section{Bilinear Q-Learning}
+
+The implementation uses a bi-linear approach where both $\bm{\psi}(s, a)$ and $\mathbf{w}(\tau)$ are learned end-to-end with temporal difference losses only. This amounts to minimizing:
+
+\begin{equation}
+\mathcal{L} = \biggl(\bm{\psi}(s, a)^\top \mathbf{w}(\tau) - \Bigl(r + \gamma \cdot \max_{a'} \bm{\psi}_{\text{tgt}}(s', a')^\top \mathbf{w}_{\text{tgt}}(\tau')\Bigr)\biggr)^2
+\end{equation}
+
+where $(s, a, r, s', \tau, \tau')$ is a transition with current and next tasks, and $\bm{\psi}_{\text{tgt}}, \mathbf{w}_{\text{tgt}}$ are target network parameters.
+
+\subsection{Identifiability Note}
+
+The bi-linear parameterization $Q(s, a, \tau) = \bm{\psi}(s, a)^\top \mathbf{w}(\tau)$ has scale ambiguity: $\bm{\psi}$ and $\mathbf{w}$ can be scaled by inverse constants without changing the Q-value. However, with normalized initialization and gradient descent, the algorithm typically learns meaningful feature representations even with this ambiguity. We apply layer normalization to $\mathbf{w}(\tau)$ to help with scaling.
+
+\section{Double DQN with Successor Features}
+
+For stable learning, action selection at bootstrapping follows the Double DQN principle:
+
+\begin{equation}
+a^*_{\text{next}} = \arg\max_{a'} \bm{\psi}_{\text{online}}(s', a')^\top \mathbf{w}_{\text{online}}(\tau')
+\end{equation}
+
+and the target uses:
+\begin{equation}
+y = r + \gamma \cdot \bm{\psi}_{\text{tgt}}(s', a^*_{\text{next}})^\top \mathbf{w}_{\text{tgt}}(\tau')
+\end{equation}
+
+This prevents the online network from inflating both its own successor features and task weights simultaneously.
+
+\end{document}

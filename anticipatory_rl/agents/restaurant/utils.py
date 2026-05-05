@@ -17,4 +17,4 @@ def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:
 def resolve_run_label(args: argparse.Namespace) -> str:
     if args.run_label is not None:
         return args.run_label
-    return "myopic_restaurant" if args.tasks_per_episode <= 1 else "anticipatory_restaurant"
+    return "myopic_restaurant" if getattr(args, "myopic", False) else "anticipatory_restaurant"
