@@ -6,7 +6,7 @@ def select_device() -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        return torch.device("cuda:0")
     return torch.device("cpu")
 
 def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:

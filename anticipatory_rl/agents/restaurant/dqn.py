@@ -86,7 +86,9 @@ def _select_device() -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        # Use an explicit CUDA ordinal so we do not depend on torch's current
+        # device state from launchers that may pre-set an invalid global index.
+        return torch.device("cuda:0")
     return torch.device("cpu")
 
 
