@@ -133,6 +133,32 @@ class SuccessorFeatureNetwork(nn.Module):
         self.object_count = object_count
         self.location_count = location_count
 
+    def _enumerate_valid_actions_np(
+        self,
+        valid_action_type_mask: np.ndarray,
+        valid_object1_mask: np.ndarray,
+        valid_location_mask: np.ndarray,
+        valid_object2_mask: np.ndarray,
+        action_dims: Tuple[int, int, int, int],
+    ) -> List[Dict[str, int]]:
+        """Pure-numpy valid action enumerator (faster per-call than the torch version)."""
+        valid_action_types = np.nonzero(valid_action_type_mask > 0.9)[0]
+        valid_combinations = []
+        for t_idx in valid_action_types:
+            objs = np.nonzero(valid_object1_mask[t_idx] > 0.9)[0]
+            locs = np.nonzero(valid_location_mask[t_idx] > 0.9)[0]
+            for o1 in objs:
+                for loc in locs:
+                    o2s = np.nonzero(valid_object2_mask[t_idx, o1] > 0.9)[0]
+                    for o2 in o2s:
+                        valid_combinations.append({
+                            "action_type": int(t_idx),
+                            "object1": int(o1),
+                            "location": int(loc),
+                            "object2": int(o2),
+                        })
+        return valid_combinations
+
     def _enumerate_valid_actions(
         self,
         valid_action_type_mask: np.ndarray,
@@ -187,6 +213,29 @@ class SuccessorFeatureNetwork(nn.Module):
                             valid_combinations.append(action_combo)
 
         return valid_combinations
+
+    def compute_successor_features_flat(
+        self,
+        states: torch.Tensor,  # [batch, state_dim]
+        action_type_indices: torch.Tensor,  # [batch]
+        object1_indices: torch.Tensor,  # [batch]
+        location_indices: torch.Tensor,  # [batch]
+        object2_indices: torch.Tensor,  # [batch]
+    ) -> torch.Tensor:  # [batch, sf_dim]
+        """Compute SF for a batch with flat tensor action indices (no Python list overhead)."""
+        h = self.encoder(states)  # [batch, hidden_dim]
+
+        action_type_embs = self.action_type_embed(action_type_indices)
+        object1_embs = self.object1_embed(object1_indices)
+        location_embs = self.location_embed(location_indices)
+        object2_embs = self.object2_embed(object2_indices)
+
+        psi_t = self.psi_t_head(torch.cat([h, action_type_embs], dim=-1))
+        psi_x = self.psi_x_head(torch.cat([h, action_type_embs, object1_embs], dim=-1))
+        psi_y = self.psi_y_head(torch.cat([h, action_type_embs, object1_embs, location_embs], dim=-1))
+        psi_z = self.psi_z_head(torch.cat([h, action_type_embs, object1_embs, location_embs, object2_embs], dim=-1))
+
+        return psi_t + psi_x + psi_y + psi_z
 
     def compute_successor_features_batch(
         self,
@@ -472,60 +521,96 @@ def _optimize(
     )
 
     # For each next state, enumerate valid actions and compute max Q'
+    # Fully vectorized (Double DQN): collect all valid actions across the batch
+    # into a single flat list, run one forward pass per network (online + target),
+    # then use segmented argmax / gather per batch item.
     with torch.no_grad():
-        target_q_values = []
+        # Step 1: enumerate valid actions per batch item → flat lists
+        batch_idx_list: List[int] = []  # which batch item each flat action belongs to
+        flat_at: List[int] = []
+        flat_o1: List[int] = []
+        flat_loc: List[int] = []
+        flat_o2: List[int] = []
+        counts_per_item: List[int] = []   # number of valid actions per batch item
+
         for i in range(len(batch)):
-            state = next_states[i:i+1]  # [1, state_dim]
-            w_tgt = next_task_weights_tgt[i:i+1]  # [1, sf_dim] — for evaluation
-            w_online = next_task_weights_online[i:i+1]  # [1, sf_dim] — for argmax
-
-            # Get valid masks for this specific transition
-            valid_action_types = next_valid_action_types[i]
-            valid_obj1 = next_valid_obj1[i]
-            valid_loc = next_valid_loc[i]
-            valid_obj2 = next_valid_obj2[i]
-
-            # Find all valid actions
-            valid_combs = sf_net._enumerate_valid_actions(
-                valid_action_types,
-                valid_obj1,
-                valid_loc,
-                valid_obj2,
-                (len(action_types), len(object_names)+1, len(locations)+1, len(object_names)+1),
+            valid_combs = sf_net._enumerate_valid_actions_np(
+                next_valid_action_types[i],
+                next_valid_obj1[i],
+                next_valid_loc[i],
+                next_valid_obj2[i],
+                (len(action_types), len(object_names) + 1,
+                 len(locations) + 1, len(object_names) + 1),
             )
+            n = len(valid_combs)
+            counts_per_item.append(n)
+            if n > 0:
+                batch_idx_list.extend([i] * n)
+                flat_at.extend(c["action_type"] for c in valid_combs)
+                flat_o1.extend(c["object1"] for c in valid_combs)
+                flat_loc.extend(c["location"] for c in valid_combs)
+                flat_o2.extend(c["object2"] for c in valid_combs)
 
-            if not valid_combs:
-                target_q_values.append(0.0)
-                continue
+        if not flat_at:
+            target_q_values = torch.zeros_like(rewards)
+        else:
+            total_flat = len(flat_at)
+            batch_idx = torch.tensor(batch_idx_list, dtype=torch.long, device=device)
+            counts = torch.tensor(counts_per_item, dtype=torch.long, device=device)
 
-            # Batch ψ_online(s', a) for all valid actions, then argmax
-            state_batch = state.repeat(len(valid_combs), 1)  # [num_valid, state_dim]
-            action_list = [
-                {
-                    "action_type": torch.tensor([c["action_type"]], dtype=torch.long, device=device),
-                    "object1": torch.tensor([c["object1"]], dtype=torch.long, device=device),
-                    "location": torch.tensor([c["location"]], dtype=torch.long, device=device),
-                    "object2": torch.tensor([c["object2"]], dtype=torch.long, device=device),
-                }
-                for c in valid_combs
-            ]
-            # a* = argmax ψ_online(s', a)^T w_online(τ')  (full online, eq. 108)
-            online_sf_batch = sf_net.compute_successor_features_batch(state_batch, action_list)  # [num_valid, sf_dim]
-            online_qs = (online_sf_batch * w_online).sum(dim=1)  # [num_valid]
-            best_idx = torch.argmax(online_qs).item()
-            best_comb = valid_combs[best_idx]
+            # Expanded next_states: each next_state[i] repeated counts[i] times
+            expanded_next = torch.repeat_interleave(next_states, counts, dim=0)  # [total_flat, state_dim]
 
-            # Evaluate with target network: y = ψ_tgt(s', a*)^T w_tgt(τ')
-            target_sf = target_sf_net.compute_successor_features_batch(state, [{
-                "action_type": torch.tensor([best_comb["action_type"]], dtype=torch.long, device=device),
-                "object1": torch.tensor([best_comb["object1"]], dtype=torch.long, device=device),
-                "location": torch.tensor([best_comb["location"]], dtype=torch.long, device=device),
-                "object2": torch.tensor([best_comb["object2"]], dtype=torch.long, device=device),
-            }])[0]
-            target_q = torch.dot(target_sf, w_tgt[0]).item()
-            target_q_values.append(target_q)
+            # Expand task weights similarly
+            expanded_w_online = torch.repeat_interleave(next_task_weights_online, counts, dim=0)
+            expanded_w_tgt = torch.repeat_interleave(next_task_weights_tgt, counts, dim=0)
 
-        target_q_values = torch.tensor(target_q_values, dtype=torch.float32, device=device)
+            # Step 2: single forward pass through ONLINE net → ψ_online(s', a)
+            flat_actions = {
+                "action_type": torch.tensor(flat_at, dtype=torch.long, device=device),
+                "object1": torch.tensor(flat_o1, dtype=torch.long, device=device),
+                "location": torch.tensor(flat_loc, dtype=torch.long, device=device),
+                "object2": torch.tensor(flat_o2, dtype=torch.long, device=device),
+            }
+            online_sf = sf_net.compute_successor_features_flat(
+                expanded_next,
+                flat_actions["action_type"],
+                flat_actions["object1"],
+                flat_actions["location"],
+                flat_actions["object2"],
+            )  # [total_flat, sf_dim]
+            online_qs = (online_sf * expanded_w_online).sum(dim=1)  # [total_flat]
+
+            # Step 3: argmax per batch item (vectorized across batch)
+            num_items = len(batch)
+            valid_mask = counts > 0
+            max_k = int(counts.max())
+            cum_counts = torch.cat([torch.tensor([0], device=device), counts.cumsum(0)])  # [batch+1]
+            seq_idx = torch.arange(total_flat, device=device) - cum_counts[batch_idx]
+            q_pad = torch.full((num_items, max_k), -1e9, device=device)
+            q_pad[batch_idx, seq_idx] = online_qs
+            best_local = q_pad.argmax(dim=1)  # [batch]
+            best_flat_idx = cum_counts[:-1] + best_local  # [batch]
+
+            # Guard: for items with no valid actions, best_flat_idx points into
+            # garbage or OOB. Clamp to 0 — values are discarded below anyway.
+            best_flat_idx = best_flat_idx.clamp(0, max(0, total_flat - 1))
+
+            # Step 4: forward pass through TARGET net for best actions only.
+            # Items with no valid next action get target_q = 0.
+            target_q_values = torch.zeros(num_items, device=device)
+            if valid_mask.any():
+                valid_idx = torch.nonzero(valid_mask).squeeze(-1)
+                target_sf = target_sf_net.compute_successor_features_flat(
+                    next_states[valid_idx],
+                    flat_actions["action_type"][best_flat_idx][valid_idx],
+                    flat_actions["object1"][best_flat_idx][valid_idx],
+                    flat_actions["location"][best_flat_idx][valid_idx],
+                    flat_actions["object2"][best_flat_idx][valid_idx],
+                )  # [num_valid, sf_dim]
+                target_q_values[valid_idx] = (
+                    target_sf * next_task_weights_tgt[valid_idx]
+                ).sum(dim=1)
 
         # Standard TD target: r + γ(1-done) * max_Q'. The done flag controls
         # cross-task bootstrapping: myopic → done=True at every task boundary;
