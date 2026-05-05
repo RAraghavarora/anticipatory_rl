@@ -304,12 +304,13 @@ class AimLogger:
     def track(
         self,
         value: float | int,
+        name: str,
         *,
         step: int | None = None,
         context: Mapping[str, str] | None = None,
     ) -> None:
         if self._run is not None:
-            self._run.track(value, step=step, context=context)
+            self._run.track(value, name, step=step, context=context)
 
     def close(self) -> None:
         if self._run is not None:
@@ -1059,7 +1060,7 @@ def train(args: argparse.Namespace) -> Path:
             })
 
         for metric_name, value in logs.items():
-            aim_logger.track(value, step=global_step, context={"split": "train"})
+            aim_logger.track(value, metric_name, step=global_step, context={"split": "train"})
 
         progress.set_postfix(
             ret=f"{avg_return:.1f}" if recent_returns else "n/a",
