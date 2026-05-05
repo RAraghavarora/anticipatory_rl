@@ -406,7 +406,7 @@ def _optimize(
         next_q = next_q.masked_fill(~has_valid, 0.0)
         target = rewards + (1.0 - dones) * args.gamma * next_q
 
-    loss = nn.functional.mse_loss(q_selected, target)
+    loss = nn.functional.smooth_l1_loss(q_selected, target)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     grad_norm_t = nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
