@@ -140,9 +140,10 @@ python paper_restaurant/scripts/restaurant_multi_seed_infer.py \
 
 ## RL semantics (current)
 
-- `--tasks-per-episode` (training only): controls replay bootstrapping boundary.
+- `--boundary-mode` (training only): controls task-boundary bootstrapping semantics.
+  - `myopic`: successful task completion is terminal for TD bootstrap.
+  - `anticipatory`: successful task completion bootstraps through the next sampled task.
 - `--env-reset-tasks` (training/inference): controls physical world reset cadence.
-  - For anticipatory training, `--env-reset-tasks` must equal `--tasks-per-episode`.
 - `--max-steps-per-task`: timeout threshold per task.
 - On timeout, the system samples a new task **without** resetting the world.
 

@@ -30,7 +30,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 srun python -m anticipatory_rl.agents.restaurant.dqn \
   --run-label restaurant_capacity_anticipatory \
-  --tasks-per-episode 200 \
+  --boundary-mode anticipatory \
   --env-reset-tasks 200 \
   --seed 0
 

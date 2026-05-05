@@ -29,7 +29,7 @@ echo "Stdout: slurm_logs/${SLURM_JOB_NAME}.o${SLURM_JOB_ID}"
 echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 
 srun python -m anticipatory_rl.agents.restaurant.dqn \
-  --run-label branching \
+  --run-label restaurant_capacity_myopic \
   --total-steps 500_000 \
   --replay-size 100_000 \
   --hidden-dim 512 \

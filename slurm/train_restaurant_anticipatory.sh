@@ -28,7 +28,7 @@ source /u/rarora1/ant_env/bin/activate
 
 python -m anticipatory_rl.agents.restaurant.dqn \
   --run-label restaurant_capacity_anticipatory \
-  --tasks-per-episode 200 \
+  --boundary-mode anticipatory \
   --env-reset-tasks 200 \
   --seed 0
 

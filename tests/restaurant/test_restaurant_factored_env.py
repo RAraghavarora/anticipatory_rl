@@ -6,9 +6,12 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
+import numpy as np
+
 from anticipatory_rl.agents.restaurant import dqn as restaurant_dqn
 from anticipatory_rl.envs.restaurant.env import (
     ACTION_TYPE_TO_INDEX,
+    ACTION_TYPES,
     CONFIG_PATH,
     RestaurantObjectState,
     RestaurantState,
@@ -63,6 +66,20 @@ class RestaurantFactoredEnvTests(unittest.TestCase):
             ),
         )
 
+    def test_flat_action_catalog_uses_only_move_pick_place(self) -> None:
+        env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
+        _, info = env.reset(seed=0)
+        catalog = restaurant_dqn.FlatActionCatalog(env)
+
+        self.assertEqual(catalog.num_actions, env.num_objects + (2 * env.num_locations))
+        flat_mask = catalog.project_mask(restaurant_dqn._extract_masks(info))
+        self.assertEqual(flat_mask.shape, (catalog.num_actions,))
+        self.assertGreater(int(np.sum(flat_mask > 0.0)), 0)
+
+        allowed = {"move", "pick", "place"}
+        for action in catalog.actions:
+            self.assertIn(ACTION_TYPES[action.action_type], allowed)
+
     def test_drain_mask_requires_held_water_at_fountain(self) -> None:
         env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
         env.reset(seed=0)
@@ -97,6 +114,7 @@ class RestaurantFactoredEnvTests(unittest.TestCase):
                     epsilon_decay=10,
                     target_update=1,
                     tau=1.0,
+                    boundary_mode="myopic",
                     max_grad_norm=1.0,
                     tasks_per_episode=1,
                     env_reset_tasks=1,

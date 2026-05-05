@@ -27,6 +27,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
 source /u/rarora1/ant_env/bin/activate
 
 python -m anticipatory_rl.agents.restaurant.dqn \
-  --run-label restaurant_capacity_myopic
+  --run-label restaurant_capacity_myopic \
+  --boundary-mode myopic
 
 echo "Job finished at $(date -Is)"
