@@ -31,7 +31,6 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 # Run training with myopic mode (no bootstrapping at task success)
 srun python -m anticipatory_rl.agents.restaurant.sf_dqn \
     --total-steps 500000 \
-    --sf-dim 64 \
     --myopic \
     --max-steps-per-task 24 \
     --output-name "restaurant_sf_myopic.pt" \

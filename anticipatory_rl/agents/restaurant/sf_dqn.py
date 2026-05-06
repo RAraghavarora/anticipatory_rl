@@ -126,8 +126,14 @@ class SuccessorFeatureNetwork(nn.Module):
             nn.Linear(len(task_types) + len(locations) + len(object_kinds) + len(object_names), 128),  # task one-hot dim
             nn.ReLU(),
             nn.Linear(128, sf_dim),
-            nn.LayerNorm(sf_dim),  # Normalize to maintain scale stability
         )
+
+        # Break gradient symmetry: zero-init the output layers of ψₓ, ψ_y, ψ_z
+        # so ψ_t carries the initial coarse signal while other heads gradually "wake up"
+        for head in [self.psi_x_head, self.psi_y_head, self.psi_z_head]:
+            final_linear = head[-1]
+            nn.init.zeros_(final_linear.weight)
+            nn.init.zeros_(final_linear.bias)
 
         self.sf_dim = sf_dim
         self.action_type_count = action_type_count
@@ -1204,7 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replay-size", type=int, default=50_000, help="Experience replay buffer size")
     parser.add_argument("--batch-size", type=int, default=128, help="Minibatch size for training")
     parser.add_argument("--hidden-dim", type=int, default=256, help="Hidden dimension size for networks")
-    parser.add_argument("--sf-dim", type=int, default=64, help="Successor feature dimension (size of w vector)")
+    parser.add_argument("--sf-dim", type=int, default=16, help="Successor feature dimension (size of w vector)")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--epsilon-start", type=float, default=1.0, help="Starting epsilon for exploration")
@@ -1212,7 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epsilon-decay", type=int, default=100_000, help="Steps to decay epsilon")
     parser.add_argument("--target-update", type=int, default=1_000, help="Steps between target network updates")
     parser.add_argument("--tau", type=float, default=1.0, help="Polyak averaging factor (tau=1.0 means hard update)")
-    parser.add_argument("--max-grad-norm", type=float, default=1.0, help="Max gradient norm for clipping")
+    parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Max gradient norm for clipping")
     parser.add_argument("--task-sequence-length", type=int, default=200, help="Physical reset interval in task attempts.")
     parser.add_argument("--myopic", action="store_true", help="Myopic mode: don't bootstrap at task boundaries")
     parser.add_argument(
@@ -1221,15 +1227,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum primitive steps between resets; <=0 disables."
     )
     parser.add_argument("--max-steps-per-task", type=int, default=24, help="Max steps per individual task")
-    parser.add_argument("--success-reward", type=float, default=15.0, help="Reward for completing a task")
-    parser.add_argument("--invalid-action-penalty", type=float, default=6.0, help="Penalty for invalid actions")
-    parser.add_argument("--travel-cost-scale", type=float, default=25.0, help="Travel cost scale factor")
-    parser.add_argument("--pick-cost", type=float, default=25.0, help="Cost of pick actions")
-    parser.add_argument("--place-cost", type=float, default=25.0, help="Cost of place actions")
-    parser.add_argument("--wash-cost", type=float, default=25.0, help="Cost of wash actions")
-    parser.add_argument("--fill-cost", type=float, default=25.0, help="Cost of fill actions")
-    parser.add_argument("--brew-cost", type=float, default=25.0, help="Cost of brew actions")
-    parser.add_argument("--fruit-cost", type=float, default=25.0, help="Cost of fruit action")
+    parser.add_argument("--success-reward", type=float, default=100.0, help="Reward for completing a task")
+    parser.add_argument("--invalid-action-penalty", type=float, default=0.5, help="Penalty for invalid actions")
+    parser.add_argument("--travel-cost-scale", type=float, default=1.0, help="Travel cost scale factor")
+    parser.add_argument("--pick-cost", type=float, default=1.0, help="Cost of pick actions")
+    parser.add_argument("--place-cost", type=float, default=1.0, help="Cost of place actions")
+    parser.add_argument("--wash-cost", type=float, default=1.0, help="Cost of wash actions")
+    parser.add_argument("--fill-cost", type=float, default=1.0, help="Cost of fill actions")
+    parser.add_argument("--brew-cost", type=float, default=1.0, help="Cost of brew actions")
+    parser.add_argument("--fruit-cost", type=float, default=1.0, help="Cost of fruit action")
     parser.add_argument(
         "--config-path",
         type=Path,
