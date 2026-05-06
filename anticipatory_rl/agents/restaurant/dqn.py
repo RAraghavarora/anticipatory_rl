@@ -264,21 +264,30 @@ class ReplayBuffer:
 
 
 class RestaurantQNetwork(nn.Module):
-    def __init__(self, input_dim: int, num_actions: int, hidden_dim: int = 256) -> None:
+    def __init__(self, input_dim: int, num_actions: int, hidden_dim: int = 1024) -> None:
         super().__init__()
+        # Upgraded 4-layer MLP for high-dimensional relational flat vectors
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 2),
+            nn.ReLU(),
         )
-        self.q_head = nn.Linear(hidden_dim, num_actions)
+        self.v_head = nn.Linear(hidden_dim // 2, 1)
+        self.a_head = nn.Linear(hidden_dim // 2, num_actions)
 
     def encode(self, states: torch.Tensor) -> torch.Tensor:
         return self.encoder(states)
 
     def forward(self, states: torch.Tensor) -> torch.Tensor:
-        return self.q_head(self.encode(states))
+        features = self.encode(states)
+        v = self.v_head(features)
+        a = self.a_head(features)
+        return v + a - a.mean(dim=-1, keepdim=True)
 
 
 def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[str, object]) -> Dict[str, int]:
