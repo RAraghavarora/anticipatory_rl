@@ -1,0 +1,35 @@
+locations:
+  - name: home
+    coord: [0, 0]
+    room: kitchen
+  - name: shelf
+    coord: [2, 0]
+    room: kitchen
+  - name: table_a
+    coord: [4, 0]
+    room: serving
+  - name: table_b
+    coord: [4, 2]
+    room: serving
+
+object_kinds: [item, cup]
+
+object_specs:
+  - {name: apple, kind: item}
+  - {name: banana, kind: item}
+  - {name: cup, kind: cup}
+
+contents: [empty]
+
+task_types: [pick_place]
+
+service_locations: [table_a, table_b]
+
+reset_location_distribution:
+  item:
+    shelf: 1.0
+  cup:
+    shelf: 1.0
+
+paper2_cost:
+  enabled: false
