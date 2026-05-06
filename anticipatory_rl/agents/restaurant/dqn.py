@@ -100,9 +100,10 @@ def _select_device() -> torch.device:
 
 
 def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:
-    if decay <= 0:
+    """Linear decay from start to final, reaching final at step == decay."""
+    if step >= decay:
         return final
-    return final + (start - final) * np.exp(-float(step) / float(decay))
+    return start + (final - start) * (float(step) / float(decay))
 
 
 def _resolve_run_label(args: argparse.Namespace) -> str:
@@ -935,12 +936,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
     parser.add_argument("--epsilon-final", type=float, default=0.05)
     parser.add_argument("--epsilon-decay", type=int, default=100_000)
+    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--target-update", type=int, default=1_000)
-    parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--tasks-per-episode", type=int, default=1, help="Legacy arg retained for compatibility.")
     parser.add_argument("--env-reset-tasks", type=int, default=200, help="Physical env reset interval in tasks.")
