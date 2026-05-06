@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 from collections import deque
 from dataclasses import dataclass
@@ -965,7 +966,6 @@ def train(args: argparse.Namespace) -> Path:
 
     recent_returns: Deque[float] = deque(maxlen=100)
     recent_success: Deque[int] = deque(maxlen=100)
-    recent_auto: Deque[int] = deque(maxlen=100)
     loss_history: List[float] = []
     step_reward_history: List[float] = []
     task_records: List[Dict[str, float | int | bool | str | None]] = []
@@ -1087,7 +1087,6 @@ def train(args: argparse.Namespace) -> Path:
                 tasks_completed += 1
             recent_returns.append(task_return)
             recent_success.append(1 if success else 0)
-            recent_auto.append(1 if current_task_auto_satisfied else 0)
             task_info = next_info.get("task", {})
             task_records.append({
                 "task_number": total_tasks,
@@ -1123,14 +1122,12 @@ def train(args: argparse.Namespace) -> Path:
         # Logging
         avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
         success_rate = float(np.mean(recent_success)) if recent_success else 0.0
-        auto_rate = float(np.mean(recent_auto)) if recent_auto else 0.0
         avg_loss = float(np.mean(loss_history[-100:])) if loss_history else 0.0
 
         # Log metrics
         logs = {
             "train/return": avg_return,
             "train/success_rate": success_rate,
-            "train/auto_satisfaction_rate": auto_rate,
             "train/epsilon": epsilon,
             "train/loss": avg_loss,
             "train/tasks_completed": tasks_completed,
@@ -1150,7 +1147,6 @@ def train(args: argparse.Namespace) -> Path:
         progress.set_postfix(
             ret=f"{avg_return:.1f}" if recent_returns else "n/a",
             success=f"{success_rate:.2f}",
-            auto=f"{auto_rate:.2f}",
             loss=f"{avg_loss:.3f}" if loss_history else "n/a",
             tasks=tasks_completed,
         )
@@ -1198,6 +1194,7 @@ def train(args: argparse.Namespace) -> Path:
         print(f"[train] Skipping post-train inference due to error: {e}")
 
     aim_logger.close()
+    os.sync()
     return output_path
 
 
