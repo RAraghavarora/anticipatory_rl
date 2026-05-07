@@ -59,12 +59,42 @@ class ReplayBuffer:
         return random.sample(self.memory, batch_size)
 
 
+@dataclass
+class _ObsLayout:
+    """Precomputed slice indices for parsing the flat one-hot observation."""
+    num_locations: int
+    num_objects: int
+    num_kinds: int
+    num_contents: int
+    num_task_types: int
+
+    def __post_init__(self):
+        o = 0
+        self.agent_loc_slice = slice(o, o + self.num_locations); o += self.num_locations
+        o += 1  # skip holding_present (1 scalar, not used by factored encoder)
+        self.held_vec_slice = slice(o, o + self.num_objects + 1); o += self.num_objects + 1
+        self.obj_slices: List[Tuple[slice, slice, slice, slice, slice]] = []
+        for _ in range(self.num_objects):
+            loc_s = slice(o, o + self.num_locations + 1); o += self.num_locations + 1
+            dirty_s = slice(o, o + 1); o += 1
+            fill_s = slice(o, o + self.num_contents + 1); o += self.num_contents + 1
+            cont_s = slice(o, o + self.num_objects + 1); o += self.num_objects + 1
+            kind_s = slice(o, o + self.num_kinds); o += self.num_kinds
+            self.obj_slices.append((loc_s, dirty_s, fill_s, cont_s, kind_s))
+        self.bread_slice = slice(o, o + self.num_objects); o += self.num_objects
+        self.task_type_slice = slice(o, o + self.num_task_types); o += self.num_task_types
+        self.target_loc_slice = slice(o, o + self.num_locations + 1); o += self.num_locations + 1
+        self.target_kind_slice = slice(o, o + self.num_kinds + 1); o += self.num_kinds + 1
+        self.target_obj_slice = slice(o, o + self.num_objects + 1); o += self.num_objects + 1
+        self._total = o
+
+
 class SuccessorFeatureNetwork(nn.Module):
-    """Successor Feature network with structured action embeddings."""
+    """Successor Feature network with factored entity-aware encoder."""
 
     def __init__(
         self,
-        obs_dim: int,
+        obs_dim: int,  # Validate that _ObsLayout's computed total matches this
         action_type_count: int,
         object_count: int,
         location_count: int,
@@ -73,72 +103,146 @@ class SuccessorFeatureNetwork(nn.Module):
         action_types: Tuple[str, ...],
         object_kinds: Tuple[str, ...],
         task_types: Tuple[str, ...],
-        sf_dim: int = 64,
-        hidden_dim: int = 256
+        num_contents: int = 5,
+        sf_dim: int = 16,
+        hidden_dim: int = 256,
+        embed_dim: int = 64,
     ) -> None:
         super().__init__()
+        n_kinds = len(object_kinds)
+        n_contents = num_contents
 
-        # Shared state encoder
-        self.encoder = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim),
+        # ── Factored observation parser ──
+        self._parse = _ObsLayout(
+            num_locations=location_count,
+            num_objects=object_count,
+            num_kinds=n_kinds,
+            num_contents=n_contents,
+            num_task_types=len(task_types),
+        )
+        computed = getattr(self._parse, '_total', 0)
+        if computed != obs_dim:
+            raise ValueError(
+                f"_ObsLayout computed total dim {computed}, but obs_dim={obs_dim} was passed. "
+                "The layout parsing does not match the observation space."
+            )
+        self.agent_loc_embed = nn.Embedding(location_count, embed_dim)
+        self.holding_embed = nn.Embedding(object_count + 1, embed_dim)
+        self.object_loc_embed = nn.Embedding(location_count + 1, embed_dim)
+        self.object_kind_embed = nn.Embedding(n_kinds, embed_dim)
+        self.contained_embed = nn.Embedding(object_count + 1, embed_dim)
+        self.dirty_proj = nn.Sequential(nn.Linear(1, embed_dim // 2), nn.ReLU(), nn.Linear(embed_dim // 2, embed_dim))
+        self.fill_proj = nn.Sequential(nn.Linear(n_contents + 1, embed_dim // 2), nn.ReLU(), nn.Linear(embed_dim // 2, embed_dim))
+        self.task_type_embed = nn.Embedding(len(task_types), embed_dim)
+        self.task_loc_embed = nn.Embedding(location_count + 1, embed_dim)
+        self.task_obj_embed = nn.Embedding(object_count + 1, embed_dim)
+        self.task_kind_embed = nn.Embedding(n_kinds + 1, embed_dim)
+
+        # ── Cross-attention: objects attend to task aspects ──
+        self.attn_query = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.attn_key = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.attn_value = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.attn_scale = embed_dim ** 0.5
+
+        # ── Pool MLP: agent_emb + task_emb + mean(pooled_objects) → hidden ──
+        self.pool_mlp = nn.Sequential(
+            nn.Linear(embed_dim * 3, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
 
-        # Embeddings for different action components
-        self.action_type_embed = nn.Embedding(action_type_count, 64)
-        self.object1_embed = nn.Embedding(object_count + 1, 64)  # +1 for None token
-        self.location_embed = nn.Embedding(location_count + 1, 64)  # +1 for None token
-        self.object2_embed = nn.Embedding(object_count + 1, 64)  # +1 for None token
+        # Embeddings for action components
+        self.action_type_embed = nn.Embedding(action_type_count, embed_dim)
+        self.object1_embed = nn.Embedding(object_count + 1, embed_dim)
+        self.location_embed = nn.Embedding(location_count + 1, embed_dim)
+        self.object2_embed = nn.Embedding(object_count + 1, embed_dim)
 
-        # Conditional branch SF heads - each produces sf_dim dimensional vector
-        # psi_t(s, t) - SF feature for action type (conditions on state + action_type)
+        # Conditional branch SF heads
         self.psi_t_head = nn.Sequential(
-            nn.Linear(hidden_dim + 64, hidden_dim//2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, sf_dim),
+            nn.Linear(hidden_dim + embed_dim, hidden_dim // 2), nn.ReLU(),
+            nn.Linear(hidden_dim // 2, sf_dim),
         )
-
-        # psi_x(s, t, x) - SF feature for first argument
         self.psi_x_head = nn.Sequential(
-            nn.Linear(hidden_dim + 64 + 64, hidden_dim//2),  # state + action_type_emb + object1_emb
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, sf_dim),
+            nn.Linear(hidden_dim + embed_dim * 2, hidden_dim // 2), nn.ReLU(),
+            nn.Linear(hidden_dim // 2, sf_dim),
         )
-
-        # psi_y(s, t, x, y) - SF feature for second argument (location)
         self.psi_y_head = nn.Sequential(
-            nn.Linear(hidden_dim + 64 + 64 + 64, hidden_dim//2),  # state+type+obj1+loc
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, sf_dim),
+            nn.Linear(hidden_dim + embed_dim * 3, hidden_dim // 2), nn.ReLU(),
+            nn.Linear(hidden_dim // 2, sf_dim),
         )
-
-        # psi_z(s, t, x, y, z) - SF feature for third argument
         self.psi_z_head = nn.Sequential(
-            nn.Linear(hidden_dim + 64 + 64 + 64 + 64, hidden_dim//2),  # state+type+obj1+loc+obj2
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, sf_dim),
+            nn.Linear(hidden_dim + embed_dim * 4, hidden_dim // 2), nn.ReLU(),
+            nn.Linear(hidden_dim // 2, sf_dim),
         )
 
-        # Task embedding head
+        # Task weight head
+        task_onehot_dim = len(task_types) + len(locations) + len(object_kinds) + len(object_names)
         self.task_head = nn.Sequential(
-            nn.Linear(len(task_types) + len(locations) + len(object_kinds) + len(object_names), 128),  # task one-hot dim
-            nn.ReLU(),
+            nn.Linear(task_onehot_dim, 128), nn.ReLU(),
             nn.Linear(128, sf_dim),
         )
 
-        # Break gradient symmetry: zero-init the output layers of ψₓ, ψ_y, ψ_z
-        # so ψ_t carries the initial coarse signal while other heads gradually "wake up"
+        # Break gradient symmetry
         for head in [self.psi_x_head, self.psi_y_head, self.psi_z_head]:
-            final_linear = head[-1]
-            nn.init.zeros_(final_linear.weight)
-            nn.init.zeros_(final_linear.bias)
+            nn.init.zeros_(head[-1].weight)
+            nn.init.zeros_(head[-1].bias)
 
         self.sf_dim = sf_dim
         self.action_type_count = action_type_count
         self.object_count = object_count
         self.location_count = location_count
+
+    def _encode_state(self, obs: torch.Tensor) -> torch.Tensor:
+        """Factored entity-aware encoder: entities → cross-attention → pooling."""
+        L = self._parse
+
+        # Parse flat obs → indices
+        agent_loc_idx = obs[:, L.agent_loc_slice].argmax(dim=1)
+        holding_idx = obs[:, L.held_vec_slice].argmax(dim=1)
+        task_type_idx = obs[:, L.task_type_slice].argmax(dim=1)
+        tgt_loc_idx = obs[:, L.target_loc_slice].argmax(dim=1)
+        tgt_kind_idx = obs[:, L.target_kind_slice].argmax(dim=1)
+        tgt_obj_idx = obs[:, L.target_obj_slice].argmax(dim=1)
+
+        # Agent embedding
+        agent_emb = self.agent_loc_embed(agent_loc_idx) + self.holding_embed(holding_idx)  # [B, E]
+
+        # Task embeddings — kept separate as MHA keys so objects can attend
+        # selectively to different task aspects (what, where, which object, what kind).
+        task_keys = torch.stack([
+            self.task_type_embed(task_type_idx),
+            self.task_loc_embed(tgt_loc_idx),
+            self.task_obj_embed(tgt_obj_idx),
+            self.task_kind_embed(tgt_kind_idx),
+        ], dim=1)  # [B, 4, E]
+        task_emb = task_keys.sum(dim=1)  # [B, E] — pooled for the concat path
+
+        # Object embeddings
+        obj_embs = []
+        for loc_s, dirty_s, fill_s, cont_s, kind_s in L.obj_slices:
+            emb = (
+                self.object_loc_embed(obs[:, loc_s].argmax(dim=1))
+                + self.object_kind_embed(obs[:, kind_s].argmax(dim=1))
+                + self.contained_embed(obs[:, cont_s].argmax(dim=1))
+                + self.dirty_proj(obs[:, dirty_s])
+                + self.fill_proj(obs[:, fill_s])
+            )  # [B, E]
+            obj_embs.append(emb)
+        obj_tokens = torch.stack(obj_embs, dim=1)  # [B, N_obj, E]
+
+        # Cross-attention: objects attend to the 4 task aspects
+        Q = self.attn_query(obj_tokens)       # [B, N_obj, E]
+        K = self.attn_key(task_keys)          # [B, 4, E]
+        V = self.attn_value(task_keys)        # [B, 4, E]
+        attn_weights = (Q @ K.transpose(-2, -1)) / self.attn_scale  # [B, N_obj, 4]
+        attn_weights = torch.softmax(attn_weights, dim=-1)
+        obj_attn = attn_weights @ V  # [B, N_obj, E]
+        pooled = obj_attn.mean(dim=1)  # [B, E]
+
+        # Combine and project
+        combined = torch.cat([agent_emb, task_emb, pooled], dim=-1)  # [B, 3E]
+        return self.pool_mlp(combined)  # [B, hidden_dim]
 
     def _enumerate_valid_actions_np(
         self,
@@ -230,7 +334,7 @@ class SuccessorFeatureNetwork(nn.Module):
         object2_indices: torch.Tensor,  # [batch]
     ) -> torch.Tensor:  # [batch, sf_dim]
         """Compute SF for a batch with flat tensor action indices (no Python list overhead)."""
-        h = self.encoder(states)  # [batch, hidden_dim]
+        h = self._encode_state(states)  # [batch, hidden_dim]
 
         action_type_embs = self.action_type_embed(action_type_indices)
         object1_embs = self.object1_embed(object1_indices)
@@ -253,7 +357,7 @@ class SuccessorFeatureNetwork(nn.Module):
         batch_size = states.shape[0]
 
         # Encode states
-        h = self.encoder(states)  # [batch, hidden_dim]
+        h = self._encode_state(states)  # [batch, hidden_dim]
 
         # Prepare action embeddings for the batch (squeeze dim=1 since each component is a scalar)
         action_type_indices = torch.cat([a["action_type"] for a in actions])  # [batch]
@@ -286,7 +390,7 @@ class SuccessorFeatureNetwork(nn.Module):
 
         if state is not None and action is not None:
             # Compute successor features ψ(s, a)
-            h = self.encoder(state)
+            h = self._encode_state(state)
             action_type_emb = self.action_type_embed(action["action_type"])
             object1_emb = self.object1_embed(action["object1"])
             location_emb = self.location_embed(action["location"])
@@ -712,6 +816,7 @@ def _run_post_train_inference(
         action_types=action_types,
         object_kinds=object_kinds,
         task_types=task_types,
+        num_contents=len(env.contents),
         sf_dim=args.sf_dim,
         hidden_dim=args.hidden_dim,
     ).to(device)
@@ -934,6 +1039,7 @@ def train(args: argparse.Namespace) -> Path:
         action_types=action_types,
         object_kinds=object_kinds,
         task_types=task_types,
+        num_contents=len(env.contents),
         sf_dim=args.sf_dim,
         hidden_dim=args.hidden_dim,
     ).to(device)
@@ -948,6 +1054,7 @@ def train(args: argparse.Namespace) -> Path:
         action_types=action_types,
         object_kinds=object_kinds,
         task_types=task_types,
+        num_contents=len(env.contents),
         sf_dim=args.sf_dim,
         hidden_dim=args.hidden_dim,
     ).to(device)
