@@ -269,12 +269,16 @@ class RestaurantQNetwork(nn.Module):
         # Upgraded 4-layer MLP for high-dimensional relational flat vectors
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
             nn.ReLU(),
         )
         self.v_head = nn.Linear(hidden_dim // 2, 1)
