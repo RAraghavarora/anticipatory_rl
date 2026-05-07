@@ -1,0 +1,43 @@
+# Minimal restaurant environment for debugging SF-DQN
+# Only the essentials needed to solve a single pick-place task
+
+locations:
+  - name: kitchen_counter
+    coord: [1, 1]
+  - name: table_right
+    coord: [13, 5]
+
+object_kinds:
+  - cup
+  - mug
+
+contents:
+  - empty
+  - water
+  - coffee
+
+# Only one task type to simplify credit assignment
+task_types:
+  - pick_place
+
+# Two objects: always one away from its target after a pick-place success
+object_specs:
+  - name: mug_red
+    kind: mug
+  - name: cup_small
+    kind: cup
+
+# Task distribution: only pick_place tasks
+task_distribution:
+  pick_place: 1.0
+
+# Success reward and costs (already rebalanced in code)
+success_reward: 100.0
+travel_cost_scale: 1.0
+pick_cost: 1.0
+place_cost: 1.0
+invalid_action_penalty: 0.5
+
+# Paper2 cost configuration (optional, can be disabled)
+paper2_cost:
+  enabled: false
