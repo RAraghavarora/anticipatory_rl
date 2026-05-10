@@ -10,6 +10,7 @@ keyconfig.py
 runs/
 *.mp4
 *.gif
+slurm_logs*
 
 # Planner outputs
 sas_plan*
