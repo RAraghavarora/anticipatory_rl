@@ -23,6 +23,7 @@ cd /home/aurora/raghav/raghav/anticipatory_rl
 # Run training with anticipatory mode (bootstrapping at task success)
 python -m anticipatory_rl.agents.restaurant.sf_dqn \
     --total-steps 500000 \
+    --sf-dim 64 \
     --max-steps-per-task 24 \
     --output-name "restaurant_sf_anticipatory.pt" \
     --run-label "sf_anticipatory_$(date +%Y%m%d_%H%M%S)"

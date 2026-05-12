@@ -32,6 +32,7 @@ echo "Stderr: slurm_logs/${SLURM_JOB_NAME}.e${SLURM_JOB_ID}"
 srun python -m anticipatory_rl.agents.restaurant.sf_dqn \
     --total-steps 500000 \
     --myopic \
+    --sf-dim 64 \
     --max-steps-per-task 24 \
     --output-name "restaurant_sf_myopic.pt" \
     --run-label "sf_myopic_$(date +%Y%m%d_%H%M%S)"

@@ -104,7 +104,7 @@ class SuccessorFeatureNetwork(nn.Module):
         object_kinds: Tuple[str, ...],
         task_types: Tuple[str, ...],
         num_contents: int = 5,
-        sf_dim: int = 16,
+        sf_dim: int = 64,
         hidden_dim: int = 256,
         embed_dim: int = 64,
     ) -> None:
@@ -133,12 +133,13 @@ class SuccessorFeatureNetwork(nn.Module):
         self.contained_embed = nn.Embedding(object_count + 1, embed_dim)
         self.dirty_proj = nn.Sequential(nn.Linear(1, embed_dim // 2), nn.ReLU(), nn.Linear(embed_dim // 2, embed_dim))
         self.fill_proj = nn.Sequential(nn.Linear(n_contents + 1, embed_dim // 2), nn.ReLU(), nn.Linear(embed_dim // 2, embed_dim))
+        self.obj_embed_proj = nn.Linear(5 * embed_dim, embed_dim)
         self.task_type_embed = nn.Embedding(len(task_types), embed_dim)
         self.task_loc_embed = nn.Embedding(location_count + 1, embed_dim)
         self.task_obj_embed = nn.Embedding(object_count + 1, embed_dim)
         self.task_kind_embed = nn.Embedding(n_kinds + 1, embed_dim)
 
-        # ── Cross-attention: objects attend to task aspects ──
+        # ── Cross-attention ──
         self.attn_query = nn.Linear(embed_dim, embed_dim, bias=False)
         self.attn_key = nn.Linear(embed_dim, embed_dim, bias=False)
         self.attn_value = nn.Linear(embed_dim, embed_dim, bias=False)
@@ -151,6 +152,8 @@ class SuccessorFeatureNetwork(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
+        self.h_norm = nn.LayerNorm(hidden_dim)
+        self.sf_norm = nn.LayerNorm(sf_dim)
 
         # Embeddings for action components
         self.action_type_embed = nn.Embedding(action_type_count, embed_dim)
@@ -183,11 +186,6 @@ class SuccessorFeatureNetwork(nn.Module):
             nn.Linear(128, sf_dim),
         )
 
-        # Break gradient symmetry
-        for head in [self.psi_x_head, self.psi_y_head, self.psi_z_head]:
-            nn.init.zeros_(head[-1].weight)
-            nn.init.zeros_(head[-1].bias)
-
         self.sf_dim = sf_dim
         self.action_type_count = action_type_count
         self.object_count = object_count
@@ -208,41 +206,47 @@ class SuccessorFeatureNetwork(nn.Module):
         # Agent embedding
         agent_emb = self.agent_loc_embed(agent_loc_idx) + self.holding_embed(holding_idx)  # [B, E]
 
-        # Task embeddings — kept separate as MHA keys so objects can attend
-        # selectively to different task aspects (what, where, which object, what kind).
+        # Task embeddings — separate queries for cross-attending over objects
         task_keys = torch.stack([
             self.task_type_embed(task_type_idx),
             self.task_loc_embed(tgt_loc_idx),
             self.task_obj_embed(tgt_obj_idx),
             self.task_kind_embed(tgt_kind_idx),
         ], dim=1)  # [B, 4, E]
-        task_emb = task_keys.sum(dim=1)  # [B, E] — pooled for the concat path
 
         # Object embeddings
         obj_embs = []
         for loc_s, dirty_s, fill_s, cont_s, kind_s in L.obj_slices:
             emb = (
-                self.object_loc_embed(obs[:, loc_s].argmax(dim=1))
-                + self.object_kind_embed(obs[:, kind_s].argmax(dim=1))
-                + self.contained_embed(obs[:, cont_s].argmax(dim=1))
-                + self.dirty_proj(obs[:, dirty_s])
-                + self.fill_proj(obs[:, fill_s])
+                self.obj_embed_proj(
+                    torch.cat([
+                        self.object_loc_embed(obs[:, loc_s].argmax(dim=1)),
+                        self.object_kind_embed(obs[:, kind_s].argmax(dim=1)),
+                        self.contained_embed(obs[:, cont_s].argmax(dim=1)),
+                        self.dirty_proj(obs[:, dirty_s]),
+                        self.fill_proj(obs[:, fill_s]),
+                    ], dim=-1)
+                )
             )  # [B, E]
             obj_embs.append(emb)
         obj_tokens = torch.stack(obj_embs, dim=1)  # [B, N_obj, E]
 
-        # Cross-attention: objects attend to the 4 task aspects
-        Q = self.attn_query(obj_tokens)       # [B, N_obj, E]
-        K = self.attn_key(task_keys)          # [B, 4, E]
-        V = self.attn_value(task_keys)        # [B, 4, E]
-        attn_weights = (Q @ K.transpose(-2, -1)) / self.attn_scale  # [B, N_obj, 4]
+        # Cross-attention: task attends to objects (which objects matter?)
+        Q = self.attn_query(task_keys)         # [B, 4, E]
+        K = self.attn_key(obj_tokens)          # [B, N_obj, E]
+        V = self.attn_value(obj_tokens)        # [B, N_obj, E]
+        attn_weights = (Q @ K.transpose(-2, -1)) / self.attn_scale  # [B, 4, N_obj]
         attn_weights = torch.softmax(attn_weights, dim=-1)
-        obj_attn = attn_weights @ V  # [B, N_obj, E]
-        pooled = obj_attn.mean(dim=1)  # [B, E]
+        task_out = attn_weights @ V            # [B, 4, E]
+        task_emb = task_out.mean(dim=1)        # [B, E]
+
+        # Weighted-sum pool over objects using attention weights (task-conditioned)
+        obj_pool_weights = attn_weights.mean(dim=1)                   # [B, N_obj]
+        pooled = (obj_pool_weights.unsqueeze(-1) * obj_tokens).sum(dim=1)  # [B, E]
 
         # Combine and project
         combined = torch.cat([agent_emb, task_emb, pooled], dim=-1)  # [B, 3E]
-        return self.pool_mlp(combined)  # [B, hidden_dim]
+        return self.h_norm(self.pool_mlp(combined))  # [B, hidden_dim]
 
     def _enumerate_valid_actions_np(
         self,
@@ -346,7 +350,7 @@ class SuccessorFeatureNetwork(nn.Module):
         psi_y = self.psi_y_head(torch.cat([h, action_type_embs, object1_embs, location_embs], dim=-1))
         psi_z = self.psi_z_head(torch.cat([h, action_type_embs, object1_embs, location_embs, object2_embs], dim=-1))
 
-        return psi_t + psi_x + psi_y + psi_z
+        return self.sf_norm(psi_t + psi_x + psi_y + psi_z)
 
     def compute_successor_features_batch(
         self,
@@ -378,8 +382,7 @@ class SuccessorFeatureNetwork(nn.Module):
 
         # Combine them into full SF (element-wise sum)
         sf = psi_t + psi_x + psi_y + psi_z  # [batch, sf_dim]
-
-        return sf
+        return self.sf_norm(sf)
 
     def forward(
         self,
@@ -401,7 +404,7 @@ class SuccessorFeatureNetwork(nn.Module):
             psi_y = self.psi_y_head(torch.cat([h, action_type_emb, object1_emb, location_emb], dim=-1))
             psi_z = self.psi_z_head(torch.cat([h, action_type_emb, object1_emb, location_emb, object2_emb], dim=-1))
 
-            return psi_t + psi_x + psi_y + psi_z
+            return self.sf_norm(psi_t + psi_x + psi_y + psi_z)
         else:
             raise ValueError("Must provide state and action for SF computation")
 
@@ -571,7 +574,7 @@ def _optimize(
     locations: Tuple[str, ...],
     object_names: Tuple[str, ...],
     object_kinds: Tuple[str, ...],
-) -> float | None:
+) -> Tuple[float, float, float] | None:
     if len(replay) < args.batch_size:
         return None
 
@@ -736,7 +739,7 @@ def _optimize(
     nn.utils.clip_grad_norm_(sf_net.parameters(), args.max_grad_norm)
     optimizer.step()
 
-    return float(loss.item())
+    return float(loss.item()), float(current_q_values.mean().item()), float(targets.mean().item())
 
 
 def _classify_pick_place_failure(
@@ -1080,6 +1083,8 @@ def train(args: argparse.Namespace) -> Path:
     recent_returns: Deque[float] = deque(maxlen=100)
     recent_success: Deque[int] = deque(maxlen=100)
     loss_history: List[float] = []
+    q_history: List[float] = []
+    target_history: List[float] = []
     step_reward_history: List[float] = []
     task_records: List[Dict[str, float | int | bool | str | None]] = []
 
@@ -1174,13 +1179,16 @@ def train(args: argparse.Namespace) -> Path:
         )
         replay.push(transition)
 
-        loss_value = _optimize(
+        optimize_result = _optimize(
             sf_net, target_sf_net, sf_net,  # task_net can be same as sf_net for simplicity in bi-linear version
             replay, optimizer, args, device,
             action_types, task_types, locations, object_names, object_kinds
         )
-        if loss_value is not None:
-            loss_history.append(loss_value)
+        if optimize_result is not None:
+            loss_val, q_val, target_val = optimize_result
+            loss_history.append(loss_val)
+            q_history.append(q_val)
+            target_history.append(target_val)
 
         # Update target network with Polyak averaging or hard update
         if args.tau < 1.0:
@@ -1236,6 +1244,8 @@ def train(args: argparse.Namespace) -> Path:
         avg_return = float(np.mean(recent_returns)) if recent_returns else 0.0
         success_rate = float(np.mean(recent_success)) if recent_success else 0.0
         avg_loss = float(np.mean(loss_history[-100:])) if loss_history else 0.0
+        avg_q = float(np.mean(q_history[-100:])) if q_history else 0.0
+        avg_target = float(np.mean(target_history[-100:])) if target_history else 0.0
 
         # Log metrics
         logs = {
@@ -1243,6 +1253,8 @@ def train(args: argparse.Namespace) -> Path:
             "train/success_rate": success_rate,
             "train/epsilon": epsilon,
             "train/loss": avg_loss,
+            "train/q": avg_q,
+            "train/target": avg_target,
             "train/tasks_completed": tasks_completed,
             "train/total_steps": global_step,
         }
@@ -1317,7 +1329,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replay-size", type=int, default=50_000, help="Experience replay buffer size")
     parser.add_argument("--batch-size", type=int, default=128, help="Minibatch size for training")
     parser.add_argument("--hidden-dim", type=int, default=256, help="Hidden dimension size for networks")
-    parser.add_argument("--sf-dim", type=int, default=16, help="Successor feature dimension (size of w vector)")
+    parser.add_argument("--sf-dim", type=int, default=64, help="Successor feature dimension (size of w vector)")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--epsilon-start", type=float, default=1.0, help="Starting epsilon for exploration")

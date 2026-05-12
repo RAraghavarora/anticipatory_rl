@@ -163,6 +163,8 @@ class RestaurantSymbolicEnv(Env):
         pour_cost: float = 25.0,
         refill_cost: float = 25.0,
         drain_cost: float = 25.0,
+        partial_reward_pick: float = 15.0,
+        partial_reward_reach: float = 5.0,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__()
@@ -183,12 +185,16 @@ class RestaurantSymbolicEnv(Env):
         self.pour_cost = float(pour_cost)
         self.refill_cost = float(refill_cost)
         self.drain_cost = float(drain_cost)
+        self.partial_reward_pick = float(partial_reward_pick)
+        self.partial_reward_reach = float(partial_reward_reach)
 
         self._task_library: List[RestaurantTask] = []
         self._task_library_index = 0
         self._task_source = "iid"
         self._pending_auto_success = False
         self._task_steps = 0
+        self._partial_pick_awarded = False
+        self._partial_reach_awarded = False
         self._active_layout_id: str | None = None
         self._action_mask_cache_key: tuple[object, ...] | None = None
         self._action_mask_cache: Dict[str, np.ndarray] | None = None
@@ -254,6 +260,8 @@ class RestaurantSymbolicEnv(Env):
             bread_spread=None,
         )
         self._task_steps = 0
+        self._partial_pick_awarded = False
+        self._partial_reach_awarded = False
         self._task_source = "iid"
         self._paper2_total_cost = 0.0
         self._paper2_task_cost = 0.0
@@ -271,6 +279,8 @@ class RestaurantSymbolicEnv(Env):
             truncated = False
             self._advance_after_task_success(completed_task)
             self._task_steps = 0
+            self._partial_pick_awarded = False
+            self._partial_reach_awarded = False
             self._paper2_task_cost = 0.0
             return self._obs(), reward, success, truncated, self._info(success=success)
 
@@ -287,16 +297,23 @@ class RestaurantSymbolicEnv(Env):
             reward -= self.invalid_action_penalty
         self._update_paper2_cost(action_spec=parsed, src_location=src_location, valid=valid)
 
+        if valid:
+            reward += self._partial_reward(parsed)
+
         if self._task_already_satisfied():
             reward += self.success_reward
             success = True
             completed_task = self.task
             self._advance_after_task_success(completed_task)
             self._task_steps = 0
+            self._partial_pick_awarded = False
+            self._partial_reach_awarded = False
             self._paper2_task_cost = 0.0
         elif self._task_steps >= self.max_steps_per_task:
             truncated = True
             self._task_steps = 0
+            self._partial_pick_awarded = False
+            self._partial_reach_awarded = False
             self._paper2_task_cost = 0.0
             self._resample_task()
 
@@ -326,6 +343,8 @@ class RestaurantSymbolicEnv(Env):
             object_name=object_name,
         )
         self._task_source = task_source
+        self._partial_pick_awarded = False
+        self._partial_reach_awarded = False
         self._update_pending_auto_success()
 
     def get_action_meanings(self) -> List[str]:
@@ -650,6 +669,27 @@ class RestaurantSymbolicEnv(Env):
             obj = self.state.objects.get(self.task.object_name)
             return obj is not None and obj.location == self.task.target_location and self.state.holding is None
         raise ValueError(f"Unsupported task type: {self.task.task_type}")
+
+    def _partial_reward(self, action_spec: Mapping[str, Any]) -> float:
+        """Return partial reward for subgoal progress on pick_place tasks, once per subgoal per task."""
+        if self.task.task_type != "pick_place":
+            return 0.0
+        if self.task.object_name is None or self.task.target_location is None:
+            return 0.0
+        action_type = str(action_spec["action_type"])
+        held = self.state.holding
+        target_obj = self.task.object_name
+        target_loc = self.task.target_location
+
+        if action_type == "pick":
+            if not self._partial_pick_awarded and action_spec.get("object1_name") == target_obj:
+                self._partial_pick_awarded = True
+                return self.partial_reward_pick
+        elif action_type == "move":
+            if not self._partial_reach_awarded and held == target_obj and self.state.agent_location == target_loc:
+                self._partial_reach_awarded = True
+                return self.partial_reward_reach
+        return 0.0
 
     def _update_pending_auto_success(self) -> None:
         self._pending_auto_success = self._task_already_satisfied()
