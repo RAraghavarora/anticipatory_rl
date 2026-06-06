@@ -654,10 +654,28 @@ def _optimize(
     optimizer: optim.Optimizer,
     args: argparse.Namespace,
     device: torch.device,
+    demo_replay: ReplayBuffer | None = None,
+    demo_fraction: float = 0.0,
 ) -> OptimizeStats | None:
     if len(replay) < args.batch_size:
         return None
-    batch = replay.sample(args.batch_size)
+    # Protected-demo sampling: reserve a fixed fraction of every minibatch for
+    # never-evicting oracle demonstrations so positive-reward transitions cannot
+    # wash out of the agent's gradient signal.
+    if demo_replay is not None and demo_fraction > 0.0 and len(demo_replay) > 0:
+        n_demo = min(int(round(args.batch_size * demo_fraction)), len(demo_replay))
+        n_main = args.batch_size - n_demo
+        if n_main <= 0:
+            n_main = args.batch_size
+            n_demo = 0
+        main_batch = replay.sample(n_main)
+        if n_demo > 0:
+            demo_batch = demo_replay.sample(n_demo)
+            batch = torch.cat([main_batch, demo_batch], dim=0)
+        else:
+            batch = main_batch
+    else:
+        batch = replay.sample(args.batch_size)
     td = batch.to(device)
 
     q_values = q_net(
@@ -1046,6 +1064,8 @@ def train(args: argparse.Namespace) -> Path:
         )
 
     seed_oracle = int(getattr(args, "seed_replay_oracle", 0) or 0)
+    demo_fraction = float(getattr(args, "protect_demo_fraction", 0.0) or 0.0)
+    demo_replay: ReplayBuffer | None = None
     if seed_oracle > 0:
         oracle_env = RestaurantSymbolicEnv(
             config_path=args.config_path,
@@ -1061,11 +1081,21 @@ def train(args: argparse.Namespace) -> Path:
             fruit_cost=args.fruit_cost,
             rng_seed=args.seed + 3_000_000,
         )
+        # When protecting demos, route them into a separate never-evicting buffer
+        # that _optimize blends into every minibatch. Otherwise behave as before
+        # (demos mixed into the main buffer, free to age out).
+        if demo_fraction > 0.0:
+            demo_replay = ReplayBuffer(storage=LazyTensorStorage(max_size=max(seed_oracle * args.max_steps_per_task, args.batch_size)))
+            target_buffer = demo_replay
+        else:
+            target_buffer = replay
         stored = _seed_replay_with_oracle(
-            replay, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000
+            target_buffer, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000
         )
-        print(f"[train] Seeded replay with {stored} oracle transitions from {seed_oracle} tasks.")
+        dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
+        print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} tasks (demo_fraction={demo_fraction}).")
         aim_logger.set_metadata("oracle_seed_transitions", int(stored))
+        aim_logger.set_metadata("protect_demo_fraction", demo_fraction)
 
     task_return = 0.0
     task_steps = 0
@@ -1149,7 +1179,7 @@ def train(args: argparse.Namespace) -> Path:
         if reward > 0.0:
             positive_reward_transitions += 1
 
-        optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device)
+        optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device, demo_replay=demo_replay, demo_fraction=demo_fraction)
         if optimize_stats is not None:
             optimize_stats_history.append(optimize_stats)
             loss_history.append(optimize_stats.loss)
@@ -1393,6 +1423,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnostics-interval", type=int, default=1000, help="Steps between periodic greedy-eval / Q-probe diagnostics.")
     parser.add_argument("--no-dueling-centering", action="store_true", help="Ablation C: disable masked-mean advantage centering in all heads.")
     parser.add_argument("--seed-replay-oracle", type=int, default=0, help="Ablation B: seed replay with oracle pick_place demos from N tasks before training.")
+    parser.add_argument("--protect-demo-fraction", type=float, default=0.0, help="If >0, store oracle demos in a separate never-evicting buffer and draw this fraction of every minibatch from it (prevents demo washout).")
     parser.add_argument("--post-train-eval-tasks", type=int, default=25)
     parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
     parser.add_argument("--post-train-log-trajectories", type=int, default=10)
