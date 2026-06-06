@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tensordict import TensorDict
-from torchrl.data import LazyTensorStorage, ReplayBuffer
+from torchrl.data import LazyTensorStorage, PrioritizedReplayBuffer, ReplayBuffer
 from tqdm import tqdm
 
 from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
@@ -659,6 +659,9 @@ def _optimize(
 ) -> OptimizeStats | None:
     if len(replay) < args.batch_size:
         return None
+    per_alpha = float(getattr(args, "per_alpha", 0.0) or 0.0)
+    per_eps = float(getattr(args, "per_eps", 1e-6) or 1e-6)
+    per_info, main_indices, n_demo = None, None, 0
     # Protected-demo sampling: reserve a fixed fraction of every minibatch for
     # never-evicting oracle demonstrations so positive-reward transitions cannot
     # wash out of the agent's gradient signal.
@@ -668,14 +671,23 @@ def _optimize(
         if n_main <= 0:
             n_main = args.batch_size
             n_demo = 0
-        main_batch = replay.sample(n_main)
+        if per_alpha > 0.0:
+            main_data, per_info = replay.sample(n_main, return_info=True)
+            main_indices = per_info["index"]
+        else:
+            main_data = replay.sample(n_main)
         if n_demo > 0:
             demo_batch = demo_replay.sample(n_demo)
-            batch = torch.cat([main_batch, demo_batch], dim=0)
+            batch = torch.cat([main_data, demo_batch], dim=0)
         else:
-            batch = main_batch
+            batch = main_data
     else:
-        batch = replay.sample(args.batch_size)
+        if per_alpha > 0.0:
+            data, per_info = replay.sample(args.batch_size, return_info=True)
+            main_indices = per_info["index"]
+            batch = data
+        else:
+            batch = replay.sample(args.batch_size)
     td = batch.to(device)
 
     q_values = q_net(
@@ -712,7 +724,16 @@ def _optimize(
         targets = td["reward"].unsqueeze(1) + args.gamma * (1.0 - td["done"].unsqueeze(1)) * next_q
 
     td_error = q_values - targets
-    loss = nn.functional.smooth_l1_loss(q_values, targets)
+    loss = nn.functional.smooth_l1_loss(q_values, targets, reduction="none")
+    if per_info is not None:
+        is_weights = per_info["priority_weight"].to(device)  # (n_main,)
+        if n_demo > 0:
+            demo_ones = torch.ones(n_demo, dtype=is_weights.dtype, device=device)
+            is_weights = torch.cat([is_weights, demo_ones], dim=0)
+        is_weights = is_weights.unsqueeze(1)  # (batch_size, 1)
+        loss = (loss * is_weights).mean()
+    else:
+        loss = loss.mean()
     optimizer.zero_grad()
     loss.backward()
     grad_norm_t = nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
@@ -735,6 +756,11 @@ def _optimize(
             type_scores = q_net.action_type_scores(encoded, td["action_type_mask"])
             mean_type_q = _masked_mean(type_scores, td["action_type_mask"])
             v_gap = float((value - mean_type_q).mean().item())
+
+    if main_indices is not None:
+        n_main = main_indices.shape[0]
+        main_td_abs = td_error.abs()[:n_main].squeeze(1)
+        replay.update_priority(main_indices, main_td_abs + per_eps)
 
     return OptimizeStats(
         loss=float(loss.item()),
@@ -1037,7 +1063,19 @@ def train(args: argparse.Namespace) -> Path:
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
-    replay = ReplayBuffer(storage=LazyTensorStorage(max_size=args.replay_size))
+    per_alpha = float(getattr(args, "per_alpha", 0.0) or 0.0)
+    per_beta = float(getattr(args, "per_beta", 0.4) or 0.4)
+    per_eps = float(getattr(args, "per_eps", 1e-6) or 1e-6)
+    if per_alpha > 0.0:
+        replay: ReplayBuffer = PrioritizedReplayBuffer(
+            alpha=float(per_alpha),
+            beta=float(per_beta),
+            eps=float(per_eps),
+            storage=LazyTensorStorage(max_size=args.replay_size),
+        )
+        print(f"[train] PrioritizedReplayBuffer (α={per_alpha}, β={per_beta}, ε={per_eps})")
+    else:
+        replay = ReplayBuffer(storage=LazyTensorStorage(max_size=args.replay_size))
 
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
     if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
@@ -1180,6 +1218,11 @@ def train(args: argparse.Namespace) -> Path:
             positive_reward_transitions += 1
 
         optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device, demo_replay=demo_replay, demo_fraction=demo_fraction)
+        if per_alpha > 0.0:
+            frac = min(1.0, float(global_step) / max(1, args.total_steps))
+            current_beta = per_beta + (1.0 - per_beta) * frac
+            replay._sampler._beta = float(current_beta)
+
         if optimize_stats is not None:
             optimize_stats_history.append(optimize_stats)
             loss_history.append(optimize_stats.loss)
@@ -1424,6 +1467,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-dueling-centering", action="store_true", help="Ablation C: disable masked-mean advantage centering in all heads.")
     parser.add_argument("--seed-replay-oracle", type=int, default=0, help="Ablation B: seed replay with oracle pick_place demos from N tasks before training.")
     parser.add_argument("--protect-demo-fraction", type=float, default=0.0, help="If >0, store oracle demos in a separate never-evicting buffer and draw this fraction of every minibatch from it (prevents demo washout).")
+    parser.add_argument("--per-alpha", type=float, default=0.0, help="PER α: 0 = uniform, >0 enables PrioritizedReplayBuffer with this α.")
+    parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
+    parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")
     parser.add_argument("--post-train-eval-tasks", type=int, default=25)
     parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
     parser.add_argument("--post-train-log-trajectories", type=int, default=10)
