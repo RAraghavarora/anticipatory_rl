@@ -49,6 +49,10 @@ class OptimizeStats:
     target_abs_max: float
     td_abs_mean: float
     grad_norm: float
+    # Diagnostics (populated only when args.diagnostics is set; NaN otherwise).
+    td_abs_mean_pos_reward: float = float("nan")
+    td_abs_mean_nonpos_reward: float = float("nan")
+    value_vs_meanq_gap: float = float("nan")
 
 
 class RestaurantQNetwork(nn.Module):
@@ -59,8 +63,10 @@ class RestaurantQNetwork(nn.Module):
         object_dim: int,
         location_dim: int,
         hidden_dim: int = 256,
+        center_advantages: bool = True,
     ) -> None:
         super().__init__()
+        self.center_advantages = bool(center_advantages)
         self.action_type_dim = int(action_type_dim)
         self.object_dim = int(object_dim)
         self.location_dim = int(location_dim)
@@ -100,8 +106,9 @@ class RestaurantQNetwork(nn.Module):
     def action_type_scores(self, encoded: torch.Tensor, action_type_mask: torch.Tensor) -> torch.Tensor:
         value = self.value_head(encoded) #V(s)
         advantages = self.action_type_adv_head(encoded) # A_t(s,t)
-        centered = advantages - _masked_mean(advantages, action_type_mask)
-        return value + centered # V(s) + A_t(s,t) - mean_{t'} A_t(s,t')
+        if self.center_advantages:
+            advantages = advantages - _masked_mean(advantages, action_type_mask)
+        return value + advantages # V(s) + A_t(s,t) [- mean_{t'} A_t(s,t')]
 
     def object1_scores(
         self,
@@ -111,6 +118,8 @@ class RestaurantQNetwork(nn.Module):
     ) -> torch.Tensor:
         prefix = torch.cat([encoded, self.action_type_embed(action_types.squeeze(1))], dim=1) # [s; e_t(t)]
         advantages = self.object1_adv_head(prefix) # A_x(s,t,x)
+        if not self.center_advantages:
+            return advantages
         return advantages - _masked_mean(advantages, object1_mask) # A_x(s,t,x) - mean_{x'} A_x(s,t,x')
 
     def location_scores(
@@ -129,6 +138,8 @@ class RestaurantQNetwork(nn.Module):
             dim=1,
         ) # [s; e_t(t); e_x(x)]
         advantages = self.location_adv_head(prefix) # A_y(s,t,x,y)
+        if not self.center_advantages:
+            return advantages
         return advantages - _masked_mean(advantages, location_mask) # A_y(s,t,x,y) - mean_{y'} A_y(s,t,x,y')
 
     def object2_scores(
@@ -149,6 +160,8 @@ class RestaurantQNetwork(nn.Module):
             dim=1,
         ) # [s; e_t(t); e_x(x); e_y(y)]
         advantages = self.object2_adv_head(prefix) # A_z(s,t,x,y,z)
+        if not self.center_advantages:
+            return advantages
         return advantages - _masked_mean(advantages, object2_mask) # A_z(s,t,x,y,z) - mean_{z'} A_z(s,t,x,y,z')
 
     def forward(
@@ -322,6 +335,68 @@ def _classify_pick_place_failure(env: RestaurantSymbolicEnv, task: Mapping[str, 
     if picked and not placed_at_target:
         return "picked_but_failed_place"
     return "timeout_or_mask_issue"
+
+
+def _store_transition(
+    replay: ReplayBuffer,
+    obs: np.ndarray,
+    action: Mapping[str, int],
+    reward: float,
+    masks: Dict[str, np.ndarray],
+    next_obs: np.ndarray,
+    next_masks: Dict[str, np.ndarray],
+    transition_done: bool,
+    success: bool,
+) -> None:
+    """Append one transition to the replay buffer (shared by training loop and oracle seeding)."""
+    replay.add(
+        TensorDict({
+            "state": torch.tensor(np.asarray(obs, dtype=np.float32)),
+            "action_type": torch.tensor(int(action["action_type"])),
+            "object1": torch.tensor(int(action["object1"])),
+            "location": torch.tensor(int(action["location"])),
+            "object2": torch.tensor(int(action["object2"])),
+            "reward": torch.tensor(float(reward)),
+            "action_type_mask": torch.tensor(np.asarray(masks["valid_action_type_mask"], dtype=np.float32)),
+            "object1_mask": torch.tensor(np.asarray(masks["valid_object1_mask"], dtype=np.float32)),
+            "location_mask": torch.tensor(np.asarray(masks["valid_location_mask"], dtype=np.float32)),
+            "object2_mask": torch.tensor(np.asarray(masks["valid_object2_mask"], dtype=np.float32)),
+            "next_state": torch.tensor(np.asarray(next_obs, dtype=np.float32)),
+            "done": torch.tensor(float(transition_done)),
+            "next_action_type_mask": torch.tensor(np.asarray(next_masks["valid_action_type_mask"], dtype=np.float32)),
+            "next_object1_mask": torch.tensor(np.asarray(next_masks["valid_object1_mask"], dtype=np.float32)),
+            "next_location_mask": torch.tensor(np.asarray(next_masks["valid_location_mask"], dtype=np.float32)),
+            "next_object2_mask": torch.tensor(np.asarray(next_masks["valid_object2_mask"], dtype=np.float32)),
+            "task_boundary": torch.tensor(float(success)),
+        }, batch_size=torch.Size([]))
+    )
+
+
+def _seed_replay_with_oracle(
+    replay: ReplayBuffer,
+    env: RestaurantSymbolicEnv,
+    *,
+    n_tasks: int,
+    max_steps: int,
+    seed_base: int,
+) -> int:
+    """Roll out the pick_place oracle and store its transitions. Returns count stored."""
+    stored = 0
+    for i in range(n_tasks):
+        obs, info = env.reset(seed=seed_base + i)
+        task = dict(info.get("task", {}))
+        for _ in range(max_steps):
+            masks = extract_masks(info)
+            action = _choose_oracle_pick_place_action(env, task)
+            next_obs, reward, success, truncated, next_info = env.step(action)
+            next_masks = extract_masks(next_info)
+            done = bool(success or truncated)
+            _store_transition(replay, obs, action, reward, masks, next_obs, next_masks, done, success)
+            stored += 1
+            obs, info = next_obs, next_info
+            if success or truncated:
+                break
+    return stored
 
 
 def _select_action(
@@ -624,6 +699,25 @@ def _optimize(
     loss.backward()
     grad_norm_t = nn.utils.clip_grad_norm_(q_net.parameters(), args.max_grad_norm)
     optimizer.step()
+
+    td_pos = td_neg = v_gap = float("nan")
+    if getattr(args, "diagnostics", False):
+        with torch.no_grad():
+            rewards = td["reward"].unsqueeze(1)
+            td_abs = td_error.abs()
+            pos_mask = rewards > 0.0
+            if pos_mask.any():
+                td_pos = float(td_abs[pos_mask].mean().item())
+            if (~pos_mask).any():
+                td_neg = float(td_abs[~pos_mask].mean().item())
+            # V(s) vs mean over valid action-type scores: how much absolute level
+            # the dueling value head absorbs relative to the action-type advantages.
+            encoded = q_net.encode(td["state"])
+            value = q_net.value_head(encoded)
+            type_scores = q_net.action_type_scores(encoded, td["action_type_mask"])
+            mean_type_q = _masked_mean(type_scores, td["action_type_mask"])
+            v_gap = float((value - mean_type_q).mean().item())
+
     return OptimizeStats(
         loss=float(loss.item()),
         q_selected_mean=float(q_values.mean().item()),
@@ -632,7 +726,78 @@ def _optimize(
         target_abs_max=float(targets.abs().max().item()),
         td_abs_mean=float(td_error.abs().mean().item()),
         grad_norm=float(grad_norm_t.item() if hasattr(grad_norm_t, "item") else grad_norm_t),
+        td_abs_mean_pos_reward=td_pos,
+        td_abs_mean_nonpos_reward=td_neg,
+        value_vs_meanq_gap=v_gap,
     )
+
+
+def _greedy_success_rate(
+    q_net: RestaurantQNetwork,
+    env: RestaurantSymbolicEnv,
+    device: torch.device,
+    *,
+    n_tasks: int,
+    max_steps: int,
+    seed_base: int,
+) -> float:
+    """Greedy (epsilon=0) success rate over n_tasks fresh tasks. Diagnostics only."""
+    was_training = q_net.training
+    q_net.eval()
+    successes = 0
+    for i in range(n_tasks):
+        obs, info = env.reset(seed=seed_base + i)
+        for _ in range(max_steps):
+            masks = extract_masks(info)
+            action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
+            obs, reward, success, truncated, info = env.step(action)
+            if success:
+                successes += 1
+                break
+            if truncated:
+                break
+    if was_training:
+        q_net.train()
+    return successes / max(1, n_tasks)
+
+
+def _q_by_action_type(
+    q_net: RestaurantQNetwork,
+    env: RestaurantSymbolicEnv,
+    device: torch.device,
+    *,
+    seed: int,
+) -> Dict[str, float]:
+    """Best composed-Q per valid action_type at one fixed probe state.
+
+    Watches whether Q(move) ever overtakes Q(pick) as replay fills, which is the
+    crux of the dueling-decomposition hypothesis.
+    """
+    obs, info = env.reset(seed=seed)
+    masks = extract_masks(info)
+    was_training = q_net.training
+    q_net.eval()
+    out: Dict[str, float] = {}
+    with torch.no_grad():
+        state_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        encoded = q_net.encode(state_t)
+        atm = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        o1m = torch.tensor(masks["valid_object1_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        lm = torch.tensor(masks["valid_location_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        o2m = torch.tensor(masks["valid_object2_mask"], dtype=torch.float32, device=device).unsqueeze(0)
+        type_scores = q_net.action_type_scores(encoded, atm)
+        for t_idx, name in enumerate(ACTION_TYPES):
+            if atm[0, t_idx] <= 0.0:
+                continue
+            # Reuse the per-type greedy decode by masking to this single type.
+            single_type_mask = torch.zeros_like(atm)
+            single_type_mask[0, t_idx] = 1.0
+            at, o1, loc, o2 = _select_greedy_actions_batch(q_net, encoded, single_type_mask, o1m, lm, o2m)
+            q = _compose_q_values(q_net, encoded, at, o1, loc, o2, atm, o1m, lm, o2m)
+            out[name] = float(q.item())
+    if was_training:
+        q_net.train()
+    return out
 
 
 def _plot_post_train_trajectories(trajectory_records: List[Dict[str, object]], output_path: Path) -> None:
@@ -848,8 +1013,9 @@ def train(args: argparse.Namespace) -> Path:
             "hidden_dim": args.hidden_dim,
         },
     )
-    q_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim).to(device)
-    target_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim).to(device)
+    center_advantages = not getattr(args, "no_dueling_centering", False)
+    q_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim, center_advantages=center_advantages).to(device)
+    target_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim, center_advantages=center_advantages).to(device)
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
@@ -858,6 +1024,48 @@ def train(args: argparse.Namespace) -> Path:
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
     if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
         raise ValueError("For anticipatory runs, env-reset-tasks must equal tasks-per-episode.")
+
+    diagnostics = bool(getattr(args, "diagnostics", False))
+    diag_interval = max(1, int(getattr(args, "diagnostics_interval", 1000)))
+    positive_reward_transitions = 0
+    diag_env: RestaurantSymbolicEnv | None = None
+    if diagnostics:
+        diag_env = RestaurantSymbolicEnv(
+            config_path=args.config_path,
+            max_steps_per_task=args.max_steps_per_task,
+            success_reward=args.success_reward,
+            invalid_action_penalty=args.invalid_action_penalty,
+            travel_cost_scale=args.travel_cost_scale,
+            pick_cost=args.pick_cost,
+            place_cost=args.place_cost,
+            wash_cost=args.wash_cost,
+            fill_cost=args.fill_cost,
+            brew_cost=args.brew_cost,
+            fruit_cost=args.fruit_cost,
+            rng_seed=args.seed + 7_000_000,
+        )
+
+    seed_oracle = int(getattr(args, "seed_replay_oracle", 0) or 0)
+    if seed_oracle > 0:
+        oracle_env = RestaurantSymbolicEnv(
+            config_path=args.config_path,
+            max_steps_per_task=args.max_steps_per_task,
+            success_reward=args.success_reward,
+            invalid_action_penalty=args.invalid_action_penalty,
+            travel_cost_scale=args.travel_cost_scale,
+            pick_cost=args.pick_cost,
+            place_cost=args.place_cost,
+            wash_cost=args.wash_cost,
+            fill_cost=args.fill_cost,
+            brew_cost=args.brew_cost,
+            fruit_cost=args.fruit_cost,
+            rng_seed=args.seed + 3_000_000,
+        )
+        stored = _seed_replay_with_oracle(
+            replay, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000
+        )
+        print(f"[train] Seeded replay with {stored} oracle transitions from {seed_oracle} tasks.")
+        aim_logger.set_metadata("oracle_seed_transitions", int(stored))
 
     task_return = 0.0
     task_steps = 0
@@ -937,27 +1145,9 @@ def train(args: argparse.Namespace) -> Path:
 
         next_masks = extract_masks(next_info)
         transition_done = bool(bootstrap_done or truncated)
-        replay.add(
-            TensorDict({
-                "state": torch.tensor(np.asarray(obs, dtype=np.float32)),
-                "action_type": torch.tensor(int(action["action_type"])),
-                "object1": torch.tensor(int(action["object1"])),
-                "location": torch.tensor(int(action["location"])),
-                "object2": torch.tensor(int(action["object2"])),
-                "reward": torch.tensor(float(reward)),
-                "action_type_mask": torch.tensor(np.asarray(masks["valid_action_type_mask"], dtype=np.float32)),
-                "object1_mask": torch.tensor(np.asarray(masks["valid_object1_mask"], dtype=np.float32)),
-                "location_mask": torch.tensor(np.asarray(masks["valid_location_mask"], dtype=np.float32)),
-                "object2_mask": torch.tensor(np.asarray(masks["valid_object2_mask"], dtype=np.float32)),
-                "next_state": torch.tensor(np.asarray(next_obs, dtype=np.float32)),
-                "done": torch.tensor(float(transition_done)),
-                "next_action_type_mask": torch.tensor(np.asarray(next_masks["valid_action_type_mask"], dtype=np.float32)),
-                "next_object1_mask": torch.tensor(np.asarray(next_masks["valid_object1_mask"], dtype=np.float32)),
-                "next_location_mask": torch.tensor(np.asarray(next_masks["valid_location_mask"], dtype=np.float32)),
-                "next_object2_mask": torch.tensor(np.asarray(next_masks["valid_object2_mask"], dtype=np.float32)),
-                "task_boundary": torch.tensor(float(success)),
-            }, batch_size=torch.Size([]))
-        )
+        _store_transition(replay, obs, action, reward, masks, next_obs, next_masks, transition_done, success)
+        if reward > 0.0:
+            positive_reward_transitions += 1
 
         optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device)
         if optimize_stats is not None:
@@ -970,6 +1160,28 @@ def train(args: argparse.Namespace) -> Path:
             aim_logger.track(optimize_stats.target_abs_max, name="target_abs_max", step=global_step)
             aim_logger.track(optimize_stats.td_abs_mean, name="td_abs_mean", step=global_step)
             aim_logger.track(optimize_stats.grad_norm, name="grad_norm", step=global_step)
+            if diagnostics:
+                if not np.isnan(optimize_stats.td_abs_mean_pos_reward):
+                    aim_logger.track(optimize_stats.td_abs_mean_pos_reward, name="td_abs_mean_pos_reward", step=global_step)
+                if not np.isnan(optimize_stats.td_abs_mean_nonpos_reward):
+                    aim_logger.track(optimize_stats.td_abs_mean_nonpos_reward, name="td_abs_mean_nonpos_reward", step=global_step)
+                if not np.isnan(optimize_stats.value_vs_meanq_gap):
+                    aim_logger.track(optimize_stats.value_vs_meanq_gap, name="value_vs_meanq_gap", step=global_step)
+
+        if diagnostics and diag_env is not None and (global_step + 1) % diag_interval == 0:
+            aim_logger.track(
+                positive_reward_transitions / float(global_step + 1),
+                name="replay_positive_reward_fraction",
+                step=global_step,
+            )
+            greedy_success = _greedy_success_rate(
+                q_net, diag_env, device,
+                n_tasks=20, max_steps=args.max_steps_per_task, seed_base=args.seed + 8_000_000,
+            )
+            aim_logger.track(greedy_success, name="greedy_success_rolling", step=global_step)
+            q_by_type = _q_by_action_type(q_net, diag_env, device, seed=args.seed + 9_000_000)
+            for name, q_val in q_by_type.items():
+                aim_logger.track(q_val, name="q_by_action_type", step=global_step, context={"action_type": name})
 
         if args.tau < 1.0:
             with torch.no_grad():
@@ -1177,6 +1389,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output-name", type=str, default="restaurant_dqn.pt")
+    parser.add_argument("--diagnostics", action="store_true", help="Enable root-cause diagnostic logging (off by default).")
+    parser.add_argument("--diagnostics-interval", type=int, default=1000, help="Steps between periodic greedy-eval / Q-probe diagnostics.")
+    parser.add_argument("--no-dueling-centering", action="store_true", help="Ablation C: disable masked-mean advantage centering in all heads.")
+    parser.add_argument("--seed-replay-oracle", type=int, default=0, help="Ablation B: seed replay with oracle pick_place demos from N tasks before training.")
     parser.add_argument("--post-train-eval-tasks", type=int, default=25)
     parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
     parser.add_argument("--post-train-log-trajectories", type=int, default=10)
