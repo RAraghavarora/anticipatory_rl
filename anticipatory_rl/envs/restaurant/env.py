@@ -117,7 +117,7 @@ TASK_TYPES: Tuple[str, ...] = DEFAULT_TASK_TYPES
 
 @dataclass(frozen=True)
 class RestaurantTask:
-    task_type: str
+    task_type: str # See DEFAULT_TASK_TYPES
     target_location: str | None = None
     target_kind: str | None = None
     object_name: str | None = None
@@ -138,7 +138,7 @@ class RestaurantState:
     agent_location: str
     holding: str | None
     objects: Dict[str, RestaurantObjectState]
-    bread_spread: str | None = None
+    bread_spread: str | None = None #TODO: Move this to RestaurantObjectState
 
 
 class RestaurantSymbolicEnv(Env):
@@ -172,7 +172,8 @@ class RestaurantSymbolicEnv(Env):
         self.max_steps_per_task = max(1, int(max_steps_per_task))
         self.success_reward = float(success_reward)
         self.invalid_action_penalty = float(invalid_action_penalty)
-        self.travel_cost_scale = float(travel_cost_scale)
+        self.travel_cost_scale = float(travel_cost_scale) # travel_cost = travel_cost_scale * manhattan_distance
+        # RL reward: Manhattan distance; Paper2 cost: Djisktra distance
         self.pick_cost = float(pick_cost)
         self.place_cost = float(place_cost)
         self.wash_cost = float(wash_cost)
@@ -183,6 +184,8 @@ class RestaurantSymbolicEnv(Env):
         self.pour_cost = float(pour_cost)
         self.refill_cost = float(refill_cost)
         self.drain_cost = float(drain_cost)
+        # TODO: We can have separate cost for metrics and rewards.
+        # See PDDL_ACTION_COSTS in pddl_domain.py 
 
         self._task_library: List[RestaurantTask] = []
         self._task_library_index = 0
@@ -194,8 +197,8 @@ class RestaurantSymbolicEnv(Env):
         self._action_mask_cache: Dict[str, np.ndarray] | None = None
 
         self._apply_schema(self._base_config)
-        self._configure_paper2_cost(self._base_config.get("paper2_cost", {}))
-
+        self._configure_paper2_cost(self._base_config.get("paper2_cost", {})) # Only for metrics
+        
         self.state = RestaurantState(
             agent_location=self._default_agent_location(),
             holding=None,
@@ -262,14 +265,15 @@ class RestaurantSymbolicEnv(Env):
         self._resample_task()
         return self._obs(), self._info(success=False)
 
-    def step(self, action: Mapping[str, int] | Sequence[int]):
+    def step(self, action: Mapping[str, int]):
         if self._pending_auto_success:
-            completed_task = self.task
+            # Chosen task is already completed in the initial state.
+            #TODO: Change the variable name from "pending_auto_success"
             self._pending_auto_success = False
             reward = self.success_reward
             success = True
             truncated = False
-            self._advance_after_task_success(completed_task)
+            self._resample_task()
             self._task_steps = 0
             self._paper2_task_cost = 0.0
             return self._obs(), reward, success, truncated, self._info(success=success)
@@ -290,8 +294,7 @@ class RestaurantSymbolicEnv(Env):
         if self._task_already_satisfied():
             reward += self.success_reward
             success = True
-            completed_task = self.task
-            self._advance_after_task_success(completed_task)
+            self._resample_task()
             self._task_steps = 0
             self._paper2_task_cost = 0.0
         elif self._task_steps >= self.max_steps_per_task:
@@ -380,11 +383,7 @@ class RestaurantSymbolicEnv(Env):
             for x in schema.get("dirty_drop_locations", ["sink", "bus_tub"])
             if str(x) in self.location_index
         )
-        self.restricted_locations = set(
-            str(x)
-            for x in schema.get("restricted_locations", [])
-            if str(x) in self.location_index
-        )
+        # Removed restricted_locations as they were unused
 
         stations = schema.get("stations", {})
         self.station_water = str(stations.get("water", "water_station"))
@@ -563,10 +562,6 @@ class RestaurantSymbolicEnv(Env):
             return self.locations[0]
         return DEFAULT_LOCATIONS[0]
 
-    def _advance_after_task_success(self, completed_task: RestaurantTask) -> None:
-        del completed_task
-        self._resample_task()
-
     def _resample_task(self) -> None:
         if self._task_library:
             task = self._task_library[self._task_library_index % len(self._task_library)]
@@ -583,6 +578,7 @@ class RestaurantSymbolicEnv(Env):
         # Current RL training is constrained to non-auto pick-place tasks.
         # This avoids impossible/too-long task families while we validate the
         # factorized PDDL-style action model.
+        # TODO: Change this for when we use anticipation.
         candidate_objects = [
             name
             for name in self.object_names
@@ -654,22 +650,13 @@ class RestaurantSymbolicEnv(Env):
     def _update_pending_auto_success(self) -> None:
         self._pending_auto_success = self._task_already_satisfied()
 
-    def _normalize_action(self, action: Mapping[str, int] | Sequence[int]) -> Dict[str, int | str]:
-        if isinstance(action, Mapping):
-            action_type_idx = int(action.get("action_type", 0))
-            object1_idx = int(action.get("object1", self.none_object_index))
-            location_idx = int(action.get("location", self.none_location_index))
-            object2_idx = int(action.get("object2", self.none_object_index))
-        elif isinstance(action, Sequence) and not isinstance(action, (str, bytes)):
-            values = list(action)
-            if len(values) != 4:
-                raise ValueError("Structured restaurant action sequence must have length 4.")
-            action_type_idx = int(values[0])
-            object1_idx = int(values[1])
-            location_idx = int(values[2])
-            object2_idx = int(values[3])
-        else:
-            raise TypeError("RestaurantSymbolicEnv.step expects a mapping or length-4 sequence action.")
+    def _normalize_action(self, action: Mapping[str, int]) -> Dict[str, int | str]:
+        if not isinstance(action, Mapping):
+            raise TypeError("RestaurantSymbolicEnv.step expects a mapping action.")
+        action_type_idx = int(action.get("action_type", 0))
+        object1_idx = int(action.get("object1", self.none_object_index))
+        location_idx = int(action.get("location", self.none_location_index))
+        object2_idx = int(action.get("object2", self.none_object_index))
 
         if action_type_idx < 0 or action_type_idx >= len(ACTION_TYPES):
             raise ValueError(f"Invalid action_type index {action_type_idx}.")
@@ -834,9 +821,9 @@ class RestaurantSymbolicEnv(Env):
             if object1 is None or held_name is not None:
                 return False
             obj = self.state.objects[object1]
-            return obj.location == self.state.agent_location and self.state.agent_location not in self.restricted_locations
+            return obj.location == self.state.agent_location
         if action_type == "place":
-            return held_name is not None and location is not None and location == self.state.agent_location and location not in self.restricted_locations
+            return held_name is not None and location is not None and location == self.state.agent_location
         if action_type == "wash":
             if object1 is None:
                 return False
@@ -1173,7 +1160,7 @@ class RestaurantSymbolicEnv(Env):
                     masks["valid_location_mask"][move_idx, self.location_index[location]] = 1.0
             masks["valid_object2_mask"][move_idx, self.none_object_index, self.none_object_index] = 1.0
 
-        if held_name is None and self.state.agent_location not in self.restricted_locations:
+        if held_name is None:
             valid_pick_objects = [
                 self.object_name_index[name]
                 for name in self.object_names
@@ -1186,7 +1173,7 @@ class RestaurantSymbolicEnv(Env):
                     masks["valid_object2_mask"][pick_idx, obj_idx, self.none_object_index] = 1.0
                 masks["valid_location_mask"][pick_idx, self.none_location_index] = 1.0
 
-        if held_name is not None and self.state.agent_location not in self.restricted_locations:
+        if held_name is not None:
             place_idx = self._set_action_type_valid(masks, "place")
             masks["valid_object1_mask"][place_idx, self.none_object_index] = 1.0
             loc_idx = self.location_index[self.state.agent_location]

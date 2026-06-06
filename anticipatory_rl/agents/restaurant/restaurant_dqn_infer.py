@@ -19,20 +19,13 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from .dqn import RestaurantQNetwork, _extract_masks, _masked_choice
+from .dqn import RestaurantQNetwork
+from anticipatory_rl.utils import extract_masks, masked_choice, select_device
 from anticipatory_rl.envs.restaurant.env import (
     CONFIG_PATH as DEFAULT_RESTAURANT_CONFIG_PATH,
     RestaurantSymbolicEnv,
     TASK_TYPES,
 )
-
-
-def _select_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
 
 
 def _sample_action_from_q(
@@ -151,12 +144,12 @@ def _sample_masked_index(
     if valid.numel() == 0:
         return int(torch.argmax(logits).item())
     if temperature <= 0.0:
-        return _masked_choice(logits, mask)
+        return masked_choice(logits, mask)
     masked_logits = logits.clone()
     masked_logits[mask <= 0.0] = float("-inf")
     probs = torch.softmax(masked_logits / temperature, dim=-1)
     if not torch.isfinite(probs).all() or float(probs.nansum()) <= 0.0:
-        return _masked_choice(logits, mask)
+        return masked_choice(logits, mask)
     draw = torch.multinomial(probs.detach().float().cpu(), 1, generator=generator)
     return int(draw.item())
 
@@ -170,7 +163,7 @@ def _sample_structured_action(
     generator: torch.Generator,
     device: torch.device,
 ) -> Dict[str, int]:
-    masks = _extract_masks(info)
+    masks = extract_masks(info)
     obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
     with torch.no_grad():
         action_type_mask = torch.tensor(masks["valid_action_type_mask"], dtype=torch.float32, device=device).unsqueeze(0)
@@ -444,7 +437,7 @@ def evaluate(
 
 
 def run_compare(args: argparse.Namespace) -> None:
-    device = _select_device()
+    device = select_device()
     output_dir = args.output_dir or (Path("runs") / "compare_restaurant_dqn_infer")
     ant_dir = output_dir / "anticipatory"
     myo_dir = output_dir / "myopic"
@@ -504,7 +497,7 @@ def run_compare(args: argparse.Namespace) -> None:
 
 
 def run_single(args: argparse.Namespace) -> None:
-    device = _select_device()
+    device = select_device()
     state_path = args.state_dict.expanduser().resolve()
     output_dir = args.output_dir or (state_path.parent / "infer")
     evaluate(

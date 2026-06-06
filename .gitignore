@@ -22,6 +22,13 @@ try.ipynb
 *.fdb_latexmk
 *.fls
 
+.aider*
+
+# Local AI instruction files/symlinks (keep out of repo)
+AI_INSTRUCTIONS.md
 AGENTS.md
 CLAUDE.md
-.aider*
+CONVENTIONS.md
+.cursorrules
+.github/copilot-instructions.md
+.aim*

@@ -17,77 +17,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from tensordict import TensorDict
+from torchrl.data import LazyTensorStorage, ReplayBuffer
 from tqdm import tqdm
 
 from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
 
 
-class AimLogger:
-    def __init__(self, args: argparse.Namespace, run_label: str) -> None:
-        self._run = None
-        try:
-            from aim import Run  # type: ignore
-        except ImportError:
-            print("[train] Aim logging disabled: install `aim` to enable experiment tracking.")
-            return
-
-        self._run = Run(experiment="restaurant_rl_factored")
-        self._run["run_label"] = run_label
-        self._run["hparams"] = {
-            key: (str(value) if isinstance(value, Path) else value)
-            for key, value in vars(args).items()
-        }
-        self._run["action_space"] = {"action_types": list(ACTION_TYPES), "factored": True}
-        print("[train] Aim logging enabled. Launch UI with `aim up`.")
-
-    def set_metadata(self, key: str, value: object) -> None:
-        if self._run is not None:
-            self._run[key] = value
-
-    def track(
-        self,
-        value: float | int,
-        *,
-        name: str,
-        step: int,
-        context: Mapping[str, object] | None = None,
-    ) -> None:
-        if self._run is None:
-            return
-        self._run.track(value, name=name, step=step, context=dict(context or {}))
-
-    def close(self) -> None:
-        if self._run is None:
-            return
-        close = getattr(self._run, "close", None)
-        if callable(close):
-            close()
-
-    def track_text(self, text: str, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
-        if self._run is None:
-            return
-        try:
-            from aim import Text  # type: ignore
-            self._run.track(Text(text), name=name, step=step, context=dict(context or {}))
-        except Exception:
-            self._run.track(text, name=name, step=step, context=dict(context or {}))
-
-    def track_image(self, image_path: Path, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
-        if self._run is None:
-            return
-        try:
-            from aim import Image  # type: ignore
-            self._run.track(Image(str(image_path)), name=name, step=step, context=dict(context or {}))
-        except Exception:
-            self._run.track(str(image_path), name=name, step=step, context=dict(context or {}))
-
-
-def _select_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+from anticipatory_rl.logging import AimLogger
+from anticipatory_rl.utils import extract_masks, masked_choice, random_valid_index, select_device
 
 
 def epsilon_by_step(step: int, start: float, final: float, decay: int) -> float:
@@ -102,61 +40,6 @@ def _resolve_run_label(args: argparse.Namespace) -> str:
     return "myopic_restaurant" if args.tasks_per_episode <= 1 else "anticipatory_restaurant"
 
 
-def _extract_masks(info: Mapping[str, np.ndarray | List[float] | Dict[str, object]]) -> Dict[str, np.ndarray]:
-    return {
-        "valid_action_type_mask": np.asarray(info.get("valid_action_type_mask"), dtype=np.float32),
-        "valid_object1_mask": np.asarray(info.get("valid_object1_mask"), dtype=np.float32),
-        "valid_location_mask": np.asarray(info.get("valid_location_mask"), dtype=np.float32),
-        "valid_object2_mask": np.asarray(info.get("valid_object2_mask"), dtype=np.float32),
-    }
-
-
-def _masked_choice(values: torch.Tensor, mask: torch.Tensor) -> int:
-    valid = torch.nonzero(mask > 0.0, as_tuple=False).squeeze(-1)
-    if valid.numel() == 0:
-        return int(torch.argmax(values).item())
-    masked = values.clone()
-    masked[mask <= 0.0] = float("-inf")
-    return int(torch.argmax(masked).item())
-
-
-def _masked_argmax(values: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    neg_inf = torch.finfo(values.dtype).min
-    masked_values = values.masked_fill(mask <= 0.0, neg_inf)
-    indices = torch.argmax(masked_values, dim=1)
-    best = masked_values.gather(1, indices.unsqueeze(1)).squeeze(1)
-    valid = (mask > 0.0).any(dim=1)
-    return indices, best.masked_fill(~valid, neg_inf)
-
-
-def _random_valid_index(mask: np.ndarray) -> int:
-    indices = np.flatnonzero(mask > 0.0)
-    if indices.size == 0:
-        return int(mask.shape[0] - 1)
-    return int(random.choice(indices.tolist()))
-
-
-@dataclass
-class Transition:
-    state: np.ndarray
-    action_type: int
-    object1: int
-    location: int
-    object2: int
-    reward: float
-    action_type_mask: np.ndarray
-    object1_mask: np.ndarray
-    location_mask: np.ndarray
-    object2_mask: np.ndarray
-    next_state: np.ndarray
-    done: bool
-    next_action_type_mask: np.ndarray
-    next_object1_mask: np.ndarray
-    next_location_mask: np.ndarray
-    next_object2_mask: np.ndarray
-    task_boundary: bool = False
-
-
 @dataclass
 class OptimizeStats:
     loss: float
@@ -166,21 +49,6 @@ class OptimizeStats:
     target_abs_max: float
     td_abs_mean: float
     grad_norm: float
-
-
-class ReplayBuffer:
-    def __init__(self, capacity: int) -> None:
-        self.capacity = max(1, int(capacity))
-        self.memory: Deque[Transition] = deque(maxlen=self.capacity)
-
-    def __len__(self) -> int:
-        return len(self.memory)
-
-    def push(self, transition: Transition) -> None:
-        self.memory.append(transition)
-
-    def sample(self, batch_size: int) -> List[Transition]:
-        return random.sample(self.memory, batch_size)
 
 
 class RestaurantQNetwork(nn.Module):
@@ -203,10 +71,10 @@ class RestaurantQNetwork(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
-        self.value_head = nn.Linear(hidden_dim, 1)
-        self.action_type_adv_head = nn.Linear(hidden_dim, action_type_dim)
+        self.value_head = nn.Linear(hidden_dim, 1) # V(s)
+        self.action_type_adv_head = nn.Linear(hidden_dim, action_type_dim) # A_t(s,t)
 
-        self.action_type_embed = nn.Embedding(action_type_dim, self.prefix_embed_dim)
+        self.action_type_embed = nn.Embedding(action_type_dim, self.prefix_embed_dim) 
         self.object_embed = nn.Embedding(object_dim, self.prefix_embed_dim)
         self.location_embed = nn.Embedding(location_dim, self.prefix_embed_dim)
 
@@ -214,26 +82,26 @@ class RestaurantQNetwork(nn.Module):
             nn.Linear(hidden_dim + self.prefix_embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, object_dim),
-        )
+        ) # A_x(s,t,x)
         self.location_adv_head = nn.Sequential(
             nn.Linear(hidden_dim + 2 * self.prefix_embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, location_dim),
-        )
+        ) # A_y(s,t,x,y)
         self.object2_adv_head = nn.Sequential(
             nn.Linear(hidden_dim + 3 * self.prefix_embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, object_dim),
-        )
+        ) # A_z(s,t,x,y,z)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
 
     def action_type_scores(self, encoded: torch.Tensor, action_type_mask: torch.Tensor) -> torch.Tensor:
-        value = self.value_head(encoded)
-        advantages = self.action_type_adv_head(encoded)
+        value = self.value_head(encoded) #V(s)
+        advantages = self.action_type_adv_head(encoded) # A_t(s,t)
         centered = advantages - _masked_mean(advantages, action_type_mask)
-        return value + centered
+        return value + centered # V(s) + A_t(s,t) - mean_{t'} A_t(s,t')
 
     def object1_scores(
         self,
@@ -241,9 +109,9 @@ class RestaurantQNetwork(nn.Module):
         action_types: torch.Tensor,
         object1_mask: torch.Tensor,
     ) -> torch.Tensor:
-        prefix = torch.cat([encoded, self.action_type_embed(action_types.squeeze(1))], dim=1)
-        advantages = self.object1_adv_head(prefix)
-        return advantages - _masked_mean(advantages, object1_mask)
+        prefix = torch.cat([encoded, self.action_type_embed(action_types.squeeze(1))], dim=1) # [s; e_t(t)]
+        advantages = self.object1_adv_head(prefix) # A_x(s,t,x)
+        return advantages - _masked_mean(advantages, object1_mask) # A_x(s,t,x) - mean_{x'} A_x(s,t,x')
 
     def location_scores(
         self,
@@ -259,9 +127,9 @@ class RestaurantQNetwork(nn.Module):
                 self.object_embed(object1.squeeze(1)),
             ],
             dim=1,
-        )
-        advantages = self.location_adv_head(prefix)
-        return advantages - _masked_mean(advantages, location_mask)
+        ) # [s; e_t(t); e_x(x)]
+        advantages = self.location_adv_head(prefix) # A_y(s,t,x,y)
+        return advantages - _masked_mean(advantages, location_mask) # A_y(s,t,x,y) - mean_{y'} A_y(s,t,x,y')
 
     def object2_scores(
         self,
@@ -279,9 +147,9 @@ class RestaurantQNetwork(nn.Module):
                 self.location_embed(location.squeeze(1)),
             ],
             dim=1,
-        )
-        advantages = self.object2_adv_head(prefix)
-        return advantages - _masked_mean(advantages, object2_mask)
+        ) # [s; e_t(t); e_x(x); e_y(y)]
+        advantages = self.object2_adv_head(prefix) # A_z(s,t,x,y,z)
+        return advantages - _masked_mean(advantages, object2_mask) # A_z(s,t,x,y,z) - mean_{z'} A_z(s,t,x,y,z')
 
     def forward(
         self,
@@ -464,10 +332,10 @@ def _select_action(
     device: torch.device,
 ) -> Dict[str, int]:
     if random.random() < epsilon:
-        action_type = _random_valid_index(masks["valid_action_type_mask"])
-        object1 = _random_valid_index(masks["valid_object1_mask"][action_type])
-        location = _random_valid_index(masks["valid_location_mask"][action_type])
-        object2 = _random_valid_index(masks["valid_object2_mask"][action_type, object1])
+        action_type = random_valid_index(masks["valid_action_type_mask"])
+        object1 = random_valid_index(masks["valid_object1_mask"][action_type])
+        location = random_valid_index(masks["valid_location_mask"][action_type])
+        object2 = random_valid_index(masks["valid_object2_mask"][action_type, object1])
         return {
             "action_type": int(action_type),
             "object1": int(object1),
@@ -687,10 +555,10 @@ def _select_greedy_actions_batch(
     fallback_indices = torch.nonzero(~has_valid, as_tuple=False).squeeze(-1)
     if fallback_indices.numel() > 0:
         for idx in fallback_indices.tolist():
-            action_type = _masked_choice(action_type_scores[idx], action_type_masks[idx])
-            object1 = _random_valid_index(object1_masks[idx, action_type].detach().cpu().numpy())
-            location = _random_valid_index(location_masks[idx, action_type].detach().cpu().numpy())
-            object2 = _random_valid_index(object2_masks[idx, action_type, object1].detach().cpu().numpy())
+            action_type = masked_choice(action_type_scores[idx], action_type_masks[idx])
+            object1 = random_valid_index(object1_masks[idx, action_type].detach().cpu().numpy())
+            location = random_valid_index(location_masks[idx, action_type].detach().cpu().numpy())
+            object2 = random_valid_index(object2_masks[idx, action_type, object1].detach().cpu().numpy())
             best_action_type[idx] = int(action_type)
             best_object1[idx] = int(object1)
             best_location[idx] = int(location)
@@ -715,57 +583,42 @@ def _optimize(
     if len(replay) < args.batch_size:
         return None
     batch = replay.sample(args.batch_size)
-    states = torch.tensor(np.stack([t.state for t in batch]), dtype=torch.float32, device=device)
-    action_type = torch.tensor([t.action_type for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
-    object1 = torch.tensor([t.object1 for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
-    location = torch.tensor([t.location for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
-    object2 = torch.tensor([t.object2 for t in batch], dtype=torch.int64, device=device).unsqueeze(1)
-    rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-    action_type_masks = torch.tensor(np.stack([t.action_type_mask for t in batch]), dtype=torch.float32, device=device)
-    object1_masks = torch.tensor(np.stack([t.object1_mask for t in batch]), dtype=torch.float32, device=device)
-    location_masks = torch.tensor(np.stack([t.location_mask for t in batch]), dtype=torch.float32, device=device)
-    object2_masks = torch.tensor(np.stack([t.object2_mask for t in batch]), dtype=torch.float32, device=device)
-    next_states = torch.tensor(np.stack([t.next_state for t in batch]), dtype=torch.float32, device=device)
-    dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=device).unsqueeze(1)
-    next_action_type_masks = torch.tensor(np.stack([t.next_action_type_mask for t in batch]), dtype=torch.float32, device=device)
-    next_object1_masks = torch.tensor(np.stack([t.next_object1_mask for t in batch]), dtype=torch.float32, device=device)
-    next_location_masks = torch.tensor(np.stack([t.next_location_mask for t in batch]), dtype=torch.float32, device=device)
-    next_object2_masks = torch.tensor(np.stack([t.next_object2_mask for t in batch]), dtype=torch.float32, device=device)
+    td = batch.to(device)
 
     q_values = q_net(
-        states,
-        action_types=action_type,
-        object1=object1,
-        location=location,
-        object2=object2,
-        action_type_masks=action_type_masks,
-        object1_masks=object1_masks,
-        location_masks=location_masks,
-        object2_masks=object2_masks,
+        td["state"],
+        action_types=td["action_type"].unsqueeze(1),
+        object1=td["object1"].unsqueeze(1),
+        location=td["location"].unsqueeze(1),
+        object2=td["object2"].unsqueeze(1),
+        action_type_masks=td["action_type_mask"],
+        object1_masks=td["object1_mask"],
+        location_masks=td["location_mask"],
+        object2_masks=td["object2_mask"],
     )
     with torch.no_grad():
         next_action_type, next_object1, next_location, next_object2 = q_net(
-            next_states,
-            action_type_masks=next_action_type_masks,
-            object1_masks=next_object1_masks,
-            location_masks=next_location_masks,
-            object2_masks=next_object2_masks,
+            td["next_state"],
+            action_type_masks=td["next_action_type_mask"],
+            object1_masks=td["next_object1_mask"],
+            location_masks=td["next_location_mask"],
+            object2_masks=td["next_object2_mask"],
             decode_greedy=True,
         )
         next_q = target_net(
-            next_states,
+            td["next_state"],
             action_types=next_action_type,
             object1=next_object1,
             location=next_location,
             object2=next_object2,
-            action_type_masks=next_action_type_masks,
-            object1_masks=next_object1_masks,
-            location_masks=next_location_masks,
-            object2_masks=next_object2_masks,
+            action_type_masks=td["next_action_type_mask"],
+            object1_masks=td["next_object1_mask"],
+            location_masks=td["next_location_mask"],
+            object2_masks=td["next_object2_mask"],
         )
-        targets = rewards + args.gamma * (1.0 - dones) * next_q
+        targets = td["reward"].unsqueeze(1) + args.gamma * (1.0 - td["done"].unsqueeze(1)) * next_q
 
-    td = q_values - targets
+    td_error = q_values - targets
     loss = nn.functional.smooth_l1_loss(q_values, targets)
     optimizer.zero_grad()
     loss.backward()
@@ -777,7 +630,7 @@ def _optimize(
         q_selected_abs_max=float(q_values.abs().max().item()),
         target_mean=float(targets.mean().item()),
         target_abs_max=float(targets.abs().max().item()),
-        td_abs_mean=float(td.abs().mean().item()),
+        td_abs_mean=float(td_error.abs().mean().item()),
         grad_norm=float(grad_norm_t.item() if hasattr(grad_norm_t, "item") else grad_norm_t),
     )
 
@@ -850,7 +703,7 @@ def _run_post_train_inference(
         success = False
         truncated = False
         for _ in range(args.post_train_eval_max_steps):
-            masks = _extract_masks(info)
+            masks = extract_masks(info)
             action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
             actions.append(dict(action))
             readable_actions.append(_action_to_string(env, action))
@@ -949,7 +802,7 @@ def _run_post_train_inference(
 
 
 def train(args: argparse.Namespace) -> Path:
-    device = _select_device()
+    device = select_device()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -1000,7 +853,7 @@ def train(args: argparse.Namespace) -> Path:
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
-    replay = ReplayBuffer(args.replay_size)
+    replay = ReplayBuffer(storage=LazyTensorStorage(max_size=args.replay_size))
 
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
     if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
@@ -1044,7 +897,7 @@ def train(args: argparse.Namespace) -> Path:
         )
         current_task_snapshot = dict(info.get("task", {}))
         current_task_auto_snapshot = bool(current_task_auto_satisfied)
-        masks = _extract_masks(info)
+        masks = extract_masks(info)
         action = _select_action(q_net, obs, masks, epsilon, device)
         current_task_actions.append(dict(action))
         current_task_action_strings.append(_action_to_string(env, action))
@@ -1082,28 +935,28 @@ def train(args: argparse.Namespace) -> Path:
             tasks_since_reset = 0
             env_tasks_since_reset = 0
 
-        next_masks = _extract_masks(next_info)
+        next_masks = extract_masks(next_info)
         transition_done = bool(bootstrap_done or truncated)
-        replay.push(
-            Transition(
-                state=np.array(obs, dtype=np.float32, copy=True),
-                action_type=int(action["action_type"]),
-                object1=int(action["object1"]),
-                location=int(action["location"]),
-                object2=int(action["object2"]),
-                reward=float(reward),
-                action_type_mask=np.array(masks["valid_action_type_mask"], dtype=np.float32, copy=True),
-                object1_mask=np.array(masks["valid_object1_mask"], dtype=np.float32, copy=True),
-                location_mask=np.array(masks["valid_location_mask"], dtype=np.float32, copy=True),
-                object2_mask=np.array(masks["valid_object2_mask"], dtype=np.float32, copy=True),
-                next_state=np.array(next_obs, dtype=np.float32, copy=True),
-                done=transition_done,
-                next_action_type_mask=np.array(next_masks["valid_action_type_mask"], dtype=np.float32, copy=True),
-                next_object1_mask=np.array(next_masks["valid_object1_mask"], dtype=np.float32, copy=True),
-                next_location_mask=np.array(next_masks["valid_location_mask"], dtype=np.float32, copy=True),
-                next_object2_mask=np.array(next_masks["valid_object2_mask"], dtype=np.float32, copy=True),
-                task_boundary=bool(success),
-            )
+        replay.add(
+            TensorDict({
+                "state": torch.tensor(np.asarray(obs, dtype=np.float32)),
+                "action_type": torch.tensor(int(action["action_type"])),
+                "object1": torch.tensor(int(action["object1"])),
+                "location": torch.tensor(int(action["location"])),
+                "object2": torch.tensor(int(action["object2"])),
+                "reward": torch.tensor(float(reward)),
+                "action_type_mask": torch.tensor(np.asarray(masks["valid_action_type_mask"], dtype=np.float32)),
+                "object1_mask": torch.tensor(np.asarray(masks["valid_object1_mask"], dtype=np.float32)),
+                "location_mask": torch.tensor(np.asarray(masks["valid_location_mask"], dtype=np.float32)),
+                "object2_mask": torch.tensor(np.asarray(masks["valid_object2_mask"], dtype=np.float32)),
+                "next_state": torch.tensor(np.asarray(next_obs, dtype=np.float32)),
+                "done": torch.tensor(float(transition_done)),
+                "next_action_type_mask": torch.tensor(np.asarray(next_masks["valid_action_type_mask"], dtype=np.float32)),
+                "next_object1_mask": torch.tensor(np.asarray(next_masks["valid_object1_mask"], dtype=np.float32)),
+                "next_location_mask": torch.tensor(np.asarray(next_masks["valid_location_mask"], dtype=np.float32)),
+                "next_object2_mask": torch.tensor(np.asarray(next_masks["valid_object2_mask"], dtype=np.float32)),
+                "task_boundary": torch.tensor(float(success)),
+            }, batch_size=torch.Size([]))
         )
 
         optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device)
@@ -1228,7 +1081,7 @@ def train(args: argparse.Namespace) -> Path:
         aim_logger.track(success_rate, name="success_rate_rolling", step=global_step, context={"window": 100})
         aim_logger.track(auto_rate, name="auto_rate_rolling", step=global_step, context={"window": 100})
         aim_logger.track(non_auto_success_rate, name="non_auto_success_rate_rolling", step=global_step, context={"window": 100})
-        aim_logger.track(len(replay) / max(1, replay.capacity), name="replay_fill_fraction", step=global_step)
+        aim_logger.track(len(replay) / max(1, args.replay_size), name="replay_fill_fraction", step=global_step)
         for action_name, count in action_type_counts.items():
             aim_logger.track(count / max(1, global_step + 1), name="action_type_fraction", step=global_step, context={"action_type": action_name})
         if recent_returns:
@@ -1272,7 +1125,7 @@ def train(args: argparse.Namespace) -> Path:
         "max_abs_target_q": float(np.max([s.target_abs_max for s in optimize_stats_history])) if optimize_stats_history else 0.0,
         "mean_td_abs": float(np.mean([s.td_abs_mean for s in optimize_stats_history])) if optimize_stats_history else 0.0,
         "mean_grad_norm": float(np.mean([s.grad_norm for s in optimize_stats_history])) if optimize_stats_history else 0.0,
-        "replay_fill_fraction_final": float(len(replay) / max(1, replay.capacity)),
+        "replay_fill_fraction_final": float(len(replay) / max(1, args.replay_size)),
         "action_type_counts": action_type_counts,
         "debug_questions": question_counters,
         "tasks_per_episode": int(args.tasks_per_episode),
