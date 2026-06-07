@@ -760,7 +760,9 @@ def _optimize(
     if main_indices is not None:
         n_main = main_indices.shape[0]
         main_td_abs = td_error.abs()[:n_main].squeeze(1)
-        replay.update_priority(main_indices, main_td_abs + per_eps)
+        per_clip = float(getattr(args, "per_clip", 10.0) or 10.0)
+        priorities = main_td_abs.clamp(max=per_clip) + per_eps
+        replay.update_priority(main_indices, priorities)
 
     return OptimizeStats(
         loss=float(loss.item()),
@@ -1470,6 +1472,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--per-alpha", type=float, default=0.0, help="PER α: 0 = uniform, >0 enables PrioritizedReplayBuffer with this α.")
     parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
     parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")
+    parser.add_argument("--per-clip", type=float, default=10.0, help="Clip |TD| at this value before computing PER priority (breaks feedback loop).")
     parser.add_argument("--post-train-eval-tasks", type=int, default=25)
     parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
     parser.add_argument("--post-train-log-trajectories", type=int, default=10)
