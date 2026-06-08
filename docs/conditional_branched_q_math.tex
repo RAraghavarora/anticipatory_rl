@@ -11,7 +11,8 @@
 \begin{document}
 \maketitle
 
-\section*{Setup}
+\section{Setup}
+\label{sec:setup}
 
 Let the structured restaurant action be
 \[
@@ -35,7 +36,8 @@ z = \texttt{object2}.
 
 The valid sets $\mathcal{T}(s)$, $\mathcal{X}(s,t)$, $\mathcal{Y}(s,t,x)$, and $\mathcal{Z}(s,t,x,y)$ are induced by the environment masks.
 
-\section*{Conditional Branched Joint Q}
+\section{Conditional Branched Joint Q}
+\label{sec:joint-q}
 
 We define a joint action-value function
 \[
@@ -51,19 +53,20 @@ Q(s,t,x,y,z)
 + q_z(s,t,x,y,z).
 \end{equation}
 
-This is a \emph{joint} Q-function because it scores the full structured action. It is also \emph{autoregressive} because each later term is conditioned on earlier choices.
+This is a \emph{joint} Q-function because it scores the full structured action. It is also \emph{autoregressive} because each later term is conditioned on earlier choices. The current implementation in this repository uses the dueling-style decomposition described in Section~\ref{sec:dueling-form}.
 
 \paragraph{Interpretation.}
 \begin{itemize}
-  \item $q_t(s,t)$ scores the choice of action type.
-  \item $q_x(s,t,x)$ scores the first argument given the action type.
-  \item $q_y(s,t,x,y)$ scores the second argument given previous choices.
-  \item $q_z(s,t,x,y,z)$ scores the final argument given previous choices.
+  \item $q_t(s,t)$ is the stage contribution for the action type: a learned scalar function of the state and the chosen action type (a joint score over $(s,t)$).
+  \item $q_x(s,t,x)$ is a learned, advantage‑style contribution that jointly scores the state, action type, and first argument; it is a function of $(s,t,x)$ and should be read as a value (score), not as a conditional probability over $x$ given $(s,t)$.
+  \item $q_y(s,t,x,y)$ is a learned contribution that jointly scores $(s,t,x,y)$ and captures the incremental value of choosing $y$ given the prefix.
+  \item $q_z(s,t,x,y,z)$ is a learned contribution that jointly scores $(s,t,x,y,z)$ and captures the incremental value of choosing $z$ given the prefix.
 \end{itemize}
 
-Unlike the current unconditional additive factorization, the argument terms are not shared independently across incompatible action types.
+Unlike an unconditional additive factorization, the argument terms here are joint score functions tied to the action prefix rather than statistical conditional distributions; they are not normalized over their arguments.
 
-\section*{Suffix Value Functions}
+\section{Suffix Value Functions}
+\label{sec:suffix-values}
 
 Define the optimal suffix values recursively:
 \begin{align}
@@ -87,7 +90,8 @@ q_z(s,t,x,y,z).
 
 These are not separate environment values. They are the optimal continuation values induced by the autoregressive decomposition in Equation~\eqref{eq:autoregressive-q}.
 
-\section*{Greedy Decoding}
+\section{Greedy Decoding}
+\label{sec:greedy-decoding}
 
 The greedy action under this model is obtained by backward-consistent sequential maximization.
 
@@ -145,7 +149,8 @@ a^* \in \arg\max_a Q(s,a).
 \]
 That alignment is the main reason to prefer this formulation over unconditional branch-wise argmax.
 
-\section*{Bellman Target}
+\section{Bellman Target}
+\label{sec:bellman-target}
 
 For a transition $(s,a,r,s',d)$ with terminal flag $d \in \{0,1\}$, the standard Q-learning target is
 \begin{equation}
@@ -179,28 +184,10 @@ r + \gamma (1-d) Q_{\mathrm{tgt}}(s',a'_*),
 a'_* \in \arg\max_{a'} Q_{\mathrm{online}}(s',a').
 \end{equation}
 
-\section*{Model Architecture}
+\section{Dueling-Style Conditional Architecture}
+\label{sec:dueling-form}
 
-One suitable conditional branched architecture is:
-\begin{align}
-h(s) &= f_{\theta}(s), \\
-q_t(s,t) &= g_t(h(s), t), \\
-q_x(s,t,x) &= g_x(h(s), \phi_t(t), x), \\
-q_y(s,t,x,y) &= g_y(h(s), \phi_t(t), \phi_x(x), y), \\
-q_z(s,t,x,y,z) &= g_z(h(s), \phi_t(t), \phi_x(x), \phi_y(y), z),
-\end{align}
-where
-\begin{itemize}
-  \item $f_{\theta}$ is a shared state encoder,
-  \item $\phi_t, \phi_x, \phi_y$ are learned embeddings of earlier choices,
-  \item $g_t, g_x, g_y, g_z$ are stage-specific heads.
-\end{itemize}
-
-This is ``branched'' in the implementation sense, but the branches are conditional rather than independent.
-
-\section*{Optional Dueling-Style Form}
-
-If desired, a dueling-style decomposition can be added in a way that remains compatible with the autoregressive joint Q semantics. The clean version is to use a single state-value baseline
+A dueling-style decomposition can be added in a way that remains compatible with the autoregressive joint Q semantics. The clean version is to use a single state-value baseline
 \[
 V(s),
 \]
@@ -221,10 +208,10 @@ V(s)
 +
 \Bigl(
 A_t(s,t) - \bar{A}_t(s)
-\Bigr), \\
+\Bigr), \label{eq:q_t-dueling}\\
 q_x(s,t,x)
 &=
-A_x(s,t,x) - \bar{A}_x(s,t), \\
+A_x(s,t,x) - \bar{A}_x(s,t), \label{eq:q_x-dueling}\\
 q_y(s,t,x,y)
 &=
 A_y(s,t,x,y) - \bar{A}_y(s,t,x), \\
@@ -258,15 +245,27 @@ Q(s,t,x,y,z)
 = q_t(s,t) + q_x(s,t,x) + q_y(s,t,x,y) + q_z(s,t,x,y,z).
 \]
 
+\paragraph{Implementation.}
+This formulation is implemented by the \texttt{RestaurantQNetwork} class in \texttt{anticipatory\_rl/agents/restaurant/dqn.py}.
+The components are:
+\begin{itemize}
+    \item $h(s)$ from \texttt{encoder} (line 200).
+    \item $V(s)$ from \texttt{value\_head} (line 206).
+    \item $A_t(s,t)$ from \texttt{action\_type\_adv\_head} (line 207).
+    \item $A_x, A_y, A_z$ from \texttt{object1\_adv\_head}, \texttt{location\_adv\_head}, and \texttt{object2\_adv\_head} respectively (lines 213--227).
+    \item The centered contributions in Equations~\eqref{eq:q_t-dueling} and~\eqref{eq:q_x-dueling} are computed by the \texttt{*\_scores} methods (lines 232--284).
+\end{itemize}
+
 \paragraph{Why this is better than stage-specific value heads.}
 It is tempting to introduce separate learned value terms such as $V_x(s,t)$ or $V_y(s,t,x)$ and then add them to the stage contributions. However, that creates an identifiability problem: if two learned terms have the same conditioning context and are simply added together, the model can shift mass between them without changing the total Q-value. Using a single global baseline $V(s)$ plus centered conditional advantages avoids that redundancy.
 
 \paragraph{Interpretation.}
-The terms $q_t, q_x, q_y, q_z$ should be understood as centered incremental contributions to the total joint Q-value, not as independent Bellman Q-functions. The actual continuation value after fixing a prefix is still given by the suffix maximization defined earlier in the note.
+The terms $q_t, q_x, q_y, q_z$ should be understood as centered incremental contributions to the total joint Q-value, not as independent Bellman Q-functions. The actual continuation value after fixing a prefix is still given by the suffix maximization defined earlier in Section~\ref{sec:suffix-values}.
 
 This can improve optimization, but it does not change the main semantic requirement: later stages must be conditioned on earlier ones, and decoding must remain aligned with the joint autoregressive Q.
 
-\section*{Restaurant-Specific Instantiation}
+\section{Restaurant-Specific Instantiation}
+\label{sec:instantiation}
 
 For the current environment, a natural specialization is
 \begin{equation}
@@ -281,9 +280,10 @@ q_{\mathrm{type}}(s,\texttt{type})
 
 For action types that do not use some arguments, the corresponding valid set is a singleton containing the ``none'' token, so the same equations still apply without case-splitting.
 
-\section*{Why This Fixes the Current Design Problem}
+\section{Why This Fixes the Prior Design}
+\label{sec:why-fix}
 
-The current unconditional factorization effectively assumes that argument scores are reusable across unrelated action types. In contrast, the conditional branched model ensures:
+The prior unconditional factorization effectively assumed that argument scores were reusable across unrelated action types. In contrast, the conditional branched model ensures:
 \begin{itemize}
   \item object preferences are action-type dependent,
   \item location preferences are conditioned on the action type and earlier arguments,

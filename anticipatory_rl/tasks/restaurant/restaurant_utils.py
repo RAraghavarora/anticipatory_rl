@@ -32,8 +32,15 @@ def sample_task(
         return RestaurantTask(task_type=ttype, target_location=target_location, target_kind=None)
 
     if ttype == "pick_place":
-        object_name = random.choice(env.object_names)
-        target_location = random.choice(env.locations)
+        for _ in range(50):
+            object_name = random.choice(list(env.object_names))
+            obj = env.state.objects[object_name]
+            if obj.kind in {"water", "coffeegrinds"}:
+                continue
+            if obj.contained_in is not None:
+                continue
+            break
+        target_location = random.choice(list(env.locations))
         return RestaurantTask(task_type=ttype, target_location=target_location, target_kind=None, object_name=object_name)
 
     target_kind = env._weighted_choice(env.wash_kind_distribution, env.object_kinds)

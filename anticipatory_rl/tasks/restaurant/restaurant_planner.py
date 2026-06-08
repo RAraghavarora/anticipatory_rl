@@ -33,6 +33,7 @@ class RestaurantPlannerState:
     agent_location: str
     holding: str | None
     objects: Dict[str, RestaurantObjectState]
+    bread_spread: str | None = None
 
     @classmethod
     def from_env(cls, env: RestaurantSymbolicEnv) -> "RestaurantPlannerState":
@@ -40,6 +41,7 @@ class RestaurantPlannerState:
             agent_location=str(env.state.agent_location),
             holding=None if env.state.holding is None else str(env.state.holding),
             objects={k: copy.deepcopy(v) for k, v in env.state.objects.items()},
+            bread_spread=None if env.state.bread_spread is None else str(env.state.bread_spread),
         )
 
     def copy(self) -> "RestaurantPlannerState":
@@ -47,6 +49,7 @@ class RestaurantPlannerState:
             agent_location=self.agent_location,
             holding=self.holding,
             objects={k: copy.deepcopy(v) for k, v in self.objects.items()},
+            bread_spread=self.bread_spread,
         )
 
 
@@ -73,17 +76,17 @@ def _line_cost_from_action(action_name: str, args: Sequence[str], env: Restauran
         src, dst = args[0], args[1]
         return float(env.paper2_move_scale * env._dijkstra_distance(src, dst))
     if action_name == "pick":
-        return float(fixed.get("pick", 0.0))
+        return float(fixed.get("pick", 100))
     if action_name == "place":
-        return float(fixed.get("place", 0.0))
+        return float(fixed.get("place", 100))
     if action_name == "wash":
-        return float(fixed.get("wash", 0.0))
-    if action_name == "fill-water":
-        return float(fixed.get("fill", 0.0))
-    if action_name == "brew-coffee":
-        return float(fixed.get("brew", 0.0))
-    if action_name == "fill-fruit":
-        return float(fixed.get("fruit", 0.0))
+        return float(fixed.get("wash", 200))
+    if action_name == "fill":
+        return float(fixed.get("fill", 1000))
+    if action_name == "make-coffee":
+        return float(fixed.get("make_coffee", 50))
+    if action_name == "make-fruit-bowl":
+        return float(fixed.get("make_fruit_bowl", 100))
     return 0.0
 
 
@@ -119,29 +122,34 @@ def task_goal_clauses(
     if task.task_type == "serve_water":
         assert task.target_location is not None
         candidates = [n for n, o in state.objects.items() if o.kind in {"cup", "mug"}]
-        return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (water {o}))' for o in candidates])})"]
+        return [f"(or {' '.join([f'(and (is-at {o} {task.target_location}) (filled-with water {o}))' for o in candidates])})"]
     if task.task_type == "make_coffee":
         assert task.target_location is not None
         candidates = [n for n, o in state.objects.items() if o.kind in {"cup", "mug"}]
-        return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (coffee {o}))' for o in candidates])})"]
+        return [f"(or {' '.join([f'(and (is-at {o} {task.target_location}) (filled-with coffee {o}))' for o in candidates])})"]
     if task.task_type == "make_fruit_bowl":
         assert task.target_location is not None
-        candidates = _objects_of_kind(state, "bowl")
-        return [f"(or {' '.join([f'(and (at {o} {task.target_location}) (apple {o}))' for o in candidates])})"]
+        bowls = _objects_of_kind(state, "bowl")
+        apples = _objects_of_kind(state, "apple")
+        disj_terms: List[str] = []
+        for bowl in bowls:
+            for apple in apples:
+                disj_terms.append(f"(and (is-at {bowl} {task.target_location}) (is-in {apple} {bowl}))")
+        return [f"(or {' '.join(disj_terms)})"] if disj_terms else ["(and)"]
     if task.task_type == "clear_containers":
         assert task.target_location is not None
-        return [f"(not (at {o} {task.target_location}))" for o in state.objects.keys()]
+        return [f"(not (is-at {o} {task.target_location}))" for o in state.objects.keys()]
     if task.task_type == "wash_objects":
         assert task.target_kind is not None
         candidates = _objects_of_kind(state, task.target_kind)
         disj_terms: List[str] = []
         for o in candidates:
             for wloc in wash_ready_locations:
-                disj_terms.append(f"(and (at {o} {wloc}) (clean {o}) (empty {o}))")
+                disj_terms.append(f"(and (is-at {o} {wloc}) (not (is-dirty {o})) (not (filled-with water {o})) (not (filled-with coffee {o})))")
         return [f"(or {' '.join(disj_terms)})"] if disj_terms else ["(and)"]
     if task.task_type == "pick_place":
         assert task.object_name is not None and task.target_location is not None
-        return [f"(and (at {task.object_name} {task.target_location}) (handfree))"]
+        return [f"(and (is-at {task.object_name} {task.target_location}) (hand-is-free))"]
     raise ValueError(f"Unsupported task type: {task.task_type}")
 
 
@@ -162,45 +170,50 @@ def build_restaurant_problem_text(
     loc_decl = " ".join(locations) + " - location"
     object_block = f"    {obj_decl}\n    {loc_decl}\n"
 
-    init_lines: List[str] = [f"(agent-at {state.agent_location})"]
+    init_lines: List[str] = [f"(rob-at {state.agent_location})"]
     if state.holding is None:
-        init_lines.append("(handfree)")
+        init_lines.append("(hand-is-free)")
     else:
-        init_lines.append(f"(holding {state.holding})")
+        init_lines.append(f"(is-holding {state.holding})")
     for src, dst in _all_location_pairs(locations, coords):
         init_lines.append(f"(adjacent {src} {dst})")
-    for loc in env.service_locations:
-        init_lines.append(f"(service-loc {loc})")
-    for loc in env.wash_ready_locations:
-        init_lines.append(f"(wash-ready-loc {loc})")
-    if env.station_wash in env.location_index:
-        init_lines.append(f"(sink-loc {env.station_wash})")
     if env.station_water in env.location_index:
-        init_lines.append(f"(water-loc {env.station_water})")
+        init_lines.append(f"(is-fountain {env.station_water})")
     if env.station_coffee in env.location_index:
-        init_lines.append(f"(coffee-loc {env.station_coffee})")
-    if env.station_fruit in env.location_index:
-        init_lines.append(f"(fruit-loc {env.station_fruit})")
+        init_lines.append(f"(is-coffeemachine {env.station_coffee})")
+    if env.station_wash in env.location_index:
+        init_lines.append(f"(is-dishwasher {env.station_wash})")
+    if env.countertop_location in env.location_index:
+        init_lines.append(f"(is-countertop {env.countertop_location})")
+    init_lines.append("(is-liquid water)")
+    init_lines.append("(is-liquid coffee)")
+    init_lines.append("(= (total-cost) 0)")
 
     for name, obj in state.objects.items():
-        if obj.kind == "cup":
-            init_lines.append(f"(cup-kind {name})")
-        elif obj.kind == "mug":
-            init_lines.append(f"(mug-kind {name})")
-        elif obj.kind == "bowl":
-            init_lines.append(f"(bowl-kind {name})")
-        if obj.location != "__held__":
-            init_lines.append(f"(at {name} {obj.location})")
-        if not obj.dirty:
-            init_lines.append(f"(clean {name})")
-        if obj.contents == "empty":
-            init_lines.append(f"(empty {name})")
-        elif obj.contents == "water":
-            init_lines.append(f"(water {name})")
-        elif obj.contents == "coffee":
-            init_lines.append(f"(coffee {name})")
-        elif obj.contents == "apple":
-            init_lines.append(f"(apple {name})")
+        if obj.location is not None and obj.location != "__held__":
+            init_lines.append(f"(is-at {name} {obj.location})")
+        if obj.contained_in is not None:
+            init_lines.append(f"(is-in {name} {obj.contained_in})")
+        if obj.dirty:
+            init_lines.append(f"(is-dirty {name})")
+        if obj.kind in {"cup", "bowl", "mug"}:
+            init_lines.append(f"(is-fillable {name})")
+        if obj.kind == "bowl":
+            init_lines.append(f"(is-container {name})")
+        if obj.kind == "apple":
+            init_lines.append(f"(is-slicable {name})")
+        if obj.kind == "knife":
+            init_lines.append(f"(is-knife {name})")
+        if obj.kind == "coffeegrinds":
+            init_lines.append(f"(is-coffeegrinds {name})")
+        if obj.kind == "water":
+            init_lines.append(f"(is-liquid {name})")
+        init_lines.append(f"(is-pickable {name})")
+        init_lines.append(f"(is-washable {name})")
+        if obj.filled_with == "water":
+            init_lines.append(f"(filled-with water {name})")
+        elif obj.filled_with == "coffee":
+            init_lines.append(f"(filled-with coffee {name})")
 
     goal_clauses = task_goal_clauses(
         state,
@@ -213,10 +226,11 @@ def build_restaurant_problem_text(
 
     return (
         f"(define (problem {problem_name})\n"
-        f"  (:domain restaurant_symbolic)\n"
+        f"  (:domain restaurant)\n"
         f"  (:objects\n{object_block}  )\n"
         f"  (:init\n    {init_text}\n  )\n"
         f"  (:goal\n    (and\n      {goal_text}\n    )\n  )\n"
+        f"  (:metric minimize (total-cost))\n"
         f")\n"
     )
 
@@ -273,35 +287,36 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
     if name == "pick":
         obj_name = args[0]
         state.holding = obj_name
-        state.objects[obj_name].location = "__held__"
+        state.objects[obj_name].location = None
+        state.objects[obj_name].contained_in = None
         return
     if name == "place":
         obj_name, loc = args[0], args[1]
-        obj = state.objects[obj_name]
-        prev_contents = obj.contents
-        obj.location = loc
+        state.objects[obj_name].location = loc
+        state.objects[obj_name].contained_in = None
         state.holding = None
-        if loc in {"sink", "bus_tub"}:
-            if prev_contents != "empty":
-                obj.dirty = True
-            obj.contents = "empty"
-        elif loc in {"pass_counter", "table_left", "table_right"} and prev_contents != "empty":
-            obj.dirty = True
         return
     if name == "wash":
         obj_name = args[0]
         obj = state.objects[obj_name]
         obj.dirty = False
-        obj.contents = "empty"
+        obj.filled_with = None
         return
-    if name == "fill-water":
-        state.objects[args[0]].contents = "water"
+    if name == "fill":
+        cnt = args[0]
+        state.objects[cnt].filled_with = "water"
         return
-    if name == "brew-coffee":
-        state.objects[args[0]].contents = "coffee"
+    if name == "make-coffee":
+        obj = state.objects[args[0]]
+        obj.filled_with = "coffee"
+        obj.dirty = True
         return
-    if name == "fill-fruit":
-        state.objects[args[0]].contents = "apple"
+    if name == "make-fruit-bowl":
+        apple_name, bowl_name, knife_name, loc = args[0], args[1], args[2], args[3]
+        state.objects[apple_name].location = None
+        state.objects[apple_name].contained_in = bowl_name
+        state.objects[bowl_name].dirty = True
+        state.objects[knife_name].dirty = True
         return
 
 

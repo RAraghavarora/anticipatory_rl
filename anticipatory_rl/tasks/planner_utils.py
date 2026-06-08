@@ -13,8 +13,8 @@ def run_planner(
     """Invoke Fast Downward (or compatible planner) and return the sas_plan path."""
     cmd = [
         sys.executable,
-        str(planner),
-        str(domain),
+        str(planner.resolve()),
+        str(domain.resolve()),
         str(problem.resolve()),
         "--search",
         search,

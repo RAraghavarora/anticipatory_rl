@@ -1,3 +1,6 @@
+# Open questions
+# Which objects are non-pickable?
+
 def get_domain():
     DOMAIN_PDDL = """
     (define

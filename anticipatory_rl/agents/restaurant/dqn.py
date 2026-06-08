@@ -261,8 +261,9 @@ def _action_to_string(env: RestaurantSymbolicEnv, action: Mapping[str, int]) -> 
     return f"{action_type}(object1={object1_name}, location={location_name}, object2={object2_name})"
 
 
-def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[str, object]) -> Dict[str, int]:
-    assert task.get("task_type") == "pick_place"
+def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[str, object]) -> Dict[str, int] | None:
+    if task.get("task_type") != "pick_place":
+        return None
     object_name = str(task["object_name"])
     target_location = str(task["target_location"])
     obj_idx = env.object_name_index[object_name]
@@ -307,6 +308,8 @@ def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[s
 
 
 def _classify_pick_place_failure(env: RestaurantSymbolicEnv, task: Mapping[str, object], actions: List[Mapping[str, int]]) -> str:
+    if task.get("task_type") != "pick_place":
+        return "non_pick_place_task"
     object_name = str(task["object_name"])
     target_location = str(task["target_location"])
     picked = False
@@ -945,6 +948,8 @@ def _run_post_train_inference(
         oracle_steps = 0
         for _ in range(args.post_train_eval_max_steps):
             oracle_action = _choose_oracle_pick_place_action(oracle_env, task)
+            if oracle_action is None:
+                break
             oracle_actions.append(_action_to_string(oracle_env, oracle_action))
             _, _, oracle_success, oracle_truncated, _ = oracle_env.step(oracle_action)
             oracle_steps += 1

@@ -7,7 +7,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
-from anticipatory_rl.tasks.restaurant_planner import RestaurantPlannerState
+from anticipatory_rl.tasks.restaurant.restaurant_planner import RestaurantPlannerState
 
 
 @dataclass
@@ -54,7 +54,16 @@ def _object_feature(
     max_y: float,
 ) -> np.ndarray:
     obj = state.objects[name]
-    loc = state.agent_location if obj.location == "__held__" else obj.location
+    if state.holding == name:
+        loc = state.agent_location
+    elif obj.contained_in is not None and obj.contained_in in state.objects:
+        loc = state.objects[obj.contained_in].location
+        if loc is None:
+            loc = state.agent_location
+    elif obj.location is not None:
+        loc = obj.location
+    else:
+        loc = state.agent_location
     x, y = coords[loc]
     return np.array(
         [
@@ -64,13 +73,13 @@ def _object_feature(
             float(x) / max_x,
             float(y) / max_y,
             1.0 if obj.dirty else 0.0,
-            1.0 if obj.contents == "empty" else 0.0,
-            1.0 if obj.contents == "water" else 0.0,
-            1.0 if obj.contents == "coffee" else 0.0,
-            1.0 if obj.contents == "apple" else 0.0,
-            1.0 if obj.kind == "mug" else 0.0,
-            1.0 if obj.kind == "cup" else 0.0,
-            1.0 if obj.kind == "bowl" else 0.0,
+            1.0 if obj.filled_with is None and obj.contained_in is None else 0.0,  # empty
+            1.0 if obj.filled_with == "water" else 0.0,  # water
+            1.0 if obj.filled_with == "coffee" else 0.0,  # coffee
+            1.0 if obj.contained_in is not None else 0.0,  # apple (contained)
+            1.0 if obj.kind == "mug" else 0.0,  # mug
+            1.0 if obj.kind == "cup" else 0.0,  # cup
+            1.0 if obj.kind == "bowl" else 0.0,  # bowl
         ],
         dtype=np.float32,
     )
@@ -125,8 +134,15 @@ def build_restaurant_graph(
                 edge_dst.append(idx[b])
     # Object <-> location containment edges.
     for obj_name in obj_nodes:
-        loc = state.objects[obj_name].location
-        if loc == "__held__":
+        obj = state.objects[obj_name]
+        if state.holding == obj_name:
+            loc = state.agent_location
+        elif obj.contained_in is not None and obj.contained_in in state.objects:
+            container_loc = state.objects[obj.contained_in].location
+            loc = container_loc if container_loc is not None else state.agent_location
+        elif obj.location is not None:
+            loc = obj.location
+        else:
             loc = state.agent_location
         edge_src.append(idx[obj_name])
         edge_dst.append(idx[loc])
