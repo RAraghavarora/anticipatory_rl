@@ -232,13 +232,20 @@ def _compose_q_values(
     action_type_scores = q_net.action_type_scores(encoded, action_type_masks)
     q = action_type_scores.gather(1, action_types)
 
+    head_signatures = [ACTION_HEADS[ACTION_TYPES[int(t.item())]] for t in action_types.squeeze(1)]
+    no_arg_mask = torch.tensor([len(heads) == 0 for heads in head_signatures], dtype=torch.bool, device=encoded.device)
+    if bool(no_arg_mask.all().item()):
+        return q
+
     chosen_object1_masks = object1_masks[torch.arange(encoded.shape[0], device=encoded.device), action_types.squeeze(1)]
     object1_scores = q_net.object1_scores(encoded, action_types, chosen_object1_masks)
-    q = q + object1_scores.gather(1, object1)
+    object1_component = object1_scores.gather(1, object1)
+    q = q + torch.where(no_arg_mask.unsqueeze(1), torch.zeros_like(object1_component), object1_component)
 
     chosen_location_masks = location_masks[torch.arange(encoded.shape[0], device=encoded.device), action_types.squeeze(1)]
     location_scores = q_net.location_scores(encoded, action_types, object1, chosen_location_masks)
-    q = q + location_scores.gather(1, location)
+    location_component = location_scores.gather(1, location)
+    q = q + torch.where(no_arg_mask.unsqueeze(1), torch.zeros_like(location_component), location_component)
 
     chosen_object2_masks = object2_masks[
         torch.arange(encoded.shape[0], device=encoded.device),
@@ -246,7 +253,8 @@ def _compose_q_values(
         object1.squeeze(1),
     ]
     object2_scores = q_net.object2_scores(encoded, action_types, object1, location, chosen_object2_masks)
-    q = q + object2_scores.gather(1, object2)
+    object2_component = object2_scores.gather(1, object2)
+    q = q + torch.where(no_arg_mask.unsqueeze(1), torch.zeros_like(object2_component), object2_component)
     return q
 
 
@@ -375,6 +383,32 @@ def _store_transition(
     )
 
 
+def _auto_complete_replay_action_and_masks(
+    env: RestaurantSymbolicEnv,
+    masks: Dict[str, np.ndarray],
+) -> tuple[Dict[str, int], Dict[str, np.ndarray]]:
+    """Build a replay-only internal event action for an auto-satisfied task."""
+    auto_idx = env.action_type_index["auto_complete"]
+    action = {
+        "action_type": auto_idx,
+        "object1": env.none_object_index,
+        "location": env.none_location_index,
+        "object2": env.none_object_index,
+    }
+    replay_masks = {key: np.asarray(value, dtype=np.float32).copy() for key, value in masks.items()}
+    replay_masks["valid_action_type_mask"][:] = 0.0
+    replay_masks["valid_action_type_mask"][auto_idx] = 1.0
+    replay_masks["valid_object1_mask"][:] = 0.0
+    replay_masks["valid_object1_mask"][auto_idx, env.none_object_index] = 1.0
+    replay_masks["valid_location_mask"][:] = 0.0
+    replay_masks["valid_location_mask"][auto_idx, env.none_location_index] = 1.0
+    replay_masks["valid_object2_mask"][:] = 0.0
+    replay_masks["valid_object2_mask"][auto_idx, env.none_object_index, env.none_object_index] = 1.0
+    if "valid_action_mask" in replay_masks:
+        replay_masks["valid_action_mask"] = replay_masks["valid_action_type_mask"].copy()
+    return action, replay_masks
+
+
 def _seed_replay_with_oracle(
     replay: ReplayBuffer,
     env: RestaurantSymbolicEnv,
@@ -484,6 +518,16 @@ def _select_greedy_actions_batch(
         action_type_tensor = torch.full((batch_size, 1), action_type_t, dtype=torch.int64, device=device)
         action_type_component = action_type_scores[:, action_type_t]
         heads = ACTION_HEADS[action_name]
+
+        if heads == ():
+            total = action_type_component
+            should_update = type_valid & (total > best_total)
+            best_total = torch.where(should_update, total, best_total)
+            best_action_type = torch.where(should_update, torch.full_like(best_action_type, action_type_t), best_action_type)
+            best_object1 = torch.where(should_update, torch.full_like(best_object1, none_object), best_object1)
+            best_location = torch.where(should_update, torch.full_like(best_location, none_location), best_location)
+            best_object2 = torch.where(should_update, torch.full_like(best_object2, none_object), best_object2)
+            continue
 
         if heads == ("object1",):
             # Full within-type joint argmax over object1.
@@ -1162,6 +1206,7 @@ def train(args: argparse.Namespace) -> Path:
     task_records: List[Dict[str, float | int | bool | str | None]] = []
     optimize_stats_history: List[OptimizeStats] = []
     action_type_counts = {name: 0 for name in ACTION_TYPES}
+    replay_auto_complete_count = 0
     question_counters = {
         "wrong_object_choice": 0,
         "failed_to_move_to_object": 0,
@@ -1219,8 +1264,16 @@ def train(args: argparse.Namespace) -> Path:
             env_tasks_since_reset = 0
 
         next_masks = extract_masks(next_info)
+        store_action = dict(action)
+        store_masks = masks
+        if bool(next_info.get("auto_success", False)):
+            store_action, store_masks = _auto_complete_replay_action_and_masks(env, masks)
+            replay_auto_complete_count += 1
+        store_next_masks = next_masks
+        if bool(next_info.get("next_auto_satisfied", False)):
+            _, store_next_masks = _auto_complete_replay_action_and_masks(env, next_masks)
         transition_done = bool(bootstrap_done or truncated)
-        _store_transition(replay, obs, action, reward, masks, next_obs, next_masks, transition_done, success)
+        _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, success)
         if reward > 0.0:
             positive_reward_transitions += 1
 
@@ -1418,6 +1471,7 @@ def train(args: argparse.Namespace) -> Path:
         "mean_td_abs": float(np.mean([s.td_abs_mean for s in optimize_stats_history])) if optimize_stats_history else 0.0,
         "mean_grad_norm": float(np.mean([s.grad_norm for s in optimize_stats_history])) if optimize_stats_history else 0.0,
         "replay_fill_fraction_final": float(len(replay) / max(1, args.replay_size)),
+        "replay_auto_complete_count": int(replay_auto_complete_count),
         "action_type_counts": action_type_counts,
         "debug_questions": question_counters,
         "tasks_per_episode": int(args.tasks_per_episode),

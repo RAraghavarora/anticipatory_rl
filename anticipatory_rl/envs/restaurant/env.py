@@ -95,6 +95,7 @@ ACTION_TYPES: Tuple[str, ...] = (
     "pour",
     "refill_water",
     "drain",
+    "auto_complete",
 )
 ACTION_TYPE_TO_INDEX: Dict[str, int] = {name: idx for idx, name in enumerate(ACTION_TYPES)}
 ACTION_HEADS: Dict[str, Tuple[str, ...]] = {
@@ -109,6 +110,7 @@ ACTION_HEADS: Dict[str, Tuple[str, ...]] = {
     "pour": ("object1", "object2"),
     "refill_water": ("object1", "object2"),
     "drain": ("object1",),
+    "auto_complete": (),
 }
 
 # Exported for compatibility with existing imports.
@@ -263,12 +265,11 @@ class RestaurantSymbolicEnv(Env):
         self._paper2_last_step_cost = 0.0
         self._paper2_last_step_breakdown = {"move_cost": 0.0, "fixed_cost": 0.0, "action_type": "none", "valid": True}
         self._resample_task()
+        self._resample_first_task_if_auto()
         return self._obs(), self._info(success=False)
 
     def step(self, action: Mapping[str, int]):
         if self._pending_auto_success:
-            # Chosen task is already completed in the initial state.
-            #TODO: Change the variable name from "pending_auto_success"
             self._pending_auto_success = False
             reward = self.success_reward
             success = True
@@ -276,7 +277,7 @@ class RestaurantSymbolicEnv(Env):
             self._resample_task()
             self._task_steps = 0
             self._paper2_task_cost = 0.0
-            return self._obs(), reward, success, truncated, self._info(success=success)
+            return self._obs(), reward, success, truncated, self._info(success=success, auto_success=True)
 
         parsed = self._normalize_action(action)
         self._task_steps += 1
@@ -562,6 +563,25 @@ class RestaurantSymbolicEnv(Env):
             return self.locations[0]
         return DEFAULT_LOCATIONS[0]
 
+    def _resample_first_task_if_auto(self) -> None:
+        if self._task_library:
+            return
+        if not self._pending_auto_success:
+            return
+        from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task as _sample
+
+        for _ in range(100):
+            task = _sample(self)
+            self.set_task(
+                task.task_type,
+                target_location=task.target_location,
+                target_kind=task.target_kind,
+                object_name=task.object_name,
+                task_source="iid",
+            )
+            if not self._pending_auto_success:
+                return
+
     def _resample_task(self) -> None:
         if self._task_library:
             task = self._task_library[self._task_library_index % len(self._task_library)]
@@ -585,18 +605,6 @@ class RestaurantSymbolicEnv(Env):
             object_name=task.object_name,
             task_source="iid",
         )
-        if self._pending_auto_success:
-            for _ in range(100):
-                task = _sample(self)
-                self.set_task(
-                    task.task_type,
-                    target_location=task.target_location,
-                    target_kind=task.target_kind,
-                    object_name=task.object_name,
-                    task_source="iid",
-                )
-                if not self._pending_auto_success:
-                    return
 
     def _task_already_satisfied(self) -> bool:
         if self.task.task_type == "serve_water":
@@ -1317,7 +1325,7 @@ class RestaurantSymbolicEnv(Env):
         self._action_mask_cache = {key: value.copy() for key, value in masks.items()}
         return masks
 
-    def _info(self, *, success: bool) -> Dict[str, Any]:
+    def _info(self, *, success: bool, auto_success: bool = False) -> Dict[str, Any]:
         masks = self._compute_action_masks()
         return {
             "agent_location": self.state.agent_location,
@@ -1340,6 +1348,7 @@ class RestaurantSymbolicEnv(Env):
                 "object_name": self.task.object_name,
             },
             "success": bool(success),
+            "auto_success": bool(auto_success),
             "task_source": self._task_source,
             "layout_id": self._active_layout_id,
             "next_auto_satisfied": bool(self._pending_auto_success),
