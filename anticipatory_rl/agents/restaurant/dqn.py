@@ -1085,8 +1085,8 @@ def train(args: argparse.Namespace) -> Path:
         replay = ReplayBuffer(storage=LazyTensorStorage(max_size=args.replay_size))
 
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
-    if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
-        raise ValueError("For anticipatory runs, env-reset-tasks must equal tasks-per-episode.")
+    # if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
+    #     raise ValueError("For anticipatory runs, env-reset-tasks must equal tasks-per-episode.")
 
     diagnostics = bool(getattr(args, "diagnostics", False))
     diag_interval = max(1, int(getattr(args, "diagnostics_interval", 1000)))
