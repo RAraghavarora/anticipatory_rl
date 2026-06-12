@@ -1519,7 +1519,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fill-cost", type=float, default=1.0)
     parser.add_argument("--brew-cost", type=float, default=2.0)
     parser.add_argument("--fruit-cost", type=float, default=2.0)
-    parser.add_argument("--config-path", type=Path, default=Path("anticipatory_rl/configs/restaurant/restaurant_symbolic.yaml"))
+    parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_restaurant.yaml"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output-name", type=str, default="restaurant_dqn.pt")

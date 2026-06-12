@@ -18,6 +18,9 @@ from anticipatory_rl.envs.restaurant.env import (
 )
 
 
+FULL_SYMBOLIC_CONFIG_PATH = Path("anticipatory_rl/configs/restaurant/restaurant_symbolic.yaml")
+
+
 def _make_clean_state(env: RestaurantSymbolicEnv, *, agent_location: str, holding: str | None = None) -> RestaurantState:
     objects = {}
     for name, kind in env.object_specs:
@@ -135,7 +138,7 @@ class RestaurantFactoredEnvTests(unittest.TestCase):
         self.assertEqual(tuple(q_value.shape), (1, 1))
 
     def test_drain_mask_requires_held_water_at_fountain(self) -> None:
-        env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
+        env = RestaurantSymbolicEnv(config_path=FULL_SYMBOLIC_CONFIG_PATH)
         env.reset(seed=0)
         env.state = _make_clean_state(env, agent_location="water_station", holding="cup_small")
         env.state.objects["cup_small"].filled_with = "water"

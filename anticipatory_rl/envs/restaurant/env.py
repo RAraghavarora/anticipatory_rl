@@ -14,7 +14,7 @@ from gymnasium import Env, spaces
 from .pddl_domain import get_pddl_cost
 
 
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "restaurant" / "restaurant_symbolic.yaml"
+CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "restaurant" / "toy_restaurant.yaml"
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -1155,6 +1155,7 @@ class RestaurantSymbolicEnv(Env):
         masks["valid_object2_mask"][action_type_idx, self.none_object_index, self.none_object_index] = 1.0
 
     def _build_action_masks(self) -> Dict[str, np.ndarray]:
+        # TODO: this is not optimal. replace looping with vectorized operations
         masks = self._empty_action_masks()
         held_name = self.state.holding
         held_idx = self.none_object_index if held_name is None else self.object_name_index[held_name]
