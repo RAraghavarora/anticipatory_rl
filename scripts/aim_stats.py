@@ -1,0 +1,88 @@
+"""Export Aim metrics to CSV using query_metrics — the only SDK path that resolves
+run.run_label correctly (meta_attrs_tree.collect() is buggy/cached).
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+from aim import Repo
+
+
+KNOWN_LABELS = [
+    "ablation_arch",
+    "ablation_baseline",
+    "ablation_explore",
+    "ablation_reward",
+    "anticipatory_toy",
+    "anticipatory_toy_2",
+    "modified_branching",
+    "myopic_rest",
+    "myopic_restaurant",
+    "myopic_toy_auto_complete",
+    "per_oracle_50k",
+    "prot_25",
+    "prot_control",
+    "restaurant_anticipatory_fresh_auto_complete",
+]
+
+METRICS = [
+    "td_abs_mean",
+    "loss",
+    "greedy_success_rolling",
+    "success_rate_rolling",
+    "task_return",
+    "task_steps",
+    "q_selected_mean",
+    "target_mean",
+    "q_by_action_type",
+    "avg_loss_rolling",
+]
+
+repo = Repo(".")
+
+# Discover hash → label
+hash_to_label: dict[str, str] = {}
+for label in KNOWN_LABELS:
+    q = repo.query_metrics(f'run.run_label == "{label}" and metric.name == "loss"')
+    for rm in q.iter_runs():
+        hash_to_label[rm.run.hash] = label
+
+print(f"Found {len(hash_to_label)} run hashes across {len(set(hash_to_label.values()))} labels")
+
+# Collect all metrics for all known labels
+metrics_list = '", "'.join(METRICS)
+query = repo.query_metrics(f'metric.name in ["{metrics_list}"]')
+
+raw_records: list[dict] = []
+for run_metrics in query.iter_runs():
+    rh = run_metrics.run.hash
+    label = hash_to_label.get(rh, f"Run: {rh}")
+
+    for metric in run_metrics:
+        steps, values = metric.values.sparse_numpy()
+        ctx = metric.context.to_dict()
+        action = ctx.get("action_type", "")
+        metric_label = f"{metric.name}_{action}" if action else metric.name
+
+        for step, val in zip(steps, values):
+            raw_records.append({
+                "run_label": label,
+                "run_hash": rh,
+                "raw_step": step,
+                "metric_label": metric_label,
+                "value": val,
+            })
+
+# Pivot to wide: one column per metric_label
+df = pd.DataFrame(raw_records)
+df["step"] = df.groupby("run_label")["raw_step"].rank(method="dense").astype(int) - 1
+
+df_wide = df.pivot_table(
+    index=["run_label", "step"],
+    columns="metric_label",
+    values="value",
+    aggfunc="first",
+).reset_index()
+
+df_wide.to_csv("aim_metrics_wide.csv", index=False)
+print(f"Done – {len(df_wide):,} rows × {len(df_wide.columns)} columns → aim_metrics_wide.csv")
