@@ -1478,14 +1478,19 @@ def train(args: argparse.Namespace) -> Path:
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "seed": int(args.seed),
     }
+    # Disabled: this reset-per-trajectory smoke test is misleading for
+    # anticipatory learning because it removes persistent-world auto-completion.
+    # Use restaurant_dqn_infer.py with tasks_per_reset > 1 for evaluation.
+    summary["post_train_inference"] = {
+        "disabled": True,
+        "reason": "Use persistent inference via restaurant_dqn_infer.py; reset-per-task smoke tests suppress anticipatory effects.",
+    }
     with (run_dir / "train_summary.json").open("w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
     with (run_dir / "task_records.json").open("w", encoding="utf-8") as fh:
         json.dump(task_records, fh, indent=2)
     with (run_dir / "train_args.json").open("w", encoding="utf-8") as fh:
         json.dump(vars(args), fh, indent=2, default=str)
-    post_train_summary = _run_post_train_inference(q_net, args, device, run_dir, aim_logger)
-    summary["post_train_inference"] = post_train_summary
     aim_logger.set_metadata("summary", summary)
     aim_logger.set_metadata("checkpoint_path", str(output_path))
     aim_logger.close()
