@@ -1,0 +1,103 @@
+# Toy Level 1.5 — intermediate difficulty.
+# Same 5 locations / 8 objects as toy_restaurant.yaml.
+# Two changes:
+#   1. pick_place is up-weighted so the agent gets more practice on it.
+#   2. Apple spawns at counter (easy) or coffee_bar (requires fetch for fruit bowl),
+#      so make_fruit_bowl is no longer always precondition-satisfied.
+locations:
+  - name: counter
+    coord: [0, 0]
+    roles: [countertop]
+  - name: coffee_bar
+    coord: [1, 0]
+    roles: [coffeemachine, fountain]
+  - name: sink
+    coord: [2, 0]
+    roles: [dishwasher]
+  - name: pass
+    coord: [3, 0]
+    roles: [servingtable]
+  - name: bus_tub
+    coord: [4, 0]
+
+stations:
+  water: coffee_bar
+  coffee: coffee_bar
+  fruit: counter
+  wash: sink
+  countertop: counter
+
+service_locations:
+  - pass
+
+wash_ready_locations:
+  - counter
+
+dirty_drop_locations:
+  - sink
+  - bus_tub
+
+object_kinds: [cup, water, coffeegrinds, apple, bowl, knife]
+contents: [empty, water, coffee]
+
+task_types:
+  - serve_water
+  - make_coffee
+  - make_fruit_bowl
+  - clear_containers
+  - wash_objects
+  - pick_place
+
+object_specs:
+  - [cup_0, cup]
+  - [cup_1, cup]
+  - [cup_2, cup]
+  - [water_0, water]
+  - [coffee_0, coffeegrinds]
+  - [apple_0, apple]
+  - [bowl_0, bowl]
+  - [knife_0, knife]
+
+reset_location_distribution:
+  cup:
+    counter: 0.5
+    bus_tub: 0.5
+  water:
+    coffee_bar: 1.0
+  coffeegrinds:
+    coffee_bar: 1.0
+  apple:
+    counter: 0.5
+    coffee_bar: 0.5
+  bowl:
+    counter: 1.0
+  knife:
+    counter: 1.0
+
+service_location_distribution:
+  pass: 1.0
+
+wash_kind_distribution:
+  cup: 1.0
+
+task_distribution:
+  serve_water: 0.14
+  make_coffee: 0.14
+  make_fruit_bowl: 0.14
+  clear_containers: 0.14
+  wash_objects: 0.14
+  pick_place: 0.30
+
+paper2_cost:
+  enabled: true
+  move:
+    scale: 25.0
+    grid:
+      width: 6
+      height: 3
+      location_cells:
+        counter: [0, 1]
+        coffee_bar: [1, 1]
+        sink: [2, 1]
+        pass: [3, 1]
+        bus_tub: [4, 1]
