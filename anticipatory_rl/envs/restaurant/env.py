@@ -422,6 +422,31 @@ class RestaurantSymbolicEnv(Env):
             kind: {loc: float(reset_loc_cfg.get(kind, {}).get(loc, 0.0)) for loc in self.locations}
             for kind in self.object_kinds
         }
+        reset_dirty_cfg = schema.get("reset_dirty_probability", {})
+        self.reset_dirty_probability = {
+            kind: float(reset_dirty_cfg.get(kind, 0.0)) for kind in self.object_kinds
+        }
+        self._use_reset_dirty_probability = bool(reset_dirty_cfg)
+        reset_object_cfg = schema.get("reset_object_overrides", {})
+        self.reset_object_overrides: Dict[str, Dict[str, Any]] = {}
+        if isinstance(reset_object_cfg, Mapping):
+            for name, item in reset_object_cfg.items():
+                if str(name) not in self.object_name_index or not isinstance(item, Mapping):
+                    continue
+                override: Dict[str, Any] = {}
+                location = item.get("location")
+                if location is not None:
+                    if str(location) not in self.location_index:
+                        raise ValueError(f"Unknown reset override location for {name}: {location}")
+                    override["location"] = str(location)
+                if "dirty" in item:
+                    override["dirty"] = bool(item["dirty"])
+                filled_with = item.get("filled_with")
+                if filled_with is not None:
+                    if str(filled_with) not in self.content_index or str(filled_with) == "empty":
+                        raise ValueError(f"Unknown reset override fill for {name}: {filled_with}")
+                    override["filled_with"] = str(filled_with)
+                self.reset_object_overrides[str(name)] = override
         self._task_library = self._parse_task_library(schema.get("task_library", []))
         self._task_library_index = 0
 
@@ -1022,8 +1047,13 @@ class RestaurantSymbolicEnv(Env):
     def _sample_object_layout(self) -> Dict[str, RestaurantObjectState]:
         objects: Dict[str, RestaurantObjectState] = {}
         for name, kind in self.object_specs:
-            location = self._weighted_choice(self.reset_location_distribution.get(kind, {}), self.locations)
+            override = self.reset_object_overrides.get(name, {})
+            location = str(override.get("location", self._weighted_choice(self.reset_location_distribution.get(kind, {}), self.locations)))
             dirty, filled_with = self._sample_object_status(kind, location)
+            if "dirty" in override:
+                dirty = bool(override["dirty"])
+            if "filled_with" in override:
+                filled_with = str(override["filled_with"])
             objects[name] = RestaurantObjectState(
                 name=name,
                 kind=kind,
@@ -1035,10 +1065,18 @@ class RestaurantSymbolicEnv(Env):
         return objects
 
     def _sample_object_status(self, kind: str, location: str) -> Tuple[bool, str | None]:
-        prep_like = {self._default_agent_location(), self.station_coffee, self.station_water, self.station_fruit}
-        prep_like.update(self.wash_ready_locations)
+        # Ingredients / non-washable kinds are always clean.
         if kind in {"water", "coffeegrinds"}:
             return False, None
+
+        if self._use_reset_dirty_probability:
+            # Per-kind dirty probability from config, independent of spawn location.
+            p_dirty = self.reset_dirty_probability.get(kind, 0.0)
+            return self._rng.random() < p_dirty, None
+
+        # Legacy location-based cleanliness when no config block is provided.
+        prep_like = {self._default_agent_location(), self.station_coffee, self.station_water, self.station_fruit}
+        prep_like.update(self.wash_ready_locations)
         if location in prep_like:
             return False, None
         if location in self.dirty_drop_locations:

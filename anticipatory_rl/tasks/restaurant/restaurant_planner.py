@@ -87,6 +87,8 @@ def _line_cost_from_action(action_name: str, args: Sequence[str], env: Restauran
         return float(fixed.get("make_coffee", 50))
     if action_name == "make-fruit-bowl":
         return float(fixed.get("make_fruit_bowl", 100))
+    if action_name == "drain":
+        return float(fixed.get("drain", 50))
     return 0.0
 
 
@@ -305,6 +307,10 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
     if name == "fill":
         cnt = args[0]
         state.objects[cnt].filled_with = "water"
+        return
+    if name == "drain":
+        cnt = args[0]
+        state.objects[cnt].filled_with = None
         return
     if name == "make-coffee":
         obj = state.objects[args[0]]

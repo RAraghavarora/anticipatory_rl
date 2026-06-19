@@ -111,6 +111,21 @@
     )
   )
 
+  (:action drain
+    :parameters (?cnt - object ?loc - location)
+    :precondition (and
+      (rob-at ?loc)
+      (is-fountain ?loc)
+      (is-holding ?cnt)
+      (is-fillable ?cnt)
+      (filled-with water ?cnt)
+    )
+    :effect (and
+      (not (filled-with water ?cnt))
+      (increase (total-cost) 50)
+    )
+  )
+
   (:action make-coffee
     :parameters (?c - object ?loc - location ?wsrc - object ?csrc - object)
     :precondition (and

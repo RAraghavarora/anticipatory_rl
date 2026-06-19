@@ -1,0 +1,110 @@
+# Toy Level 2.1 — single-cup scarce-resource trap.
+# Same map as toy_level_2.yaml, but only one cup exists.  This keeps the
+# serve_water / wash_objects conflict binding across the whole persistent world:
+# serving strands the only cup at pass, while washing wants it clean and empty
+# at counter.
+locations:
+  - name: counter
+    coord: [0, 0]
+    roles: [countertop]
+  - name: coffee_bar
+    coord: [1, 0]
+    roles: [coffeemachine, fountain]
+  - name: sink
+    coord: [2, 0]
+    roles: [dishwasher]
+  - name: pass
+    coord: [3, 0]
+    roles: [servingtable]
+  - name: bus_tub
+    coord: [4, 0]
+
+stations:
+  water: coffee_bar
+  coffee: coffee_bar
+  fruit: counter
+  wash: sink
+  countertop: counter
+
+service_locations:
+  - pass
+
+wash_ready_locations:
+  - counter
+
+dirty_drop_locations:
+  - sink
+  - bus_tub
+
+object_kinds: [cup, water, coffeegrinds, apple, bowl, knife]
+contents: [empty, water, coffee]
+
+task_types:
+  - serve_water
+  - make_coffee
+  - make_fruit_bowl
+  - clear_containers
+  - wash_objects
+  - pick_place
+
+object_specs:
+  - [cup_0, cup]
+  - [water_0, water]
+  - [coffee_0, coffeegrinds]
+  - [apple_0, apple]
+  - [bowl_0, bowl]
+  - [knife_0, knife]
+
+reset_location_distribution:
+  cup:
+    counter: 1.0
+  water:
+    coffee_bar: 1.0
+  coffeegrinds:
+    coffee_bar: 1.0
+  apple:
+    counter: 0.5
+    coffee_bar: 0.5
+  bowl:
+    counter: 1.0
+  knife:
+    counter: 1.0
+
+service_location_distribution:
+  pass: 1.0
+
+wash_kind_distribution:
+  cup: 1.0
+
+reset_dirty_probability:
+  knife: 0.6
+  bowl: 0.6
+  cup: 0.0
+  apple: 0.0
+
+reset_object_overrides:
+  cup_0:
+    location: counter
+    dirty: false
+
+task_distribution:
+  serve_water: 0.25
+  wash_objects: 0.30
+  make_coffee: 0.30
+  clear_containers: 0.05
+  make_fruit_bowl: 0.05
+  pick_place: 0.05
+
+paper2_cost:
+  enabled: true
+  move:
+    scale: 25.0
+    grid:
+      width: 6
+      height: 3
+      location_cells:
+        counter: [0, 1]
+        coffee_bar: [1, 1]
+        sink: [2, 1]
+        pass: [3, 1]
+        bus_tub: [4, 1]
