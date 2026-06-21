@@ -1207,6 +1207,11 @@ def train(args: argparse.Namespace) -> Path:
     optimize_stats_history: List[OptimizeStats] = []
     action_type_counts = {name: 0 for name in ACTION_TYPES}
     replay_auto_complete_count = 0
+    # Diagnostic counters for Option 3 self-loop detection (auto-success with world unchanged AND same task).
+    # Expected: ~25% of auto_success count on v2.2 (wash_objects dominates and cups-only kind makes repeat draws likely).
+    self_loop_terminal_count = 0           # both conditions match: terminal-for-bootstrap event fired
+    self_loop_world_only_count = 0         # auto_success AND world_unchanged (independent of task equality)
+    self_loop_task_only_count = 0           # auto_success AND task==pre-task (independent of world check)
     question_counters = {
         "wrong_object_choice": 0,
         "failed_to_move_to_object": 0,
@@ -1223,7 +1228,8 @@ def train(args: argparse.Namespace) -> Path:
             args.epsilon_final,
             args.epsilon_decay,
         )
-        current_task_snapshot = dict(info.get("task", {}))
+        current_task_snapshot = dict(info.get("task", {}))  # captured BEFORE env.step() below
+        current_world_state_key = env._action_mask_state_key()  # snapshot of s (world only, excludes task)
         current_task_auto_snapshot = bool(current_task_auto_satisfied)
         masks = extract_masks(info)
         action = _select_action(q_net, obs, masks, epsilon, device)
@@ -1272,7 +1278,23 @@ def train(args: argparse.Namespace) -> Path:
         store_next_masks = next_masks
         if bool(next_info.get("next_auto_satisfied", False)):
             _, store_next_masks = _auto_complete_replay_action_and_masks(env, next_masks)
-        transition_done = bool(bootstrap_done or truncated)
+        # Option 3: treat an auto-success that leaves the world unchanged AS A
+        # self-transition (s,τ)->(s,τ) as terminal for bootstrapping. auto_success=True
+        # implies world unchanged per env.step() contract, but we check the world-
+        # state key defensively. Same-task equality on the augmented state is what
+        # creates the degenerate fixed point V=r/(1-γ); making it terminal kills the
+        # self-bootstrap without touching cross-task (s,τ)->(s,τ') bootstraps.
+        world_unchanged = env._action_mask_state_key() == current_world_state_key
+        auto_success_flag = bool(next_info.get("auto_success", False))
+        task_equality = next_info.get("task") == current_task_snapshot
+        self_loop_auto_success = bool(auto_success_flag and world_unchanged and task_equality)
+        if auto_success_flag and world_unchanged:
+            self_loop_world_only_count += 1
+        if auto_success_flag and task_equality:
+            self_loop_task_only_count += 1
+        if self_loop_auto_success:
+            self_loop_terminal_count += 1
+        transition_done = bool(bootstrap_done or truncated or self_loop_auto_success)
         _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, success)
         if reward > 0.0:
             positive_reward_transitions += 1
@@ -1472,6 +1494,9 @@ def train(args: argparse.Namespace) -> Path:
         "mean_grad_norm": float(np.mean([s.grad_norm for s in optimize_stats_history])) if optimize_stats_history else 0.0,
         "replay_fill_fraction_final": float(len(replay) / max(1, args.replay_size)),
         "replay_auto_complete_count": int(replay_auto_complete_count),
+        "self_loop_terminal_count": int(self_loop_terminal_count),
+        "self_loop_world_only_count": int(self_loop_world_only_count),
+        "self_loop_task_only_count": int(self_loop_task_only_count),
         "action_type_counts": action_type_counts,
         "debug_questions": question_counters,
         "tasks_per_episode": int(args.tasks_per_episode),
