@@ -50,26 +50,30 @@ for run_metrics in query.iter_runs():
     label = hash_to_label.get(rh, f"Run: {rh}")
 
     for metric in run_metrics:
-        steps, values = metric.values.sparse_numpy()
+        # Use dataframe() instead of sparse_numpy() — sparse_numpy() returns
+        # Aim's internal storage IDs (huge int64 values, not training steps),
+        # which made the old `rank(method="dense")` produce a non-chronological
+        # "step" column and corrupt the export. dataframe() exposes the real
+        # user-provided `step` (training step) alongside `value`.
+        mdf = metric.dataframe()
         ctx = metric.context.to_dict()
         action = ctx.get("action_type", "")
         metric_label = f"{metric.name}_{action}" if action else metric.name
 
-        for step, val in zip(steps, values):
+        for _, row in mdf.iterrows():
             raw_records.append({
                 "run_label": label,
                 "run_hash": rh,
-                "raw_step": step,
+                "step": int(row["step"]),
                 "metric_label": metric_label,
-                "value": val,
+                "value": float(row["value"]),
             })
 
 # Pivot to wide: one column per metric_label
 df = pd.DataFrame(raw_records)
-df["step"] = df.groupby("run_label")["raw_step"].rank(method="dense").astype(int) - 1
 
 df_wide = df.pivot_table(
-    index=["run_label", "step"],
+    index=["run_label", "run_hash", "step"],
     columns="metric_label",
     values="value",
     aggfunc="first",
