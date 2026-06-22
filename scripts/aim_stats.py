@@ -9,20 +9,9 @@ from aim import Repo
 
 
 KNOWN_LABELS = [
-    "ablation_arch",
-    "ablation_baseline",
-    "ablation_explore",
-    "ablation_reward",
-    "anticipatory_toy",
-    "anticipatory_toy_2",
-    "modified_branching",
-    "myopic_rest",
-    "myopic_restaurant",
-    "myopic_toy_auto_complete",
-    "per_oracle_50k",
-    "prot_25",
-    "prot_control",
-    "restaurant_anticipatory_fresh_auto_complete",
+    # "rest_v2_2_anticipatory_5",
+    "rest_v2_2_ant_option3_seed0"
+    # "myopic_toy_auto_complete"
 ]
 
 METRICS = [
@@ -30,10 +19,11 @@ METRICS = [
     "loss",
     "greedy_success_rolling",
     "success_rate_rolling",
-    "task_return",
-    "task_steps",
+    "avg_task_return_rolling",
     "q_selected_mean",
+    "q_selected_abs_max",
     "target_mean",
+    "target_abs_max",
     "q_by_action_type",
     "avg_loss_rolling",
 ]
@@ -48,10 +38,11 @@ for label in KNOWN_LABELS:
         hash_to_label[rm.run.hash] = label
 
 print(f"Found {len(hash_to_label)} run hashes across {len(set(hash_to_label.values()))} labels")
-
-# Collect all metrics for all known labels
+print(hash_to_label)
+# Collect metrics only for discovered runs
 metrics_list = '", "'.join(METRICS)
-query = repo.query_metrics(f'metric.name in ["{metrics_list}"]')
+hashes_list = '", "'.join(hash_to_label)
+query = repo.query_metrics(f'metric.name in ["{metrics_list}"] and run.hash in ["{hashes_list}"]')
 
 raw_records: list[dict] = []
 for run_metrics in query.iter_runs():
@@ -82,7 +73,10 @@ df_wide = df.pivot_table(
     columns="metric_label",
     values="value",
     aggfunc="first",
-).reset_index()
+)
+
+# Forward fill missing values so episodic metrics aren't mostly empty
+df_wide = df_wide.groupby(level="run_label").ffill().reset_index()
 
 df_wide.to_csv("aim_metrics_wide.csv", index=False)
 print(f"Done – {len(df_wide):,} rows × {len(df_wide.columns)} columns → aim_metrics_wide.csv")
