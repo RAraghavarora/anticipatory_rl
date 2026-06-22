@@ -4,9 +4,36 @@ run.run_label correctly (meta_attrs_tree.collect() is buggy/cached).
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
 import pandas as pd
 from aim import Repo
 
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Export Aim metrics to wide CSV.")
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("/Users/raghav/hpc_antrl"),
+        help="Path to Aim repo (default: mounted HPC repo)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("aim_metrics_wide.csv"),
+        help="Output CSV path",
+    )
+    parser.add_argument(
+        "--include-action-type-q",
+        action="store_true",
+        help="Include per-action-type q_by_action_type metrics (slower)",
+    )
+    return parser.parse_args()
+
+
+args = parse_args()
 
 KNOWN_LABELS = [
     # "rest_v2_2_anticipatory_5",
@@ -24,11 +51,12 @@ METRICS = [
     "q_selected_abs_max",
     "target_mean",
     "target_abs_max",
-    "q_by_action_type",
     "avg_loss_rolling",
 ]
+if args.include_action_type_q:
+    METRICS.append("q_by_action_type")
 
-repo = Repo(".")
+repo = Repo(str(args.repo))
 
 # Discover hash → label
 hash_to_label: dict[str, str] = {}
@@ -79,8 +107,18 @@ df_wide = df.pivot_table(
     aggfunc="first",
 )
 
-# Forward fill missing values so episodic metrics aren't mostly empty
-df_wide = df_wide.groupby(level="run_label").ffill().reset_index()
+# Forward fill missing values so episodic metrics aren't mostly empty.
+# Group by both run_label and run_hash so distinct runs never cross-contaminate.
+df_wide = df_wide.groupby(level=["run_label", "run_hash"]).ffill().reset_index()
 
-df_wide.to_csv("aim_metrics_wide.csv", index=False)
-print(f"Done – {len(df_wide):,} rows × {len(df_wide.columns)} columns → aim_metrics_wide.csv")
+# Keep run_hash in the output so the exported data can be verified against Aim.
+df_wide.to_csv(args.output, index=False)
+print(f"Done – {len(df_wide):,} rows × {len(df_wide.columns)} columns → {args.output}")
+
+# Sanity check against Aim for q_selected_abs_max alignment
+if "q_selected_abs_max" in df_wide.columns:
+    max_row = df_wide.loc[df_wide["q_selected_abs_max"].idxmax()]
+    print(
+        f"Sanity: q_selected_abs_max max = {max_row['q_selected_abs_max']:.4f} "
+        f"at step {int(max_row['step'])} (run_hash {max_row['run_hash']})"
+    )

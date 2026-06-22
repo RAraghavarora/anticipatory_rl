@@ -24,7 +24,7 @@ from tqdm import tqdm
 from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
 
 
-from anticipatory_rl.logging import AimLogger
+from anticipatory_rl.logging import AimLogger, CSVLogger, LoggerPair
 from anticipatory_rl.utils import extract_masks, masked_choice, random_valid_index, select_device
 
 
@@ -921,7 +921,7 @@ def _run_post_train_inference(
     args: argparse.Namespace,
     device: torch.device,
     run_dir: Path,
-    aim_logger: AimLogger,
+    logger: LoggerPair,
 ) -> Dict[str, object]:
     env = RestaurantSymbolicEnv(
         config_path=args.config_path,
@@ -1047,17 +1047,17 @@ def _run_post_train_inference(
     with trajectories_path.open("w", encoding="utf-8") as fh:
         json.dump(trajectory_records, fh, indent=2)
     _plot_post_train_trajectories(trajectory_records[: args.post_train_plot_trajectories], plot_path)
-    aim_logger.set_metadata("post_train_infer", summary)
-    aim_logger.track_text(json.dumps(summary, indent=2), name="post_train_summary", step=args.total_steps)
+    logger.set_metadata("post_train_infer", summary)
+    logger.track_text(json.dumps(summary, indent=2), name="post_train_summary", step=args.total_steps)
     for record in trajectory_records[: args.post_train_log_trajectories]:
-        aim_logger.track_text(
+        logger.track_text(
             json.dumps(record, indent=2),
             name="trajectory_trace",
             step=int(record["trajectory_index"]),
             context={"task_type": str(record["task"].get("task_type", "unknown"))},
         )
     if plot_path.exists():
-        aim_logger.track_image(plot_path, name="post_train_trajectory_plot", step=args.total_steps)
+        logger.track_image(plot_path, name="post_train_trajectory_plot", step=args.total_steps)
     return summary
 
 
@@ -1090,15 +1090,17 @@ def train(args: argparse.Namespace) -> Path:
     output_path = run_dir / args.output_name
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
     aim_logger = AimLogger(args, run_label)
-    aim_logger.set_metadata("run_dir", str(run_dir.resolve()))
-    aim_logger.set_metadata("config_path", str(Path(args.config_path).resolve()))
+    csv_logger = CSVLogger(args, run_label, run_dir)
+    logger = LoggerPair(aim_logger, csv_logger)
+    logger.set_metadata("run_dir", str(run_dir.resolve()))
+    logger.set_metadata("config_path", str(Path(args.config_path).resolve()))
 
     obs, info = env.reset(seed=args.seed)
     obs_dim = int(np.asarray(obs).shape[0])
     object_dim = int(env.action_space["object1"].n)
     location_dim = int(env.action_space["location"].n)
     action_type_dim = int(env.action_space["action_type"].n)
-    aim_logger.set_metadata(
+    logger.set_metadata(
         "model",
         {
             "observation_dim": obs_dim,
@@ -1111,6 +1113,11 @@ def train(args: argparse.Namespace) -> Path:
     center_advantages = not getattr(args, "no_dueling_centering", False)
     q_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim, center_advantages=center_advantages).to(device)
     target_net = RestaurantQNetwork(obs_dim, action_type_dim, object_dim, location_dim, hidden_dim=args.hidden_dim, center_advantages=center_advantages).to(device)
+    resume_from = getattr(args, "resume_from", None)
+    if resume_from is not None:
+        resume_path = Path(resume_from).expanduser().resolve()
+        print(f"[train] Resuming q_net weights from {resume_path}")
+        q_net.load_state_dict(torch.load(resume_path, map_location=device))
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
@@ -1183,8 +1190,8 @@ def train(args: argparse.Namespace) -> Path:
         )
         dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
         print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} tasks (demo_fraction={demo_fraction}).")
-        aim_logger.set_metadata("oracle_seed_transitions", int(stored))
-        aim_logger.set_metadata("protect_demo_fraction", demo_fraction)
+        logger.set_metadata("oracle_seed_transitions", int(stored))
+        logger.set_metadata("protect_demo_fraction", demo_fraction)
 
     task_return = 0.0
     task_steps = 0
@@ -1308,23 +1315,23 @@ def train(args: argparse.Namespace) -> Path:
         if optimize_stats is not None:
             optimize_stats_history.append(optimize_stats)
             loss_history.append(optimize_stats.loss)
-            aim_logger.track(optimize_stats.loss, name="loss", step=global_step, context={"subset": "train"})
-            aim_logger.track(optimize_stats.q_selected_mean, name="q_selected_mean", step=global_step)
-            aim_logger.track(optimize_stats.q_selected_abs_max, name="q_selected_abs_max", step=global_step)
-            aim_logger.track(optimize_stats.target_mean, name="target_mean", step=global_step)
-            aim_logger.track(optimize_stats.target_abs_max, name="target_abs_max", step=global_step)
-            aim_logger.track(optimize_stats.td_abs_mean, name="td_abs_mean", step=global_step)
-            aim_logger.track(optimize_stats.grad_norm, name="grad_norm", step=global_step)
+            logger.track(optimize_stats.loss, name="loss", step=global_step, context={"subset": "train"})
+            logger.track(optimize_stats.q_selected_mean, name="q_selected_mean", step=global_step)
+            logger.track(optimize_stats.q_selected_abs_max, name="q_selected_abs_max", step=global_step)
+            logger.track(optimize_stats.target_mean, name="target_mean", step=global_step)
+            logger.track(optimize_stats.target_abs_max, name="target_abs_max", step=global_step)
+            logger.track(optimize_stats.td_abs_mean, name="td_abs_mean", step=global_step)
+            logger.track(optimize_stats.grad_norm, name="grad_norm", step=global_step)
             if diagnostics:
                 if not np.isnan(optimize_stats.td_abs_mean_pos_reward):
-                    aim_logger.track(optimize_stats.td_abs_mean_pos_reward, name="td_abs_mean_pos_reward", step=global_step)
+                    logger.track(optimize_stats.td_abs_mean_pos_reward, name="td_abs_mean_pos_reward", step=global_step)
                 if not np.isnan(optimize_stats.td_abs_mean_nonpos_reward):
-                    aim_logger.track(optimize_stats.td_abs_mean_nonpos_reward, name="td_abs_mean_nonpos_reward", step=global_step)
+                    logger.track(optimize_stats.td_abs_mean_nonpos_reward, name="td_abs_mean_nonpos_reward", step=global_step)
                 if not np.isnan(optimize_stats.value_vs_meanq_gap):
-                    aim_logger.track(optimize_stats.value_vs_meanq_gap, name="value_vs_meanq_gap", step=global_step)
+                    logger.track(optimize_stats.value_vs_meanq_gap, name="value_vs_meanq_gap", step=global_step)
 
         if diagnostics and diag_env is not None and (global_step + 1) % diag_interval == 0:
-            aim_logger.track(
+            logger.track(
                 positive_reward_transitions / float(global_step + 1),
                 name="replay_positive_reward_fraction",
                 step=global_step,
@@ -1333,10 +1340,10 @@ def train(args: argparse.Namespace) -> Path:
                 q_net, diag_env, device,
                 n_tasks=20, max_steps=args.max_steps_per_task, seed_base=args.seed + 8_000_000,
             )
-            aim_logger.track(greedy_success, name="greedy_success_rolling", step=global_step)
+            logger.track(greedy_success, name="greedy_success_rolling", step=global_step)
             q_by_type = _q_by_action_type(q_net, diag_env, device, seed=args.seed + 9_000_000)
             for name, q_val in q_by_type.items():
-                aim_logger.track(q_val, name="q_by_action_type", step=global_step, context={"action_type": name})
+                logger.track(q_val, name="q_by_action_type", step=global_step, context={"action_type": name})
 
         if args.tau < 1.0:
             with torch.no_grad():
@@ -1389,7 +1396,7 @@ def train(args: argparse.Namespace) -> Path:
                         question_counters["place_selection_wrong"] += 1
                     else:
                         question_counters["mask_or_timeout_issue"] += 1
-                aim_logger.track_text(
+                logger.track_text(
                     json.dumps(
                         {
                             "task": current_task_snapshot,
@@ -1404,19 +1411,19 @@ def train(args: argparse.Namespace) -> Path:
                     step=total_tasks,
                     context={"task_type": current_task_snapshot.get("task_type", "unknown")},
                 )
-            aim_logger.track(
+            logger.track(
                 float(task_records[-1]["return"]),
                 name="task_return",
                 step=total_tasks,
                 context={"task_type": current_task_snapshot.get("task_type", "unknown")},
             )
-            aim_logger.track(
+            logger.track(
                 float(task_records[-1]["steps"]),
                 name="task_steps",
                 step=total_tasks,
                 context={"task_type": current_task_snapshot.get("task_type", "unknown")},
             )
-            aim_logger.track(
+            logger.track(
                 1.0 if success else 0.0,
                 name="task_success",
                 step=total_tasks,
@@ -1444,17 +1451,17 @@ def train(args: argparse.Namespace) -> Path:
             denom = max(1e-8, 1.0 - auto_rate)
             non_auto_success_rate = max(0.0, min(1.0, (success_rate - auto_rate) / denom))
         avg_loss = float(np.mean(loss_history[-100:])) if loss_history else 0.0
-        aim_logger.track(epsilon, name="epsilon", step=global_step)
-        aim_logger.track(success_rate, name="success_rate_rolling", step=global_step, context={"window": 100})
-        aim_logger.track(auto_rate, name="auto_rate_rolling", step=global_step, context={"window": 100})
-        aim_logger.track(non_auto_success_rate, name="non_auto_success_rate_rolling", step=global_step, context={"window": 100})
-        aim_logger.track(len(replay) / max(1, args.replay_size), name="replay_fill_fraction", step=global_step)
+        logger.track(epsilon, name="epsilon", step=global_step)
+        logger.track(success_rate, name="success_rate_rolling", step=global_step, context={"window": 100})
+        logger.track(auto_rate, name="auto_rate_rolling", step=global_step, context={"window": 100})
+        logger.track(non_auto_success_rate, name="non_auto_success_rate_rolling", step=global_step, context={"window": 100})
+        logger.track(len(replay) / max(1, args.replay_size), name="replay_fill_fraction", step=global_step)
         for action_name, count in action_type_counts.items():
-            aim_logger.track(count / max(1, global_step + 1), name="action_type_fraction", step=global_step, context={"action_type": action_name})
+            logger.track(count / max(1, global_step + 1), name="action_type_fraction", step=global_step, context={"action_type": action_name})
         if recent_returns:
-            aim_logger.track(avg_return, name="avg_task_return_rolling", step=global_step, context={"window": 100})
+            logger.track(avg_return, name="avg_task_return_rolling", step=global_step, context={"window": 100})
         if loss_history:
-            aim_logger.track(avg_loss, name="avg_loss_rolling", step=global_step, context={"window": 100})
+            logger.track(avg_loss, name="avg_loss_rolling", step=global_step, context={"window": 100})
         progress.set_postfix(
             ret=f"{avg_return:.1f}" if recent_returns else "n/a",
             success=f"{success_rate:.2f}",
@@ -1516,9 +1523,9 @@ def train(args: argparse.Namespace) -> Path:
         json.dump(task_records, fh, indent=2)
     with (run_dir / "train_args.json").open("w", encoding="utf-8") as fh:
         json.dump(vars(args), fh, indent=2, default=str)
-    aim_logger.set_metadata("summary", summary)
-    aim_logger.set_metadata("checkpoint_path", str(output_path))
-    aim_logger.close()
+    logger.set_metadata("summary", summary)
+    logger.set_metadata("checkpoint_path", str(output_path))
+    logger.close()
     return output_path
 
 
@@ -1553,6 +1560,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output-name", type=str, default="restaurant_dqn.pt")
+    parser.add_argument("--resume-from", type=Path, default=None, help="Load q_net weights from this checkpoint before training. Target net is synced from q_net; replay/optimizer/epsilon schedules start fresh.")
     parser.add_argument("--diagnostics", action="store_true", help="Enable root-cause diagnostic logging (off by default).")
     parser.add_argument("--diagnostics-interval", type=int, default=1000, help="Steps between periodic greedy-eval / Q-probe diagnostics.")
     parser.add_argument("--no-dueling-centering", action="store_true", help="Ablation C: disable masked-mean advantage centering in all heads.")
