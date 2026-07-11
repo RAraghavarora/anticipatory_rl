@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import random
 import time
@@ -120,42 +121,71 @@ def _compute_v_q_ap(
     Cache key is just the state signature: future_tasks is deterministic given
     (state, fixed config) because the only state-conditioned part of task
     enumeration is pick_place valid objects, captured in the state signature.
+
+    Saves and restores env.state/env.task so the temporary syncs to candidate
+    terminal states do not leak into the caller.
     """
     key = _state_signature(state)
     cached = cache.get(key)
     if cached is not None:
         return cached
 
-    _sync_env_from_planner_state(env, state)
+    saved_state = copy.deepcopy(env.state)
+    saved_task = env.task
+    try:
+        _sync_env_from_planner_state(env, state)
 
-    total = 0.0
-    for task, prob in future_tasks:
-        if prob <= 0:
-            continue
+        total = 0.0
+        for task, prob in future_tasks:
+            if prob <= 0:
+                continue
 
-        # Set the future task so the observation and auto-satisfaction check
-        # are task-conditioned.
-        env.set_task(
-            task.task_type,
-            target_location=task.target_location,
-            target_kind=task.target_kind,
-            object_name=task.object_name,
-        )
-        obs = env._obs()
-        obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+            # Set the future task so the observation and auto-satisfaction check
+            # are task-conditioned.
+            env.set_task(
+                task.task_type,
+                target_location=task.target_location,
+                target_kind=task.target_kind,
+                object_name=task.object_name,
+            )
+            obs = env._obs()
+            obs_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
 
-        auto = _task_is_auto_satisfied(state, task, env)
-        if auto:
-            masks = _build_auto_complete_masks(env)
-            auto_idx = env.action_type_index["auto_complete"]
-            none_object = env.none_object_index
-            none_location = env.none_location_index
-            action_type_t = torch.tensor([[auto_idx]], dtype=torch.int64, device=device)
-            object1_t = torch.tensor([[none_object]], dtype=torch.int64, device=device)
-            location_t = torch.tensor([[none_location]], dtype=torch.int64, device=device)
-            object2_t = torch.tensor([[none_object]], dtype=torch.int64, device=device)
-        else:
-            masks = env._build_action_masks()
+            auto = _task_is_auto_satisfied(state, task, env)
+            if auto:
+                masks = _build_auto_complete_masks(env)
+                auto_idx = env.action_type_index["auto_complete"]
+                none_object = env.none_object_index
+                none_location = env.none_location_index
+                action_type_t = torch.tensor([[auto_idx]], dtype=torch.int64, device=device)
+                object1_t = torch.tensor([[none_object]], dtype=torch.int64, device=device)
+                location_t = torch.tensor([[none_location]], dtype=torch.int64, device=device)
+                object2_t = torch.tensor([[none_object]], dtype=torch.int64, device=device)
+            else:
+                masks = env._build_action_masks()
+                action_type_mask_t = torch.tensor(
+                    masks["valid_action_type_mask"], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+                object1_mask_t = torch.tensor(
+                    masks["valid_object1_mask"], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+                location_mask_t = torch.tensor(
+                    masks["valid_location_mask"], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+                object2_mask_t = torch.tensor(
+                    masks["valid_object2_mask"], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+
+                with torch.no_grad():
+                    action_type_t, object1_t, location_t, object2_t = model(
+                        obs_t,
+                        action_type_masks=action_type_mask_t,
+                        object1_masks=object1_mask_t,
+                        location_masks=location_mask_t,
+                        object2_masks=object2_mask_t,
+                        decode_greedy=True,
+                    )
+
             action_type_mask_t = torch.tensor(
                 masks["valid_action_type_mask"], dtype=torch.float32, device=device
             ).unsqueeze(0)
@@ -170,44 +200,24 @@ def _compute_v_q_ap(
             ).unsqueeze(0)
 
             with torch.no_grad():
-                action_type_t, object1_t, location_t, object2_t = model(
+                q_value = model(
                     obs_t,
+                    action_types=action_type_t,
+                    object1=object1_t,
+                    location=location_t,
+                    object2=object2_t,
                     action_type_masks=action_type_mask_t,
                     object1_masks=object1_mask_t,
                     location_masks=location_mask_t,
                     object2_masks=object2_mask_t,
-                    decode_greedy=True,
                 )
+            total += prob * float(q_value.item())
 
-        action_type_mask_t = torch.tensor(
-            masks["valid_action_type_mask"], dtype=torch.float32, device=device
-        ).unsqueeze(0)
-        object1_mask_t = torch.tensor(
-            masks["valid_object1_mask"], dtype=torch.float32, device=device
-        ).unsqueeze(0)
-        location_mask_t = torch.tensor(
-            masks["valid_location_mask"], dtype=torch.float32, device=device
-        ).unsqueeze(0)
-        object2_mask_t = torch.tensor(
-            masks["valid_object2_mask"], dtype=torch.float32, device=device
-        ).unsqueeze(0)
-
-        with torch.no_grad():
-            q_value = model(
-                obs_t,
-                action_types=action_type_t,
-                object1=object1_t,
-                location=location_t,
-                object2=object2_t,
-                action_type_masks=action_type_mask_t,
-                object1_masks=object1_mask_t,
-                location_masks=location_mask_t,
-                object2_masks=object2_mask_t,
-            )
-        total += prob * float(q_value.item())
-
-    cache[key] = total
-    return total
+        cache[key] = total
+        return total
+    finally:
+        env.state = saved_state
+        env.task = saved_task
 
 
 # ---------------------------------------------------------------------------
