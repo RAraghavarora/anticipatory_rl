@@ -8,7 +8,7 @@ the RL environment and the planner.
 Key author clarifications:
 - Task distribution P(τ) is uniform
 - Action costs vary by action (fill: 1000, wash: 200, make-coffee: 50)
-- Movement cost uses ProcTHOR occupancy grids with 0.1 resolution
+- Movement cost is governed by the `movement_costs` matrix between locations
 """
 
 from __future__ import annotations
@@ -181,6 +181,7 @@ PDDL_ACTIONS: Tuple[PDDLActionSpec, ...] = (
             "rob-at coffeemachine",
             "is-at water coffeemachine",
             "is-fillable ?c",
+            "not is-jar ?c",
             "not is-dirty ?c",
             "is-at ?c coffeemachine",
             "not filled-with water ?c",
@@ -242,7 +243,7 @@ PDDL_ACTIONS: Tuple[PDDLActionSpec, ...] = (
             "not is-dirty ?cnt",
             "filled-with water ?jr",
         ),
-        effects=("filled-with ?liquid ?cnt"),
+        effects=("filled-with water ?cnt"),
         cost=PDDL_ACTION_COSTS["refill_water"],
     ),
     PDDLActionSpec(

@@ -12,6 +12,8 @@
 # Trap: making coffee empties the machine. A myopic agent leaves it dry, so the next
 # make_coffee needs fill(fountain) -> move -> pour(coffeemachine) -> brew. An anticipatory
 # agent pre-pours a spare water to keep the machine ready for cheap/auto future coffee.
+# The wall between Kitchen and Serving also creates a cross-room movement trap: serving
+# tasks become expensive relative to kitchen-prep preparedness.
 #
 # fountain is placed far from coffeemachine to make the resupply detour costly.
 # Grid (connected via Manhattan-1 adjacency; fountain kept 2 hops from coffeemachine
@@ -49,7 +51,7 @@ wash_ready_locations:
 dirty_drop_locations:
   - dishwasher
 
-object_kinds: [cup, water, apple, bowl, knife]
+object_kinds: [cup, water, apple, bowl, knife, jar]
 contents: [empty, water, coffee]
 
 task_types:
@@ -68,6 +70,7 @@ object_specs:
   - [apple_0, apple]
   - [bowl_0, bowl]
   - [knife_0, knife]
+  - [jar_0, jar]
 
 reset_location_distribution:
   cup:
@@ -78,6 +81,8 @@ reset_location_distribution:
     countertop: 1.0
   knife:
     countertop: 1.0
+  jar:
+    shelf: 1.0
 
 service_location_distribution:
   servingtable: 1.0
@@ -90,6 +95,7 @@ reset_dirty_probability:
   bowl: 0.6
   cup: 0.0
   apple: 0.0
+  jar: 0.0
 
 reset_object_overrides:
   # Permanent fountain source vs consumable machine water.
@@ -104,6 +110,11 @@ reset_object_overrides:
   cup_1:
     location: dishwasher
     dirty: true
+  # Jar as an alternative local water source.
+  jar_0:
+    location: shelf
+    dirty: false
+    filled_with: water
 
 task_distribution:
   serve_water: 0.25
@@ -117,13 +128,18 @@ paper2_cost:
   enabled: true
   move:
     scale: 25.0
-    grid:
-      width: 3
-      height: 2
-      location_cells:
-        countertop: [0, 0]
-        coffeemachine: [1, 0]
-        dishwasher: [2, 0]
-        shelf: [0, 1]
-        servingtable: [1, 1]
-        fountain: [2, 1]
+    # movement_costs (below) replaces the grid; grid is ignored when movement_costs is present.
+
+# Room mapping.
+#   Kitchen:  countertop, coffeemachine, dishwasher, shelf
+#   Serving:  servingtable, fountain
+# A wall separates the rooms; movement between rooms must pass through the doorway,
+# producing the known_cost matrix below. Within-room moves are cheap (1-3 steps);
+# cross-room moves are expensive (7-9 steps), even though the rooms are nearby.
+movement_costs:
+  countertop:     {countertop: 0, coffeemachine: 1, dishwasher: 2, shelf: 1, servingtable: 8, fountain: 9}
+  coffeemachine:  {countertop: 1, coffeemachine: 0, dishwasher: 1, shelf: 2, servingtable: 7, fountain: 8}
+  dishwasher:     {countertop: 2, coffeemachine: 1, dishwasher: 0, shelf: 3, servingtable: 8, fountain: 9}
+  shelf:          {countertop: 1, coffeemachine: 2, dishwasher: 3, shelf: 0, servingtable: 7, fountain: 8}
+  servingtable:   {countertop: 8, coffeemachine: 7, dishwasher: 8, shelf: 7, servingtable: 0, fountain: 2}
+  fountain:       {countertop: 9, coffeemachine: 8, dishwasher: 9, shelf: 8, servingtable: 2, fountain: 0}

@@ -14,6 +14,7 @@ from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
 from anticipatory_rl.tasks.restaurant.restaurant_planner import (
     RestaurantPlannerState,
     apply_planner_action,
+    build_restaurant_problem_text,
     solve_restaurant_task_with_fd,
 )
 
@@ -51,6 +52,45 @@ class ToyV3EnvSemantics(unittest.TestCase):
         # No role indirection: canonical names carry their own role.
         self.assertTrue(self.env._is_location("fountain", "fountain"))
         self.assertTrue(self.env._is_location("coffeemachine", "coffeemachine"))
+
+    def test_jar_always_clean_at_reset(self) -> None:
+        jar = self.env.state.objects["jar_0"]
+        self.assertEqual(jar.kind, "jar")
+        self.assertFalse(jar.dirty)
+
+    def test_make_coffee_rejects_jar(self) -> None:
+        s = self.env.state
+        s.agent_location = "coffeemachine"
+        s.objects["jar_0"].location = "coffeemachine"
+        s.objects["jar_0"].dirty = False
+        s.objects["jar_0"].filled_with = None
+        self.assertFalse(
+            self.env._is_action_valid(
+                {"action_type": "make_coffee", "object1_name": "jar_0", "location_name": None, "object2_name": None}
+            )
+        )
+
+    def test_refill_water_fills_held_cup_and_preserves_jar(self) -> None:
+        s = self.env.state
+        s.agent_location = "shelf"
+        s.holding = "cup_0"
+        s.objects["cup_0"].location = None
+        s.objects["cup_0"].dirty = False
+        s.objects["cup_0"].filled_with = None
+        s.objects["jar_0"].location = "shelf"
+        s.objects["jar_0"].filled_with = "water"
+        _, ok = self.env._execute_action(
+            {
+                "action_type": "refill_water",
+                "object1_name": "cup_0",
+                "location_name": None,
+                "object2_name": "jar_0",
+            }
+        )
+        self.assertTrue(ok)
+        self.assertEqual(s.objects["cup_0"].filled_with, "water")
+        self.assertEqual(s.objects["jar_0"].filled_with, "water")
+        self.assertEqual(s.objects["jar_0"].location, "shelf")
 
     def test_reset_seeds_machine_water_and_permanent_fountain(self) -> None:
         self.assertTrue(_water_at(self.env, "coffeemachine"))
@@ -213,6 +253,14 @@ class ToyV3PlannerMirror(unittest.TestCase):
         self.assertIsNone(st.objects["cup_1"].filled_with)
         self.assertTrue(self._water_at(st, "coffeemachine"))
 
+    def test_planner_problem_emits_is_jar_and_known_costs(self) -> None:
+        st = RestaurantPlannerState.from_env(self.env)
+        problem_text = build_restaurant_problem_text(self.env, st, self.env.task)
+        self.assertIn("(is-jar jar_0)", problem_text)
+        self.assertIn("(= (known-cost countertop coffeemachine)", problem_text)
+        # No adjacency facts when movement_costs is present.
+        self.assertNotIn("(adjacent", problem_text)
+
 
 @unittest.skipUnless(PLANNER_PATH.exists(), "Fast Downward not available")
 class ToyV3PlannerDomainEquivalence(unittest.TestCase):
@@ -255,8 +303,37 @@ class ToyV3PlannerDomainEquivalence(unittest.TestCase):
         plan = self._solve_make_coffee(mutate)
         names = [a[0] for a in plan]
         self.assertIn("make-coffee", names)
-        self.assertIn("fill", names)  # real water fetched from the fountain
         for name, args in plan:
+            if name == "pour":
+                self.assertEqual(args[1], "water", "pour must carry water, not coffee")
+
+    def test_dry_machine_make_coffee_uses_refill_water_from_jar(self) -> None:
+        # Put an empty clean cup with the jar at the shelf; the machine is dry.
+        # The planner should refill from the jar, move to the machine, pour, and brew.
+        self.env.reset(seed=0)
+        self.env.set_task("make_coffee", target_location="coffeemachine", task_source="iid")
+        s = self.env.state
+        s.objects["water_machine"].location = None
+        s.objects["cup_0"].location = "shelf"
+        s.objects["cup_0"].dirty = False
+        s.objects["cup_0"].filled_with = None
+        s.objects["jar_0"].location = "shelf"
+        s.objects["jar_0"].filled_with = "water"
+        st = RestaurantPlannerState.from_env(self.env)
+        res = solve_restaurant_task_with_fd(
+            self.env,
+            st,
+            self.env.task,
+            domain_path=DOMAIN_PATH,
+            planner_path=PLANNER_PATH,
+            search="astar(blind())",
+            timeout_s=30.0,
+        )
+        self.assertTrue(res.success, f"planner failed: {res.error}")
+        names = [a[0] for a in res.plan_actions]
+        self.assertIn("refill_water", names)
+        self.assertIn("make-coffee", names)
+        for name, args in res.plan_actions:
             if name == "pour":
                 self.assertEqual(args[1], "water", "pour must carry water, not coffee")
 

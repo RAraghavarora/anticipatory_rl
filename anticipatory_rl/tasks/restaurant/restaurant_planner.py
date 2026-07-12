@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import tempfile
 import time
@@ -68,29 +69,28 @@ def parse_sas_plan(plan_text: str) -> List[Tuple[str, List[str]]]:
     return actions
 
 
+_PDDL_FIXED_COST_KEY: Dict[str, str] = {
+    "pick": "pick",
+    "place": "place",
+    "wash": "wash",
+    "fill": "fill",
+    "make-coffee": "make_coffee",
+    "make-fruit-bowl": "make_fruit_bowl",
+    "drain": "drain",
+    "pour": "pour",
+    "refill_water": "refill_water",
+}
+
+
 def _line_cost_from_action(action_name: str, args: Sequence[str], env: RestaurantSymbolicEnv) -> float:
-    fixed = env.paper2_fixed_costs
     if action_name == "move":
         if len(args) < 2:
             return 0.0
         src, dst = args[0], args[1]
         return float(env.paper2_move_scale * env._dijkstra_distance(src, dst))
-    if action_name == "pick":
-        return float(fixed.get("pick", 100))
-    if action_name == "place":
-        return float(fixed.get("place", 100))
-    if action_name == "wash":
-        return float(fixed.get("wash", 200))
-    if action_name == "fill":
-        return float(fixed.get("fill", 1000))
-    if action_name == "make-coffee":
-        return float(fixed.get("make_coffee", 50))
-    if action_name == "make-fruit-bowl":
-        return float(fixed.get("make_fruit_bowl", 100))
-    if action_name == "drain":
-        return float(fixed.get("drain", 50))
-    if action_name == "pour":
-        return float(fixed.get("pour", 200))
+    key = _PDDL_FIXED_COST_KEY.get(action_name)
+    if key is not None:
+        return float(env.paper2_fixed_costs.get(key, 0.0))
     return 0.0
 
 
@@ -101,15 +101,19 @@ def planner_actions_paper2_cost(actions: Sequence[Tuple[str, List[str]]], env: R
     return float(total)
 
 
-def _all_location_pairs(locations: Sequence[str], coords: Mapping[str, Tuple[int, int]]) -> Iterable[Tuple[str, str]]:
-    for src in locations:
-        sx, sy = coords[src]
-        for dst in locations:
-            if src == dst:
-                continue
-            dx, dy = coords[dst]
-            if abs(dx - sx) + abs(dy - sy) == 1:
-                yield src, dst
+def _known_cost_entries(env: RestaurantSymbolicEnv) -> Iterable[Tuple[str, str, int]]:
+    """Emit (src, dst, cost) triples for the PDDL known-cost function.
+
+    Uses env.movement_costs when present; otherwise falls back to a scaled
+    grid Dijkstra distance so the planner still has a deterministic cost function.
+    """
+    for src, dst in itertools.product(env.locations, repeat=2):
+        if env.movement_costs and src in env.movement_costs and dst in env.movement_costs[src]:
+            dist = env.movement_costs[src][dst]
+        else:
+            dist = env._dijkstra_distance(src, dst)
+        cost = int(round(env.paper2_move_scale * float(dist)))
+        yield src, dst, cost
 
 
 def _objects_of_kind(state: RestaurantPlannerState, kind: str) -> List[str]:
@@ -179,8 +183,8 @@ def build_restaurant_problem_text(
         init_lines.append("(hand-is-free)")
     else:
         init_lines.append(f"(is-holding {state.holding})")
-    for src, dst in _all_location_pairs(locations, coords):
-        init_lines.append(f"(adjacent {src} {dst})")
+    for src, dst, cost in _known_cost_entries(env):
+        init_lines.append(f"(= (known-cost {src} {dst}) {cost})")
     if env.station_water in env.location_index:
         init_lines.append(f"(is-fountain {env.station_water})")
     if env.station_coffee in env.location_index:
@@ -217,6 +221,8 @@ def build_restaurant_problem_text(
             init_lines.append(f"(is-slicable {name})")
         if obj.kind == "knife":
             init_lines.append(f"(is-knife {name})")
+        if obj.kind == "jar":
+            init_lines.append(f"(is-jar {name})")
         init_lines.append(f"(is-pickable {name})")
         init_lines.append(f"(is-washable {name})")
         if obj.filled_with == "water":
@@ -330,6 +336,11 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
                 if obj.kind == "water" and obj.location is None and obj.contained_in is None:
                     obj.location = loc
                     break
+        return
+    if name == "refill_water":
+        cnt = args[0]
+        state.objects[cnt].filled_with = "water"
+        # Jar is not depleted.
         return
     if name == "make-coffee":
         obj = state.objects[args[0]]

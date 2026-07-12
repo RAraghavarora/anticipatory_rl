@@ -12,10 +12,10 @@
     (hand-is-free)
     (is-holding ?obj - object)
     (is-at ?obj - object ?loc - location)
-    (adjacent ?l1 - location ?l2 - location)
     (is-dirty ?obj - object)
     (is-pickable ?obj - object)
     (is-fillable ?obj - object)
+    (is-jar ?obj - object)
     (is-liquid ?obj - object)
     (is-slicable ?obj - object)
     (is-container ?obj - object)
@@ -30,18 +30,18 @@
     (is-in ?apple - object ?bowl - object)
   )
 
-  (:functions (total-cost))
+  (:functions (total-cost) (known-cost ?start ?end - location))
 
   (:action move
     :parameters (?from - location ?to - location)
     :precondition (and
       (rob-at ?from)
-      (adjacent ?from ?to)
+      (not (= ?from ?to))
     )
     :effect (and
       (not (rob-at ?from))
       (rob-at ?to)
-      (increase (total-cost) 25)
+      (increase (total-cost) (known-cost ?from ?to))
     )
   )
 
@@ -131,9 +131,9 @@
     :precondition (and
       (rob-at ?loc)
       (is-coffeemachine ?loc)
-      (is-holding ?cnt)
       (is-liquid ?liquid)
       (filled-with ?liquid ?cnt)
+      (is-holding ?cnt)
     )
     :effect (and
       (not (filled-with ?liquid ?cnt))
@@ -149,6 +149,7 @@
       (is-coffeemachine ?loc)
       (is-at ?c ?loc)
       (is-fillable ?c)
+      (not (is-jar ?c))
       (not (is-dirty ?c))
       (not (filled-with water ?c))
       (not (filled-with coffee ?c))
@@ -184,6 +185,25 @@
       (is-dirty ?k)
       (is-dirty ?b)
       (increase (total-cost) 100)
+    )
+  )
+
+  (:action refill_water
+    :parameters (?cnt - object ?loc - location ?jr - object)
+    :precondition (and
+      (rob-at ?loc)
+      (is-at ?jr ?loc)
+      (is-holding ?cnt)
+      (is-jar ?jr)
+      (is-fillable ?cnt)
+      (not (is-dirty ?cnt))
+      (not (filled-with water ?cnt))
+      (not (filled-with coffee ?cnt))
+      (filled-with water ?jr)
+    )
+    :effect (and
+      (filled-with water ?cnt)
+      (increase (total-cost) 50)
     )
   )
 )

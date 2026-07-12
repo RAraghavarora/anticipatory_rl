@@ -358,6 +358,7 @@ class RestaurantSymbolicEnv(Env):
         self.locations, self.location_coords, self.location_roles = self._parse_locations(schema.get("locations"))
         self.location_index = {name: idx for idx, name in enumerate(self.locations)}
         self.num_locations = len(self.locations)
+        self.movement_costs = self._parse_movement_costs(schema.get("movement_costs"))
 
         self.object_kinds = tuple(str(x) for x in schema.get("object_kinds", DEFAULT_OBJECT_KINDS))
         self.contents = tuple(str(x) for x in schema.get("contents", DEFAULT_CONTENTS))
@@ -551,6 +552,19 @@ class RestaurantSymbolicEnv(Env):
         if not parsed:
             parsed = list(DEFAULT_OBJECT_SPECS)
         return tuple(parsed)
+
+    def _parse_movement_costs(self, movement_costs: Any) -> Dict[str, Dict[str, float]]:
+        """Parse optional movement cost matrix into a nested (src, dst) -> cost map."""
+        if not isinstance(movement_costs, Mapping):
+            return {}
+        result: Dict[str, Dict[str, float]] = {}
+        for src, dst_map in movement_costs.items():
+            if not isinstance(dst_map, Mapping):
+                continue
+            result[str(src)] = {
+                str(dst): float(cost) for dst, cost in dst_map.items()
+            }
+        return result
 
     def _parse_task_library(self, task_library_cfg: Any) -> List[RestaurantTask]:
         parsed: List[RestaurantTask] = []
@@ -1041,6 +1055,8 @@ class RestaurantSymbolicEnv(Env):
         self._paper2_total_cost += step_cost
 
     def _dijkstra_distance(self, src_location: str, dst_location: str) -> float:
+        if self.movement_costs and src_location in self.movement_costs and dst_location in self.movement_costs[src_location]:
+            return float(self.movement_costs[src_location][dst_location])
         src = self.paper2_location_cells.get(src_location)
         dst = self.paper2_location_cells.get(dst_location)
         if src is None or dst is None:
@@ -1091,7 +1107,7 @@ class RestaurantSymbolicEnv(Env):
 
     def _sample_object_status(self, kind: str, location: str) -> Tuple[bool, str | None]:
         # Ingredients / non-washable kinds are always clean.
-        if kind in {"water", "coffeegrinds"}:
+        if kind in {"water", "coffeegrinds", "jar"}:
             return False, None
 
         if self._use_reset_dirty_probability:
@@ -1413,6 +1429,8 @@ class RestaurantSymbolicEnv(Env):
         }
 
     def _travel_cost(self, src: str, dst: str) -> float:
+        if self.movement_costs and src in self.movement_costs and dst in self.movement_costs[src]:
+            return self.travel_cost_scale * float(self.movement_costs[src][dst])
         sx, sy = self.location_coords[src]
         dx, dy = self.location_coords[dst]
         return self.travel_cost_scale * float(abs(sx - dx) + abs(sy - dy))
