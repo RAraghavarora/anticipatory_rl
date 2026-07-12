@@ -19,13 +19,13 @@ from typing import Any, Dict, List, Mapping
 import numpy as np
 
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
-from anticipatory_rl.tasks.restaurant.restaurant_planner import (
+from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_plan,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,
 )
-from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task
+from anticipatory_rl.envs.restaurant.task_sampling import sample_task
 
 
 def _state_to_env(env: RestaurantSymbolicEnv, state: RestaurantPlannerState) -> None:

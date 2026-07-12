@@ -17,7 +17,7 @@ from anticipatory_rl.envs.restaurant.env import (
     RestaurantSymbolicEnv,
     RestaurantTask,
 )
-from anticipatory_rl.tasks.planner_utils import run_planner
+from anticipatory_rl.envs.restaurant.fd_runner import run_planner
 
 
 @dataclass

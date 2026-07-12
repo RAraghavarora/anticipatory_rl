@@ -37,7 +37,7 @@ import torch
 
 from anticipatory_rl.agents.restaurant.dqn import RestaurantQNetwork
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
-from anticipatory_rl.tasks.restaurant.restaurant_planner import (
+from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,

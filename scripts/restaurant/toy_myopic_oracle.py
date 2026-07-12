@@ -25,7 +25,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
-from anticipatory_rl.tasks.restaurant.restaurant_planner import (
+from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_plan,
     planner_actions_paper2_cost,

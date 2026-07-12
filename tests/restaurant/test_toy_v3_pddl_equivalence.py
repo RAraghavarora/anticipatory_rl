@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
-from anticipatory_rl.tasks.restaurant.restaurant_planner import (
+from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_planner_action,
     build_restaurant_problem_text,

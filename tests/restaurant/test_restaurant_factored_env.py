@@ -18,7 +18,7 @@ from anticipatory_rl.envs.restaurant.env import (
 )
 
 
-FULL_SYMBOLIC_CONFIG_PATH = Path("anticipatory_rl/configs/restaurant/restaurant_symbolic.yaml")
+TOY_V3_CONFIG_PATH = Path("configs/restaurant/toy_level_3.yaml")
 
 
 def _make_clean_state(env: RestaurantSymbolicEnv, *, agent_location: str, holding: str | None = None) -> RestaurantState:
@@ -138,19 +138,19 @@ class RestaurantFactoredEnvTests(unittest.TestCase):
         self.assertEqual(tuple(q_value.shape), (1, 1))
 
     def test_drain_mask_requires_held_water_at_fountain(self) -> None:
-        env = RestaurantSymbolicEnv(config_path=FULL_SYMBOLIC_CONFIG_PATH)
+        env = RestaurantSymbolicEnv(config_path=TOY_V3_CONFIG_PATH)
         env.reset(seed=0)
-        env.state = _make_clean_state(env, agent_location="water_station", holding="cup_small")
-        env.state.objects["cup_small"].filled_with = "water"
+        env.state = _make_clean_state(env, agent_location="fountain", holding="cup_0")
+        env.state.objects["cup_0"].filled_with = "water"
 
         info = env._info(success=False)
         drain_idx = ACTION_TYPE_TO_INDEX["drain"]
-        cup_idx = env.object_name_index["cup_small"]
+        cup_idx = env.object_name_index["cup_0"]
 
         self.assertEqual(info["valid_action_type_mask"][drain_idx], 1.0)
         self.assertEqual(info["valid_object1_mask"][drain_idx, cup_idx], 1.0)
 
-        env.state.agent_location = "sink"
+        env.state.agent_location = "countertop"
         info = env._info(success=False)
         self.assertEqual(info["valid_action_type_mask"][drain_idx], 0.0)
 

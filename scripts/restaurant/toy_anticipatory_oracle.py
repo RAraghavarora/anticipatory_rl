@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 import numpy as np
 
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
-from anticipatory_rl.tasks.restaurant.restaurant_planner import (
+from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_planner_action,
     planner_actions_paper2_cost,

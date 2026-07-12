@@ -607,7 +607,7 @@ class RestaurantSymbolicEnv(Env):
             return
         if not self._pending_auto_success:
             return
-        from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task as _sample
+        from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
 
         for _ in range(100):
             task = _sample(self)
@@ -634,7 +634,7 @@ class RestaurantSymbolicEnv(Env):
             )
             return
 
-        from anticipatory_rl.tasks.restaurant.restaurant_utils import sample_task as _sample
+        from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
 
         task = _sample(self)
         self.set_task(
