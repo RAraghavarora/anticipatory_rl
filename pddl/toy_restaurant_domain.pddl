@@ -21,7 +21,6 @@
     (is-container ?obj - object)
     (is-knife ?obj - object)
     (is-coffeegrinds ?obj - object)
-    (is-washable ?obj - object)
     (is-fountain ?loc - location)
     (is-coffeemachine ?loc - location)
     (is-dishwasher ?loc - location)
@@ -81,7 +80,6 @@
       (rob-at ?loc)
       (is-dishwasher ?loc)
       (is-at ?obj ?loc)
-      (is-washable ?obj)
       (is-dirty ?obj)
     )
     :effect (and

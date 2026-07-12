@@ -224,7 +224,6 @@ def build_restaurant_problem_text(
         if obj.kind == "jar":
             init_lines.append(f"(is-jar {name})")
         init_lines.append(f"(is-pickable {name})")
-        init_lines.append(f"(is-washable {name})")
         if obj.filled_with == "water":
             init_lines.append(f"(filled-with water {name})")
         elif obj.filled_with == "coffee":
