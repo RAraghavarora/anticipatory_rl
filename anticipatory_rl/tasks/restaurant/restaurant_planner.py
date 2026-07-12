@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
-from anticipatory_rl.envs.restaurant_symbolic_env import (
+from anticipatory_rl.envs.restaurant.env import (
     RestaurantObjectState,
     RestaurantState,
     RestaurantSymbolicEnv,

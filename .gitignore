@@ -23,6 +23,11 @@ try.ipynb
 *.fls
 
 .aider*
+logs/
+slurm_logs/
+.pytest_cache/
+*.pyc
+.claude/agent-memory
 
 # Local AI instruction files/symlinks (keep out of repo)
 AI_INSTRUCTIONS.md
