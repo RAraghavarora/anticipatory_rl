@@ -89,6 +89,8 @@ def _line_cost_from_action(action_name: str, args: Sequence[str], env: Restauran
         return float(fixed.get("make_fruit_bowl", 100))
     if action_name == "drain":
         return float(fixed.get("drain", 50))
+    if action_name == "pour":
+        return float(fixed.get("pour", 200))
     return 0.0
 
 
@@ -192,6 +194,15 @@ def build_restaurant_problem_text(
     init_lines.append("(= (total-cost) 0)")
 
     for name, obj in state.objects.items():
+        if obj.kind == "water":
+            # Water is modeled by the single `water` constant, not per-object instances.
+            # A water object at a location contributes `(is-at water <loc>)`; it is never
+            # picked/placed/washed. This keeps the water symbol identical to what fill/pour
+            # produce, so make-coffee's `(is-at water ?loc)` cannot be satisfied by poured
+            # coffee (which is a distinct constant), matching the executable env.
+            if obj.location is not None and obj.location != "__held__":
+                init_lines.append(f"(is-at water {obj.location})")
+            continue
         if obj.location is not None and obj.location != "__held__":
             init_lines.append(f"(is-at {name} {obj.location})")
         if obj.contained_in is not None:
@@ -206,10 +217,6 @@ def build_restaurant_problem_text(
             init_lines.append(f"(is-slicable {name})")
         if obj.kind == "knife":
             init_lines.append(f"(is-knife {name})")
-        if obj.kind == "coffeegrinds":
-            init_lines.append(f"(is-coffeegrinds {name})")
-        if obj.kind == "water":
-            init_lines.append(f"(is-liquid {name})")
         init_lines.append(f"(is-pickable {name})")
         init_lines.append(f"(is-washable {name})")
         if obj.filled_with == "water":
@@ -312,10 +319,28 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
         cnt = args[0]
         state.objects[cnt].filled_with = None
         return
+    if name == "pour":
+        # container -> location: empty held container; restore machine water for `water`.
+        cnt = args[0]
+        liquid = state.objects[cnt].filled_with
+        state.objects[cnt].filled_with = None
+        loc = args[-1] if len(args) >= 2 else state.agent_location
+        if liquid == "water":
+            for obj in state.objects.values():
+                if obj.kind == "water" and obj.location is None and obj.contained_in is None:
+                    obj.location = loc
+                    break
+        return
     if name == "make-coffee":
         obj = state.objects[args[0]]
         obj.filled_with = "coffee"
         obj.dirty = True
+        # Consume the water at the coffee machine (PDDL: not (is-at water coffeemachine)).
+        loc = args[1] if len(args) >= 2 else state.agent_location
+        for wobj in state.objects.values():
+            if wobj.kind == "water" and wobj.location == loc:
+                wobj.location = None
+                break
         return
     if name == "make-fruit-bowl":
         apple_name, bowl_name, knife_name, loc = args[0], args[1], args[2], args[3]

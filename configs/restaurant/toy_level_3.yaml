@@ -1,0 +1,129 @@
+# Toy Level 3 — PDDL-domain equivalence (restaurant/domain.py liquid model).
+#
+# Canonical PDDL location names, NO role indirection (validity keys on the name).
+# Key semantic change vs v2.x:
+#   - make_coffee CONSUMES the water at the coffee machine.
+#   - The machine is re-supplied only by `pour` (held liquid container -> current location).
+#   - Two water objects:
+#       water_fountain  @ fountain      -> permanent, infinite source (never toggles)
+#       water_machine   @ coffeemachine -> consumable; location toggles coffeemachine <-> None
+#   - coffeegrinds removed entirely (was a static, unconsumed marker).
+#
+# Trap: making coffee empties the machine. A myopic agent leaves it dry, so the next
+# make_coffee needs fill(fountain) -> move -> pour(coffeemachine) -> brew. An anticipatory
+# agent pre-pours a spare water to keep the machine ready for cheap/auto future coffee.
+#
+# fountain is placed far from coffeemachine to make the resupply detour costly.
+# Grid (connected via Manhattan-1 adjacency; fountain kept 2 hops from coffeemachine
+# so re-supplying machine water is a costly detour):
+#   countertop(0,0) - coffeemachine(1,0) - dishwasher(2,0)
+#        |                  |                   |
+#   shelf(0,1)     - servingtable(1,1) -   fountain(2,1)
+locations:
+  - name: countertop
+    coord: [0, 0]
+  - name: coffeemachine
+    coord: [1, 0]
+  - name: dishwasher
+    coord: [2, 0]
+  - name: shelf
+    coord: [0, 1]
+  - name: servingtable
+    coord: [1, 1]
+  - name: fountain
+    coord: [2, 1]
+
+stations:
+  water: fountain
+  coffee: coffeemachine
+  fruit: countertop
+  wash: dishwasher
+  countertop: countertop
+
+service_locations:
+  - servingtable
+
+wash_ready_locations:
+  - countertop
+
+dirty_drop_locations:
+  - dishwasher
+
+object_kinds: [cup, water, apple, bowl, knife]
+contents: [empty, water, coffee]
+
+task_types:
+  - serve_water
+  - make_coffee
+  - make_fruit_bowl
+  - clear_containers
+  - wash_objects
+  - pick_place
+
+object_specs:
+  - [cup_0, cup]
+  - [cup_1, cup]
+  - [water_fountain, water]
+  - [water_machine, water]
+  - [apple_0, apple]
+  - [bowl_0, bowl]
+  - [knife_0, knife]
+
+reset_location_distribution:
+  cup:
+    countertop: 1.0
+  apple:
+    countertop: 1.0
+  bowl:
+    countertop: 1.0
+  knife:
+    countertop: 1.0
+
+service_location_distribution:
+  servingtable: 1.0
+
+wash_kind_distribution:
+  cup: 1.0
+
+reset_dirty_probability:
+  knife: 0.6
+  bowl: 0.6
+  cup: 0.0
+  apple: 0.0
+
+reset_object_overrides:
+  # Permanent fountain source vs consumable machine water.
+  water_fountain:
+    location: fountain
+  water_machine:
+    location: coffeemachine
+  # v2.2-style two-cup substitution trap on top of the machine-water trap.
+  cup_0:
+    location: countertop
+    dirty: false
+  cup_1:
+    location: dishwasher
+    dirty: true
+
+task_distribution:
+  serve_water: 0.25
+  wash_objects: 0.30
+  make_coffee: 0.30
+  clear_containers: 0.05
+  make_fruit_bowl: 0.05
+  pick_place: 0.05
+
+paper2_cost:
+  enabled: true
+  move:
+    scale: 25.0
+    grid:
+      width: 3
+      height: 2
+      location_cells:
+        countertop: [0, 0]
+        coffeemachine: [1, 0]
+        dishwasher: [2, 0]
+        shelf: [0, 1]
+        servingtable: [1, 1]
+        fountain: [2, 1]

@@ -180,8 +180,6 @@ PDDL_ACTIONS: Tuple[PDDLActionSpec, ...] = (
         preconditions=(
             "rob-at coffeemachine",
             "is-at water coffeemachine",
-            "is-at coffeegrinds coffeemachine",
-            "not is-jar ?c",
             "is-fillable ?c",
             "not is-dirty ?c",
             "is-at ?c coffeemachine",
@@ -225,8 +223,8 @@ PDDL_ACTIONS: Tuple[PDDLActionSpec, ...] = (
         name="pour",
         preconditions=(
             "rob-at ?loc",
+            "is-coffeemachine ?loc",
             "is-liquid ?liquid",
-            "is-fillable ?loc",
             "filled-with ?liquid ?cnt",
             "is-holding ?cnt",
         ),

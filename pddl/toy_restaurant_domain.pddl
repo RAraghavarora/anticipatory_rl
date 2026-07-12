@@ -126,8 +126,24 @@
     )
   )
 
+  (:action pour
+    :parameters (?cnt - object ?liquid - object ?loc - location)
+    :precondition (and
+      (rob-at ?loc)
+      (is-coffeemachine ?loc)
+      (is-holding ?cnt)
+      (is-liquid ?liquid)
+      (filled-with ?liquid ?cnt)
+    )
+    :effect (and
+      (not (filled-with ?liquid ?cnt))
+      (is-at ?liquid ?loc)
+      (increase (total-cost) 200)
+    )
+  )
+
   (:action make-coffee
-    :parameters (?c - object ?loc - location ?wsrc - object ?csrc - object)
+    :parameters (?c - object ?loc - location)
     :precondition (and
       (rob-at ?loc)
       (is-coffeemachine ?loc)
@@ -136,14 +152,12 @@
       (not (is-dirty ?c))
       (not (filled-with water ?c))
       (not (filled-with coffee ?c))
-      (is-liquid ?wsrc)
-      (is-at ?wsrc ?loc)
-      (is-coffeegrinds ?csrc)
-      (is-at ?csrc ?loc)
+      (is-at water ?loc)
     )
     :effect (and
       (filled-with coffee ?c)
       (is-dirty ?c)
+      (not (is-at water ?loc))
       (increase (total-cost) 50)
     )
   )

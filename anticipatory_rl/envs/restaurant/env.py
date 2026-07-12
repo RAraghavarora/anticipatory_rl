@@ -107,7 +107,7 @@ ACTION_HEADS: Dict[str, Tuple[str, ...]] = {
     "make_coffee": ("object1",),
     "make_fruit_bowl": ("object1", "object2"),
     "apply_spread": ("object1",),
-    "pour": ("object1", "object2"),
+    "pour": ("object1",),
     "refill_water": ("object1", "object2"),
     "drain": ("object1",),
     "auto_complete": (),
@@ -342,7 +342,7 @@ class RestaurantSymbolicEnv(Env):
             "make_coffee(object)",
             "make_fruit_bowl(apple, bowl)",
             "apply_spread(spread)",
-            "pour(src, dst)",
+            "pour(src) -> current location",
             "refill_water(container, jar)",
             "drain(object)",
         ]
@@ -732,7 +732,7 @@ class RestaurantSymbolicEnv(Env):
         if action_type == "apply_spread":
             return self._apply_spread(str(action_spec["object1_name"])), True
         if action_type == "pour":
-            return self._pour(str(action_spec["object1_name"]), str(action_spec["object2_name"])), True
+            return self._pour(str(action_spec["object1_name"])), True
         if action_type == "refill_water":
             return self._refill_water(str(action_spec["object1_name"]), str(action_spec["object2_name"])), True
         if action_type == "drain":
@@ -773,6 +773,7 @@ class RestaurantSymbolicEnv(Env):
         obj = self.state.objects[obj_name]
         obj.filled_with = "coffee"
         obj.dirty = True
+        self._consume_machine_water(self.state.agent_location)
         return -self.brew_cost
 
     def _make_fruit_bowl(self, apple_name: str, bowl_name: str) -> float:
@@ -795,11 +796,15 @@ class RestaurantSymbolicEnv(Env):
         knife.dirty = True
         return -self.spread_cost
 
-    def _pour(self, src_name: str, dst_name: str) -> float:
+    def _pour(self, src_name: str) -> float:
+        # Container -> location. Empty the held container onto the current location.
+        # Materialize water at the location (re-supplies the coffee machine); other
+        # liquids simply empty the container (no location consumer).
         src = self.state.objects[src_name]
-        dst = self.state.objects[dst_name]
-        dst.filled_with = src.filled_with
+        liquid = src.filled_with
         src.filled_with = None
+        if liquid == "water":
+            self._restore_location_water(self.state.agent_location)
         return -self.pour_cost
 
     def _refill_water(self, container_name: str, jar_name: str) -> float:
@@ -816,6 +821,26 @@ class RestaurantSymbolicEnv(Env):
     def _has_role(self, location: str, role: str) -> bool:
         return role in self.location_roles.get(location, ())
 
+    def _is_location(self, location: str, role: str) -> bool:
+        # Canonical PDDL layouts name locations after their role (e.g. "fountain",
+        # "coffeemachine") and declare no roles; older configs declare roles. Accept either.
+        return location == role or self._has_role(location, role)
+
+    def _consume_machine_water(self, location: str) -> None:
+        # make_coffee consumes the water at the coffee machine (PDDL:
+        # `(not (is-at water coffeemachine))`). Empty one water source object here.
+        for obj in self.state.objects.values():
+            if obj.kind == "water" and obj.location == location:
+                obj.location = None
+                return
+
+    def _restore_location_water(self, location: str) -> None:
+        # pour re-supplies a location's water using an emptied ("consumed") water object.
+        for obj in self.state.objects.values():
+            if obj.kind == "water" and obj.location is None and obj.contained_in is None:
+                obj.location = location
+                return
+
     def _object_at_robot(self, obj_name: str) -> bool:
         obj = self.state.objects[obj_name]
         return obj.location == self.state.agent_location and obj.contained_in is None
@@ -826,6 +851,12 @@ class RestaurantSymbolicEnv(Env):
         held = self.state.objects[self.state.holding]
         return held.kind == "knife" and not held.dirty
 
+    def _is_pickable_kind(self, kind: str) -> bool:
+        # Liquids are moved by fill/pour only, never picked/placed as objects (matches the
+        # planner's PDDL, where water is not is-pickable). Prevents the agent from carrying
+        # a raw water source around.
+        return kind != "water"
+
     def _is_fillable_kind(self, kind: str) -> bool:
         return kind in {"cup", "mug", "jar", "bowl"}
 
@@ -834,9 +865,6 @@ class RestaurantSymbolicEnv(Env):
 
     def _water_available_at(self, location: str) -> bool:
         return any(obj.kind == "water" and obj.location == location for obj in self.state.objects.values())
-
-    def _coffeegrinds_available_at(self, location: str) -> bool:
-        return any(obj.kind == "coffeegrinds" and obj.location == location for obj in self.state.objects.values())
 
     def _bread_available_at(self, location: str) -> bool:
         return any(obj.kind == "bread" and obj.location == location for obj in self.state.objects.values())
@@ -854,20 +882,20 @@ class RestaurantSymbolicEnv(Env):
             if object1 is None or held_name is not None:
                 return False
             obj = self.state.objects[object1]
-            return obj.location == self.state.agent_location
+            return obj.location == self.state.agent_location and self._is_pickable_kind(obj.kind)
         if action_type == "place":
             return held_name is not None and location is not None and location == self.state.agent_location
         if action_type == "wash":
             if object1 is None:
                 return False
             obj = self.state.objects[object1]
-            return obj.dirty and obj.location == self.state.agent_location and self._has_role(self.state.agent_location, "dishwasher")
+            return obj.dirty and obj.location == self.state.agent_location and self._is_location(self.state.agent_location, "dishwasher")
         if action_type == "fill":
             if object1 is None or held_name != object1:
                 return False
             obj = self.state.objects[object1]
             return (
-                self._has_role(self.state.agent_location, "fountain")
+                self._is_location(self.state.agent_location, "fountain")
                 and self._water_available_at(self.state.agent_location)
                 and self._is_fillable_kind(obj.kind)
                 and not obj.dirty
@@ -878,13 +906,12 @@ class RestaurantSymbolicEnv(Env):
                 return False
             obj = self.state.objects[object1]
             return (
-                self._has_role(self.state.agent_location, "coffeemachine")
+                self._is_location(self.state.agent_location, "coffeemachine")
                 and obj.location == self.state.agent_location
                 and obj.kind in {"cup", "mug"}
                 and not obj.dirty
                 and obj.filled_with is None
                 and self._water_available_at(self.state.agent_location)
-                and self._coffeegrinds_available_at(self.state.agent_location)
             )
         if action_type == "make_fruit_bowl":
             if object1 is None or object2 is None:
@@ -892,7 +919,7 @@ class RestaurantSymbolicEnv(Env):
             apple = self.state.objects[object1]
             bowl = self.state.objects[object2]
             return (
-                self._has_role(self.state.agent_location, "countertop")
+                self._is_location(self.state.agent_location, "countertop")
                 and apple.kind == "apple"
                 and apple.location == self.state.agent_location
                 and apple.contained_in is None
@@ -908,7 +935,7 @@ class RestaurantSymbolicEnv(Env):
                 return False
             spread = self.state.objects[object1]
             return (
-                self._has_role(self.state.agent_location, "countertop")
+                self._is_location(self.state.agent_location, "countertop")
                 and spread.kind == "spread"
                 and spread.location == self.state.agent_location
                 and self._bread_available_at(self.state.agent_location)
@@ -916,17 +943,15 @@ class RestaurantSymbolicEnv(Env):
                 and self.state.bread_spread != object1
             )
         if action_type == "pour":
-            if object1 is None or object2 is None or object1 == object2:
+            # PDDL-style pour: empty a held container's liquid onto the current location.
+            # Pour-valid location = coffeemachine (re-supplies machine water).
+            if object1 is None:
                 return False
             src = self.state.objects[object1]
-            dst = self.state.objects[object2]
             return (
                 held_name == object1
                 and src.filled_with is not None
-                and dst.location == self.state.agent_location
-                and dst.contained_in is None
-                and self._is_fillable_kind(dst.kind)
-                and dst.filled_with is None
+                and self._is_location(self.state.agent_location, "coffeemachine")
             )
         if action_type == "refill_water":
             if object1 is None or object2 is None or held_name != object1:
@@ -945,7 +970,7 @@ class RestaurantSymbolicEnv(Env):
             if object1 is None or held_name != object1:
                 return False
             container = self.state.objects[object1]
-            return self._has_role(self.state.agent_location, "fountain") and container.filled_with == "water"
+            return self._is_location(self.state.agent_location, "fountain") and container.filled_with == "water"
         return False
 
     def _configure_paper2_cost(self, cfg: Mapping[str, Any]) -> None:
@@ -1212,6 +1237,7 @@ class RestaurantSymbolicEnv(Env):
                 self.object_name_index[name]
                 for name in self.object_names
                 if self.state.objects[name].location == self.state.agent_location
+                and self._is_pickable_kind(self.state.objects[name].kind)
             ]
             if valid_pick_objects:
                 pick_idx = self._set_action_type_valid(masks, "pick")
@@ -1245,7 +1271,7 @@ class RestaurantSymbolicEnv(Env):
             held_obj_idx = self.object_name_index[held_name]
 
             if (
-                self._has_role(self.state.agent_location, "fountain")
+                self._is_location(self.state.agent_location, "fountain")
                 and self._water_available_at(self.state.agent_location)
                 and self._is_fillable_kind(held_obj.kind)
                 and not held_obj.dirty
@@ -1256,7 +1282,7 @@ class RestaurantSymbolicEnv(Env):
                 masks["valid_location_mask"][fill_idx, self.none_location_index] = 1.0
                 masks["valid_object2_mask"][fill_idx, held_obj_idx, self.none_object_index] = 1.0
 
-            if self._held_clean_knife() and self._has_role(self.state.agent_location, "countertop"):
+            if self._held_clean_knife() and self._is_location(self.state.agent_location, "countertop"):
                 apple_indices = [
                     self.object_name_index[name]
                     for name in self.object_names
@@ -1295,22 +1321,11 @@ class RestaurantSymbolicEnv(Env):
                         masks["valid_object1_mask"][spread_idx, obj_idx] = 1.0
                         masks["valid_object2_mask"][spread_idx, obj_idx, self.none_object_index] = 1.0
 
-            if held_obj.filled_with is not None:
-                pour_targets = [
-                    self.object_name_index[name]
-                    for name in self.object_names
-                    if name != held_name
-                    and self.state.objects[name].location == self.state.agent_location
-                    and self.state.objects[name].contained_in is None
-                    and self._is_fillable_kind(self.state.objects[name].kind)
-                    and self.state.objects[name].filled_with is None
-                ]
-                if pour_targets:
-                    pour_idx = self._set_action_type_valid(masks, "pour")
-                    masks["valid_object1_mask"][pour_idx, held_obj_idx] = 1.0
-                    masks["valid_location_mask"][pour_idx, self.none_location_index] = 1.0
-                    for target_idx in pour_targets:
-                        masks["valid_object2_mask"][pour_idx, held_obj_idx, target_idx] = 1.0
+            if held_obj.filled_with is not None and self._is_location(self.state.agent_location, "coffeemachine"):
+                pour_idx = self._set_action_type_valid(masks, "pour")
+                masks["valid_object1_mask"][pour_idx, held_obj_idx] = 1.0
+                masks["valid_location_mask"][pour_idx, self.none_location_index] = 1.0
+                masks["valid_object2_mask"][pour_idx, held_obj_idx, self.none_object_index] = 1.0
 
             if held_obj.filled_with is None and not held_obj.dirty and self._is_fillable_kind(held_obj.kind):
                 refill_sources = [
@@ -1327,7 +1342,7 @@ class RestaurantSymbolicEnv(Env):
                     for jar_idx in refill_sources:
                         masks["valid_object2_mask"][refill_idx, held_obj_idx, jar_idx] = 1.0
 
-            if self._has_role(self.state.agent_location, "fountain") and held_obj.filled_with == "water":
+            if self._is_location(self.state.agent_location, "fountain") and held_obj.filled_with == "water":
                 drain_idx = self._set_action_type_valid(masks, "drain")
                 masks["valid_object1_mask"][drain_idx, held_obj_idx] = 1.0
                 masks["valid_location_mask"][drain_idx, self.none_location_index] = 1.0
@@ -1342,10 +1357,9 @@ class RestaurantSymbolicEnv(Env):
             and self.state.objects[name].filled_with is None
         ]
         if (
-            self._has_role(self.state.agent_location, "coffeemachine")
+            self._is_location(self.state.agent_location, "coffeemachine")
             and coffee_candidates
             and self._water_available_at(self.state.agent_location)
-            and self._coffeegrinds_available_at(self.state.agent_location)
         ):
             coffee_idx = self._set_action_type_valid(masks, "make_coffee")
             masks["valid_location_mask"][coffee_idx, self.none_location_index] = 1.0
