@@ -16,6 +16,7 @@ from anticipatory_rl.envs.restaurant.env import (
     RestaurantState,
     RestaurantSymbolicEnv,
     RestaurantTask,
+    consume_delivery,
 )
 from anticipatory_rl.envs.restaurant.fd_runner import run_planner
 
@@ -99,6 +100,11 @@ def planner_actions_paper2_cost(actions: Sequence[Tuple[str, List[str]]], env: R
     for name, args in actions:
         total += _line_cost_from_action(name, args, env)
     return float(total)
+
+
+def consume_delivery_from_state(state: RestaurantPlannerState, task_type: str, target_location: str | None) -> None:
+    """Empty delivered artifact on a planner state."""
+    consume_delivery(state.objects, task_type, target_location)
 
 
 def _known_cost_entries(env: RestaurantSymbolicEnv) -> Iterable[Tuple[str, str, int]]:

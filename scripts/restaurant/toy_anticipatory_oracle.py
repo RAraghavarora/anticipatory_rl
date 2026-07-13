@@ -35,6 +35,7 @@ from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, Restauran
 from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_planner_action,
+    consume_delivery_from_state,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,
     task_goal_clauses,
@@ -472,8 +473,10 @@ def run_anticipatory_oracle(
 
         strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
 
-        if result_success and plan is not None:
-            state = plan.terminal_state
+        if result_success:
+            if plan is not None:
+                state = plan.terminal_state
+            consume_delivery_from_state(state, task_type, task.target_location)
             env.state.agent_location = state.agent_location
             env.state.holding = state.holding
             env.state.bread_spread = state.bread_spread
@@ -482,7 +485,7 @@ def run_anticipatory_oracle(
                 env.state.objects[name].dirty = obj.dirty
                 env.state.objects[name].filled_with = obj.filled_with
                 env.state.objects[name].contained_in = obj.contained_in
-        elif not result_success:
+        else:
             failures += 1
 
         records.append({

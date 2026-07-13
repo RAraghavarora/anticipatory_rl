@@ -143,6 +143,35 @@ class RestaurantState:
     bread_spread: str | None = None #TODO: Move this to RestaurantObjectState
 
 
+def consume_delivery(objects: Mapping[str, RestaurantObjectState], task_type: str, target_location: str | None) -> None:
+    """Empty delivered artifact after a serve/deliver task completes.
+
+    Shared by env.step() and the planner-state oracles; operates on a plain
+    {name: object} mapping so it is state-representation-agnostic.
+    """
+    if target_location is None:
+        return
+    if task_type == "make_coffee":
+        for obj in objects.values():
+            if obj.location == target_location and obj.kind in {"cup", "mug"} and obj.filled_with == "coffee":
+                obj.filled_with = None
+                break
+    elif task_type == "serve_water":
+        for obj in objects.values():
+            if obj.location == target_location and obj.kind in {"cup", "mug"} and obj.filled_with == "water":
+                obj.filled_with = None
+                break
+    elif task_type == "make_fruit_bowl":
+        bowls = [obj.name for obj in objects.values()
+                 if obj.kind == "bowl" and obj.location == target_location]
+        if bowls:
+            for obj in objects.values():
+                if obj.kind == "apple" and obj.contained_in in bowls:
+                    obj.contained_in = None
+                    obj.location = target_location
+                    break
+
+
 class RestaurantSymbolicEnv(Env):
     """Symbolic continuing-task restaurant benchmark with factorized PDDL-style actions."""
 
@@ -271,6 +300,7 @@ class RestaurantSymbolicEnv(Env):
     def step(self, action: Mapping[str, int]):
         if self._pending_auto_success:
             self._pending_auto_success = False
+            consume_delivery(self.state.objects, self.task.task_type, self.task.target_location)
             reward = self.success_reward
             success = True
             truncated = False
@@ -293,6 +323,7 @@ class RestaurantSymbolicEnv(Env):
         self._update_paper2_cost(action_spec=parsed, src_location=src_location, valid=valid)
 
         if self._task_already_satisfied():
+            consume_delivery(self.state.objects, self.task.task_type, self.task.target_location)
             reward += self.success_reward
             success = True
             self._resample_task()

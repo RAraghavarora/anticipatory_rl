@@ -28,6 +28,7 @@ from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
 from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     apply_plan,
+    consume_delivery_from_state,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,
 )
@@ -93,6 +94,7 @@ def run_myopic_oracle(
 
         if result_success:
             state = apply_plan(state, plan_actions)
+            consume_delivery_from_state(state, task_type, task.target_location)
             env.state.agent_location = state.agent_location
             env.state.holding = state.holding
             env.state.bread_spread = state.bread_spread
