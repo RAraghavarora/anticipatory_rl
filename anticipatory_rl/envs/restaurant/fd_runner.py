@@ -8,36 +8,53 @@ from pathlib import Path
 
 
 def run_planner(
-    planner: Path, domain: Path, problem: Path, search: str, workdir: Path,
-    timeout: float | None = None,
+    planner: Path,
+    domain: Path,
+    problem: Path,
+    workdir: Path,
+    *,
+    alias: str = "seq-sat-lama-2011",
+    initial_search_time_limit: float = 10.0,
+    max_search_time_limit: float = 320.0,
 ) -> Path:
-    """Invoke Fast Downward (or compatible planner) and return the sas_plan path."""
-    cmd = [
-        sys.executable,
-        str(planner.resolve()),
-        str(domain.resolve()),
-        str(problem.resolve()),
-        "--search",
-        search,
-    ]
-    proc = subprocess.run(
-        cmd,
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout,
+    """Invoke Fast Downward with a portfolio alias and doubling search-time-limit.
+
+    Starts with *initial_search_time_limit* seconds. If no plan is found, doubles
+    the limit and retries, up to *max_search_time_limit* seconds total.
+    Returns the path to the first sas_plan* file produced.
+    """
+    time_limit = initial_search_time_limit
+    last_stderr = ""
+    while time_limit <= max_search_time_limit:
+        cmd = [
+            sys.executable,
+            str(planner.resolve()),
+            "--alias",
+            alias,
+            "--search-time-limit",
+            f"{int(time_limit)}s",
+            str(domain.resolve()),
+            str(problem.resolve()),
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=time_limit + 60,
+            )
+            last_stderr = proc.stderr
+        except subprocess.TimeoutExpired as exc:
+            last_stderr = str(exc)
+        plan_candidates = sorted(workdir.glob("sas_plan*"))
+        if plan_candidates:
+            return plan_candidates[0]
+        time_limit *= 2
+    raise RuntimeError(
+        f"Planner found no plan within {max_search_time_limit}s.\nSTDERR:\n{last_stderr}"
     )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Planner failed (code {proc.returncode}).\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-        )
-    plan_candidates = sorted(workdir.glob("sas_plan*"))
-    if not plan_candidates:
-        raise FileNotFoundError(
-            "Planner succeeded but produced no sas_plan* output."
-        )
-    return plan_candidates[0]
 
 
 def plan_cost(plan_path: Path) -> int:

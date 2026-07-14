@@ -136,7 +136,7 @@ def _solve_task_cost(
     task: RestaurantTask,
     planner_path: Path,
     domain_path: Path,
-    search: str,
+    alias: str,
     timeout_s: float,
 ) -> Dict[str, Any]:
     _state_to_env(env, state)
@@ -166,7 +166,7 @@ def _solve_task_cost(
         task,
         planner_path=planner_path,
         domain_path=domain_path,
-        search=search,
+        alias=alias,
         timeout_s=timeout_s,
     )
     return {
@@ -229,7 +229,7 @@ def _paired_future_probe(
     probe_seed: int,
     planner_path: Path,
     domain_path: Path,
-    search: str,
+    alias: str,
     timeout_s: float,
     log_probes: bool,
 ) -> Dict[str, Any]:
@@ -250,7 +250,7 @@ def _paired_future_probe(
             task=task,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
         )
         post = _solve_task_cost(
@@ -259,7 +259,7 @@ def _paired_future_probe(
             task=task,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
         )
         pre_results.append(pre)
@@ -406,7 +406,7 @@ def run_diagnostic(
     num_tasks: int,
     tasks_per_reset: int,
     probe_tasks: int,
-    search: str,
+    alias: str,
     timeout_s: float,
     seed: int,
     log_all: bool,
@@ -437,7 +437,7 @@ def run_diagnostic(
             task=task,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
         )
         total_current_solve_time += float(current["solve_time_s"])
@@ -454,7 +454,7 @@ def run_diagnostic(
             probe_seed=seed + 1_000_003 * task_idx,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
             log_probes=log_probes,
         )
@@ -540,8 +540,8 @@ def main() -> None:
     parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_restaurant.yaml"))
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"))
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"))
-    parser.add_argument("--search", type=str, default="astar(ff())")
-    parser.add_argument("--timeout-s", type=float, default=30.0)
+    parser.add_argument("--alias", type=str, default="seq-sat-lama-2011")
+    parser.add_argument("--timeout-s", type=float, default=10.0)
     parser.add_argument("--num-tasks", type=int, default=25)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
     parser.add_argument("--probe-tasks", type=int, default=10)
@@ -559,7 +559,7 @@ def main() -> None:
         num_tasks=args.num_tasks,
         tasks_per_reset=args.tasks_per_reset,
         probe_tasks=args.probe_tasks,
-        search=args.search,
+        alias=args.alias,
         timeout_s=args.timeout_s,
         seed=args.seed,
         log_all=args.log_all,

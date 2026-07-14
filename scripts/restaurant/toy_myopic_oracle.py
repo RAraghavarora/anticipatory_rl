@@ -41,7 +41,7 @@ def run_myopic_oracle(
     planner_path: Path,
     num_tasks: int,
     tasks_per_reset: int,
-    search: str,
+    alias: str,
     timeout_s: float,
     seed: int,
 ) -> Dict[str, Any]:
@@ -78,7 +78,7 @@ def run_myopic_oracle(
                 task,
                 planner_path=planner_path,
                 domain_path=domain_path,
-                search=search,
+                alias=alias,
                 timeout_s=timeout_s,
             )
             elapsed = float(time.perf_counter() - t0)
@@ -157,8 +157,8 @@ def main() -> None:
     parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_restaurant.yaml"))
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"))
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"))
-    parser.add_argument("--search", type=str, default="astar(ff())")
-    parser.add_argument("--timeout-s", type=float, default=30.0)
+    parser.add_argument("--alias", type=str, default="seq-sat-lama-2011")
+    parser.add_argument("--timeout-s", type=float, default=10.0)
     parser.add_argument("--num-tasks", type=int, default=40)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
@@ -171,7 +171,7 @@ def main() -> None:
         planner_path=args.planner_path,
         num_tasks=args.num_tasks,
         tasks_per_reset=args.tasks_per_reset,
-        search=args.search,
+        alias=args.alias,
         timeout_s=args.timeout_s,
         seed=args.seed,
     )

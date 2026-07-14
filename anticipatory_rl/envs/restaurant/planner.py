@@ -262,9 +262,9 @@ def solve_restaurant_task_with_fd(
     *,
     planner_path: Path,
     domain_path: Path,
-    search: str = "astar(lmcut())",
+    alias: str = "seq-sat-lama-2011",
     extra_goal_clauses: Sequence[str] | None = None,
-    timeout_s: float = 30.0,
+    timeout_s: float = 10.0,
 ) -> PlannerResult:
     t0 = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="restaurant_fd_") as tmp:
@@ -281,7 +281,14 @@ def solve_restaurant_task_with_fd(
             encoding="utf-8",
         )
         try:
-            plan_path = run_planner(planner_path, domain_path, problem_path, search, tmpdir, timeout=timeout_s)
+            plan_path = run_planner(
+                planner_path,
+                domain_path,
+                problem_path,
+                tmpdir,
+                alias=alias,
+                initial_search_time_limit=timeout_s,
+            )
             plan_text = plan_path.read_text(encoding="utf-8")
             actions = parse_sas_plan(plan_text)
             cost = planner_actions_paper2_cost(actions, env)
@@ -293,9 +300,7 @@ def solve_restaurant_task_with_fd(
             )
         except Exception as exc:
             elapsed = float(time.perf_counter() - t0)
-            if elapsed < timeout_s:
-                return PlannerResult(False, [], float("inf"), elapsed, error=str(exc))
-            return PlannerResult(False, [], float("inf"), elapsed, error=f"timeout: {exc}")
+            return PlannerResult(False, [], float("inf"), elapsed, error=str(exc))
 
 
 def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[str]]) -> None:

@@ -233,7 +233,7 @@ def _solve_q_guided_task(
     *,
     planner_path: Path,
     domain_path: Path,
-    search: str,
+    alias: str,
     timeout_s: float,
     gamma: float,
     beta: float,
@@ -254,7 +254,7 @@ def _solve_q_guided_task(
         env, state, task,
         planner_path=planner_path,
         domain_path=domain_path,
-        search=search,
+        alias=alias,
         timeout_s=timeout_s,
     )
     if myopic_result.success:
@@ -290,7 +290,7 @@ def _solve_q_guided_task(
             env, state, task,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             extra_goal_clauses=extra,
             timeout_s=timeout_s,
         )
@@ -333,7 +333,7 @@ def run_q_guided_planner(
     q_weights: Path,
     num_tasks: int,
     tasks_per_reset: int,
-    search: str,
+    alias: str,
     timeout_s: float,
     seed: int,
     gamma: float,
@@ -392,7 +392,7 @@ def run_q_guided_planner(
                 future_tasks=_enumerate_future_tasks(env, state),
                 planner_path=planner_path,
                 domain_path=domain_path,
-                search=search,
+                alias=alias,
                 timeout_s=timeout_s,
                 gamma=gamma,
                 beta=beta,
@@ -497,8 +497,8 @@ def main() -> None:
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"))
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"))
     parser.add_argument("--q-weights", type=Path, required=True)
-    parser.add_argument("--search", type=str, default="astar(ff())")
-    parser.add_argument("--timeout-s", type=float, default=30.0)
+    parser.add_argument("--alias", type=str, default="seq-sat-lama-2011")
+    parser.add_argument("--timeout-s", type=float, default=10.0)
     parser.add_argument("--num-tasks", type=int, default=40)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
@@ -515,7 +515,7 @@ def main() -> None:
         q_weights=args.q_weights,
         num_tasks=args.num_tasks,
         tasks_per_reset=args.tasks_per_reset,
-        search=args.search,
+        alias=args.alias,
         timeout_s=args.timeout_s,
         seed=args.seed,
         gamma=args.gamma,

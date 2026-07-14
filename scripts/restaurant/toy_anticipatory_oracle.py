@@ -239,7 +239,7 @@ def _compute_v_ap(
     *,
     planner_path: Path,
     domain_path: Path,
-    search: str,
+    alias: str,
     timeout_s: float,
     cache: Dict[Tuple, float],
 ) -> float:
@@ -260,7 +260,7 @@ def _compute_v_ap(
                 env, state, task,
                 planner_path=planner_path,
                 domain_path=domain_path,
-                search=search,
+                alias=alias,
                 timeout_s=timeout_s,
             )
             cost = result.plan_cost if result.success else 1e6
@@ -293,7 +293,7 @@ def _solve_anticipatory_task(
     *,
     planner_path: Path,
     domain_path: Path,
-    search: str,
+    alias: str,
     timeout_s: float,
     gamma: float,
     v_ap_cache: Dict[Tuple, float],
@@ -313,7 +313,7 @@ def _solve_anticipatory_task(
         env, state, task,
         planner_path=planner_path,
         domain_path=domain_path,
-        search=search,
+        alias=alias,
         timeout_s=timeout_s,
     )
     if myopic_result.success:
@@ -325,7 +325,7 @@ def _solve_anticipatory_task(
             terminal, env, future_tasks,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
             cache=v_ap_cache,
         )
@@ -351,7 +351,7 @@ def _solve_anticipatory_task(
             env, state, task,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             extra_goal_clauses=extra,
             timeout_s=timeout_s,
         )
@@ -365,7 +365,7 @@ def _solve_anticipatory_task(
             terminal, env, future_tasks,
             planner_path=planner_path,
             domain_path=domain_path,
-            search=search,
+            alias=alias,
             timeout_s=timeout_s,
             cache=v_ap_cache,
         )
@@ -395,7 +395,7 @@ def run_anticipatory_oracle(
     planner_path: Path,
     num_tasks: int,
     tasks_per_reset: int,
-    search: str,
+    alias: str,
     timeout_s: float,
     seed: int,
     gamma: float,
@@ -442,7 +442,7 @@ def run_anticipatory_oracle(
                 future_tasks=_enumerate_future_tasks(env, state),
                 planner_path=planner_path,
                 domain_path=domain_path,
-                search=search,
+                alias=alias,
                 timeout_s=timeout_s,
                 gamma=gamma,
                 v_ap_cache=v_ap_cache,
@@ -543,8 +543,8 @@ def main() -> None:
     parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_restaurant.yaml"))
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"))
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"))
-    parser.add_argument("--search", type=str, default="astar(ff())")
-    parser.add_argument("--timeout-s", type=float, default=30.0)
+    parser.add_argument("--alias", type=str, default="seq-sat-lama-2011")
+    parser.add_argument("--timeout-s", type=float, default=10.0)
     parser.add_argument("--num-tasks", type=int, default=40)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
@@ -558,7 +558,7 @@ def main() -> None:
         planner_path=args.planner_path,
         num_tasks=args.num_tasks,
         tasks_per_reset=args.tasks_per_reset,
-        search=args.search,
+        alias=args.alias,
         timeout_s=args.timeout_s,
         seed=args.seed,
         gamma=args.gamma,
