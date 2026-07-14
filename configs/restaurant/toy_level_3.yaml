@@ -114,7 +114,7 @@ reset_object_overrides:
   jar_0:
     location: shelf
     dirty: false
-    filled_with: water
+    filled_with:
 
 task_distribution:
   serve_water: 0.25
