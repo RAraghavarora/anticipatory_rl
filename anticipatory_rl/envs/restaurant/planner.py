@@ -219,7 +219,7 @@ def build_restaurant_problem_text(
             init_lines.append(f"(is-in {name} {obj.contained_in})")
         if obj.dirty:
             init_lines.append(f"(is-dirty {name})")
-        if obj.kind in {"cup", "bowl", "mug"}:
+        if obj.kind in {"cup", "bowl", "mug", "jar"}:
             init_lines.append(f"(is-fillable {name})")
         if obj.kind == "bowl":
             init_lines.append(f"(is-container {name})")
