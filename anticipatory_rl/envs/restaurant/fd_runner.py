@@ -8,7 +8,8 @@ from pathlib import Path
 
 
 def run_planner(
-    planner: Path, domain: Path, problem: Path, search: str, workdir: Path
+    planner: Path, domain: Path, problem: Path, search: str, workdir: Path,
+    timeout: float | None = None,
 ) -> Path:
     """Invoke Fast Downward (or compatible planner) and return the sas_plan path."""
     cmd = [
@@ -25,6 +26,7 @@ def run_planner(
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout,
     )
     if proc.returncode != 0:
         raise RuntimeError(

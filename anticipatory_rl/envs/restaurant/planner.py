@@ -281,7 +281,7 @@ def solve_restaurant_task_with_fd(
             encoding="utf-8",
         )
         try:
-            plan_path = run_planner(planner_path, domain_path, problem_path, search, tmpdir)
+            plan_path = run_planner(planner_path, domain_path, problem_path, search, tmpdir, timeout=timeout_s)
             plan_text = plan_path.read_text(encoding="utf-8")
             actions = parse_sas_plan(plan_text)
             cost = planner_actions_paper2_cost(actions, env)
