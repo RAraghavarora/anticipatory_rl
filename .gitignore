@@ -38,3 +38,9 @@ CONVENTIONS.md
 .github/copilot-instructions.md
 .aim*
 docs/
+
+# opencode agent tooling
+opencode.json
+package.json
+node_modules/
+.opencode/

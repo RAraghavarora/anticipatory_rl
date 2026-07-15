@@ -757,6 +757,7 @@ class RestaurantSymbolicEnv(Env):
         }
 
     def _execute_action(self, action_spec: Mapping[str, Any]) -> Tuple[float, bool]:
+        #TODO: Rename the function names to be the same as action names. Low priority.
         action_type = str(action_spec["action_type"])
         if not self._is_action_valid(action_spec):
             return 0.0, False
@@ -941,8 +942,8 @@ class RestaurantSymbolicEnv(Env):
             obj = self.state.objects[object1]
             return (
                 self._is_location(self.state.agent_location, "fountain")
-                and self._water_available_at(self.state.agent_location)
-                and self._is_fillable_kind(obj.kind)
+                and self._water_available_at(self.state.agent_location) # This will always be true for fountain.
+                and self._is_fillable_kind(obj.kind) # Agent is holding either a cup, mug or a jar
                 and not obj.dirty
                 and obj.filled_with is None
             )
@@ -990,6 +991,7 @@ class RestaurantSymbolicEnv(Env):
         if action_type == "pour":
             # PDDL-style pour: empty a held container's liquid onto the current location.
             # Pour-valid location = coffeemachine (re-supplies machine water).
+            # The agent can pour coffee on the coffeemachine with this action. Semantically it doesn't make sense, but is currently allowed.
             if object1 is None:
                 return False
             src = self.state.objects[object1]
