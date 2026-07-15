@@ -188,6 +188,15 @@ def test_pour_validity(env):
     env.state.objects["cup_0"].filled_with = None
     assert not env._is_action_valid(action_spec)
 
+    # An empty held cup at the coffeemachine has nothing to pour -> invalid.
+    ps = RestaurantPlannerState.from_env(env)
+    ps_before = ps.copy()
+    apply_planner_action(ps, ("pour", ["cup_0", "coffeemachine"]))
+    assert ps.objects["cup_0"] == ps_before.objects["cup_0"]
+    assert ps.objects["water_machine"] == ps_before.objects["water_machine"]
+    assert ps.agent_location == ps_before.agent_location
+    assert ps.holding == ps_before.holding
+
 
 def test_fountain_water_permanent(env):
     assert env.state.objects["water_fountain"].location == "fountain"
@@ -198,6 +207,8 @@ def test_fountain_water_permanent(env):
     env.state.objects["cup_0"].filled_with = None
     env.step(_build_env_action(env, "make_coffee", {"object1": "cup_0"}))
     assert env.state.objects["water_fountain"].location == "fountain"
+    ps = RestaurantPlannerState.from_env(env)
+    assert ps.objects["water_fountain"].location == "fountain"
 
     env.state.objects["cup_1"].location = "coffeemachine"
     env.state.objects["cup_1"].filled_with = "water"
@@ -205,6 +216,8 @@ def test_fountain_water_permanent(env):
     env.state.holding = "cup_1"
     env.step(_build_env_action(env, "pour", {"object1": "cup_1"}))
     assert env.state.objects["water_fountain"].location == "fountain"
+    ps = RestaurantPlannerState.from_env(env)
+    assert ps.objects["water_fountain"].location == "fountain"
 
     env.state.agent_location = "shelf"
     env.state.holding = "cup_0"
@@ -214,6 +227,8 @@ def test_fountain_water_permanent(env):
     env.state.objects["jar_0"].filled_with = "water"
     env.step(_build_env_action(env, "refill_water", {"object1": "cup_0", "object2": "jar_0"}))
     assert env.state.objects["water_fountain"].location == "fountain"
+    ps = RestaurantPlannerState.from_env(env)
+    assert ps.objects["water_fountain"].location == "fountain"
 
 
 def test_water_not_pickable(env):

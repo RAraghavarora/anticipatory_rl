@@ -10,9 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, Dict, List, Mapping
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -893,174 +890,6 @@ def _q_by_action_type(
     return out
 
 
-def _plot_post_train_trajectories(trajectory_records: List[Dict[str, object]], output_path: Path) -> None:
-    if not trajectory_records:
-        return
-    xs = list(range(1, len(trajectory_records) + 1))
-    steps = [int(record["steps"]) for record in trajectory_records]
-    success = [1.0 if bool(record["success"]) else 0.0 for record in trajectory_records]
-    oracle_steps = [int(record["oracle_steps"]) for record in trajectory_records]
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
-    axes[0].plot(xs, steps, label="policy_steps", color="#1f3b73")
-    axes[0].plot(xs, oracle_steps, label="oracle_steps", color="#c2410c", alpha=0.8)
-    axes[0].set_ylabel("Steps")
-    axes[0].set_title("Post-train rollout trajectories")
-    axes[0].grid(alpha=0.3)
-    axes[0].legend()
-    axes[1].step(xs, success, where="mid", color="#047857")
-    axes[1].set_ylim(-0.05, 1.05)
-    axes[1].set_ylabel("Success")
-    axes[1].set_xlabel("Trajectory index")
-    axes[1].grid(alpha=0.3)
-    fig.savefig(output_path, dpi=140, bbox_inches="tight", facecolor="#fafafa")
-    plt.close(fig)
-
-
-def _run_post_train_inference(
-    q_net: RestaurantQNetwork,
-    args: argparse.Namespace,
-    device: torch.device,
-    run_dir: Path,
-    logger: LoggerPair,
-) -> Dict[str, object]:
-    env = RestaurantSymbolicEnv(
-        config_path=args.config_path,
-        max_steps_per_task=args.max_steps_per_task,
-        success_reward=args.success_reward,
-        invalid_action_penalty=args.invalid_action_penalty,
-        travel_cost_scale=args.travel_cost_scale,
-        pick_cost=args.pick_cost,
-        place_cost=args.place_cost,
-        wash_cost=args.wash_cost,
-        fill_cost=args.fill_cost,
-        brew_cost=args.brew_cost,
-        fruit_cost=args.fruit_cost,
-        rng_seed=args.seed + 1_000_000,
-    )
-    trajectory_dir = run_dir / "post_train_infer"
-    trajectory_dir.mkdir(parents=True, exist_ok=True)
-    q_net.eval()
-
-    trajectory_records: List[Dict[str, object]] = []
-    failure_breakdown: Dict[str, int] = {}
-    action_type_counts = {name: 0 for name in ACTION_TYPES}
-    question_counters = {
-        "wrong_object_choice": 0,
-        "failed_to_move_to_object": 0,
-        "failed_after_pick": 0,
-        "place_selection_wrong": 0,
-        "mask_or_timeout_issue": 0,
-    }
-
-    for traj_idx in range(args.post_train_eval_tasks):
-        obs, info = env.reset(seed=args.seed + 50_000 + traj_idx)
-        task = dict(info.get("task", {}))
-        actions: List[Dict[str, int]] = []
-        readable_actions: List[str] = []
-        total_reward = 0.0
-        success = False
-        truncated = False
-        for _ in range(args.post_train_eval_max_steps):
-            masks = extract_masks(info)
-            action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
-            actions.append(dict(action))
-            readable_actions.append(_action_to_string(env, action))
-            action_type_counts[ACTION_TYPES[int(action["action_type"])]] += 1
-            obs, reward, success, truncated, info = env.step(action)
-            total_reward += float(reward)
-            if success or truncated:
-                break
-
-        oracle_actions: List[str] = []
-        oracle_env = RestaurantSymbolicEnv(
-            config_path=args.config_path,
-            max_steps_per_task=args.max_steps_per_task,
-            success_reward=args.success_reward,
-            invalid_action_penalty=args.invalid_action_penalty,
-            travel_cost_scale=args.travel_cost_scale,
-            pick_cost=args.pick_cost,
-            place_cost=args.place_cost,
-            wash_cost=args.wash_cost,
-            fill_cost=args.fill_cost,
-            brew_cost=args.brew_cost,
-            fruit_cost=args.fruit_cost,
-            rng_seed=args.seed + 1_000_000,
-        )
-        oracle_obs, oracle_info = oracle_env.reset(seed=args.seed + 50_000 + traj_idx)
-        del oracle_obs, oracle_info
-        oracle_success = False
-        oracle_steps = 0
-        for _ in range(args.post_train_eval_max_steps):
-            oracle_action = _choose_oracle_pick_place_action(oracle_env, task)
-            if oracle_action is None:
-                break
-            oracle_actions.append(_action_to_string(oracle_env, oracle_action))
-            _, _, oracle_success, oracle_truncated, _ = oracle_env.step(oracle_action)
-            oracle_steps += 1
-            if oracle_success or oracle_truncated:
-                break
-
-        failure_reason = "success" if success else _classify_pick_place_failure(env, task, actions)
-        failure_breakdown[failure_reason] = failure_breakdown.get(failure_reason, 0) + 1
-        if not success:
-            if failure_reason == "wrong_object_or_move":
-                question_counters["wrong_object_choice"] += 1
-                question_counters["failed_to_move_to_object"] += 1
-            elif failure_reason == "picked_but_failed_place":
-                question_counters["failed_after_pick"] += 1
-                question_counters["place_selection_wrong"] += 1
-            else:
-                question_counters["mask_or_timeout_issue"] += 1
-
-        trajectory_records.append(
-            {
-                "trajectory_index": traj_idx,
-                "task": task,
-                "success": bool(success),
-                "truncated": bool(truncated),
-                "steps": len(actions),
-                "return": total_reward,
-                "failure_reason": failure_reason,
-                "actions": readable_actions,
-                "oracle_success": bool(oracle_success),
-                "oracle_steps": oracle_steps,
-                "oracle_actions": oracle_actions,
-            }
-        )
-
-    summary = {
-        "num_trajectories": len(trajectory_records),
-        "success_rate": float(np.mean([1.0 if record["success"] else 0.0 for record in trajectory_records])) if trajectory_records else 0.0,
-        "avg_steps": float(np.mean([record["steps"] for record in trajectory_records])) if trajectory_records else 0.0,
-        "avg_return": float(np.mean([record["return"] for record in trajectory_records])) if trajectory_records else 0.0,
-        "oracle_success_rate": float(np.mean([1.0 if record["oracle_success"] else 0.0 for record in trajectory_records])) if trajectory_records else 0.0,
-        "oracle_avg_steps": float(np.mean([record["oracle_steps"] for record in trajectory_records])) if trajectory_records else 0.0,
-        "failure_breakdown": failure_breakdown,
-        "action_type_counts": action_type_counts,
-        "debug_questions": question_counters,
-    }
-    summary_path = trajectory_dir / "trajectory_summary.json"
-    trajectories_path = trajectory_dir / "trajectories.json"
-    plot_path = trajectory_dir / "trajectory_plot.png"
-    with summary_path.open("w", encoding="utf-8") as fh:
-        json.dump(summary, fh, indent=2)
-    with trajectories_path.open("w", encoding="utf-8") as fh:
-        json.dump(trajectory_records, fh, indent=2)
-    _plot_post_train_trajectories(trajectory_records[: args.post_train_plot_trajectories], plot_path)
-    logger.set_metadata("post_train_infer", summary)
-    logger.track_text(json.dumps(summary, indent=2), name="post_train_summary", step=args.total_steps)
-    for record in trajectory_records[: args.post_train_log_trajectories]:
-        logger.track_text(
-            json.dumps(record, indent=2),
-            name="trajectory_trace",
-            step=int(record["trajectory_index"]),
-            context={"task_type": str(record["task"].get("task_type", "unknown"))},
-        )
-    if plot_path.exists():
-        logger.track_image(plot_path, name="post_train_trajectory_plot", step=args.total_steps)
-    return summary
-
-
 def train(args: argparse.Namespace) -> Path:
     device = select_device()
     random.seed(args.seed)
@@ -1510,13 +1339,6 @@ def train(args: argparse.Namespace) -> Path:
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "seed": int(args.seed),
     }
-    # Disabled: this reset-per-trajectory smoke test is misleading for
-    # anticipatory learning because it removes persistent-world auto-completion.
-    # Use restaurant_dqn_infer.py with tasks_per_reset > 1 for evaluation.
-    summary["post_train_inference"] = {
-        "disabled": True,
-        "reason": "Use persistent inference via restaurant_dqn_infer.py; reset-per-task smoke tests suppress anticipatory effects.",
-    }
     with (run_dir / "train_summary.json").open("w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
     with (run_dir / "task_records.json").open("w", encoding="utf-8") as fh:
@@ -1570,10 +1392,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
     parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")
     parser.add_argument("--per-clip", type=float, default=10.0, help="Clip |TD| at this value before computing PER priority (breaks feedback loop).")
-    parser.add_argument("--post-train-eval-tasks", type=int, default=25)
-    parser.add_argument("--post-train-eval-max-steps", type=int, default=64)
-    parser.add_argument("--post-train-log-trajectories", type=int, default=10)
-    parser.add_argument("--post-train-plot-trajectories", type=int, default=25)
     return parser
 
 
