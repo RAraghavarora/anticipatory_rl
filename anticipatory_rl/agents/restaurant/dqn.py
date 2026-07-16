@@ -8,7 +8,7 @@ import random
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Dict, List, Mapping
+from typing import Deque, Dict, List, Mapping, NamedTuple
 
 import numpy as np
 import torch
@@ -35,6 +35,53 @@ def _resolve_run_label(args: argparse.Namespace) -> str:
     if args.run_label is not None:
         return args.run_label
     return "myopic_restaurant" if args.tasks_per_episode <= 1 else "anticipatory_restaurant"
+
+
+class TaskTransition(NamedTuple):
+    episode_done_flag: bool
+    env_reset_flag: bool
+    trunc_reset_flag: bool
+    bootstrap_done: bool
+    tasks_since_reset: int
+    env_tasks_since_reset: int
+
+
+def _decide_task_transition(
+    success: bool,
+    truncated: bool,
+    tasks_since_reset: int,
+    env_tasks_since_reset: int,
+    steps_since_reset: int,
+    tasks_per_episode: int,
+    env_reset_tasks: int | None,
+    episode_step_limit: int,
+) -> TaskTransition:
+    episode_done_flag = False
+    env_reset_flag = False
+    trunc_reset_flag = False
+    bootstrap_done = False
+    new_tasks = tasks_since_reset
+    new_env_tasks = env_tasks_since_reset
+
+    if success or truncated:
+        new_tasks += 1
+        new_env_tasks += 1
+        if tasks_per_episode > 0 and new_tasks >= tasks_per_episode:
+            episode_done_flag = True
+            bootstrap_done = True
+            new_tasks = 0
+        if env_reset_tasks is not None and env_reset_tasks > 0 and new_env_tasks >= env_reset_tasks:
+            env_reset_flag = True
+            episode_done_flag = True
+            bootstrap_done = True
+            new_env_tasks = 0
+    if episode_step_limit > 0 and steps_since_reset >= episode_step_limit:
+        trunc_reset_flag = True
+        bootstrap_done = True
+        new_tasks = 0
+        new_env_tasks = 0
+    return TaskTransition(episode_done_flag, env_reset_flag, trunc_reset_flag, bootstrap_done,
+                          new_tasks, new_env_tasks)
 
 
 @dataclass
@@ -965,6 +1012,13 @@ def train(args: argparse.Namespace) -> Path:
         replay = ReplayBuffer(storage=LazyTensorStorage(max_size=args.replay_size))
 
     env_reset_tasks = args.env_reset_tasks if args.env_reset_tasks is not None else args.tasks_per_episode
+    if args.episode_step_limit is None:
+        args.episode_step_limit = int(env_reset_tasks * args.max_steps_per_task * 1.5)
+    if args.episode_step_limit > 0 and env_reset_tasks > 0:
+        assert args.episode_step_limit > env_reset_tasks * args.max_steps_per_task, (
+            "episode_step_limit must exceed env_reset_tasks * max_steps_per_task "
+            "or paired agents desync on world-reset cadence."
+        )
     # if args.tasks_per_episode > 1 and env_reset_tasks != args.tasks_per_episode:
     #     raise ValueError("For anticipatory runs, env-reset-tasks must equal tasks-per-episode.")
 
@@ -1078,32 +1132,16 @@ def train(args: argparse.Namespace) -> Path:
         step_reward_history.append(float(reward))
 
         steps_since_reset += 1
-        episode_done_flag = False
-        env_reset_flag = False
-        trunc_reset_flag = False
-        bootstrap_done = False
-
-        if success:
-            tasks_since_reset += 1
-            env_tasks_since_reset += 1
-            if args.tasks_per_episode > 0 and tasks_since_reset >= args.tasks_per_episode:
-                episode_done_flag = True
-                bootstrap_done = True
-                tasks_since_reset = 0
-            if env_reset_tasks is not None and env_reset_tasks > 0 and env_tasks_since_reset >= env_reset_tasks:
-                env_reset_flag = True
-                episode_done_flag = True
-                bootstrap_done = True
-                env_tasks_since_reset = 0
-
-        if truncated:
-            trunc_reset_flag = True
-            tasks_since_reset = 0
-            env_tasks_since_reset = 0
-        if args.episode_step_limit > 0 and steps_since_reset >= args.episode_step_limit:
-            trunc_reset_flag = True
-            tasks_since_reset = 0
-            env_tasks_since_reset = 0
+        t = _decide_task_transition(
+            success, truncated, tasks_since_reset, env_tasks_since_reset, steps_since_reset,
+            args.tasks_per_episode, env_reset_tasks, args.episode_step_limit,
+        )
+        episode_done_flag = t.episode_done_flag
+        env_reset_flag = t.env_reset_flag
+        trunc_reset_flag = t.trunc_reset_flag
+        bootstrap_done = t.bootstrap_done
+        tasks_since_reset = t.tasks_since_reset
+        env_tasks_since_reset = t.env_tasks_since_reset
 
         next_masks = extract_masks(next_info)
         store_action = dict(action)
@@ -1130,7 +1168,7 @@ def train(args: argparse.Namespace) -> Path:
             self_loop_task_only_count += 1
         if self_loop_auto_success:
             self_loop_terminal_count += 1
-        transition_done = bool(bootstrap_done or truncated or self_loop_auto_success)
+        transition_done = bool(bootstrap_done or self_loop_auto_success)
         _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, success)
         if reward > 0.0:
             positive_reward_transitions += 1
@@ -1367,7 +1405,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--tasks-per-episode", type=int, default=1)
     parser.add_argument("--env-reset-tasks", type=int, default=200, help="Physical env reset interval in tasks.")
-    parser.add_argument("--episode-step-limit", type=int, default=3000, help="Maximum primitive steps allowed between resets; <=0 disables.")
+    parser.add_argument("--episode-step-limit", type=int, default=None, help="Maximum primitive steps allowed between resets; <=0 disables. None -> derived from env_reset_tasks * max_steps_per_task.")
     parser.add_argument("--max-steps-per-task", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
@@ -1378,7 +1416,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fill-cost", type=float, default=1.0)
     parser.add_argument("--brew-cost", type=float, default=2.0)
     parser.add_argument("--fruit-cost", type=float, default=2.0)
-    parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_restaurant.yaml"))
+    parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_level_3.yaml"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)
     parser.add_argument("--output-name", type=str, default="restaurant_dqn.pt")

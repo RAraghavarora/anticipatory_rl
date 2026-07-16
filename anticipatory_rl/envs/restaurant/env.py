@@ -14,7 +14,7 @@ from gymnasium import Env, spaces
 from .pddl_domain import get_pddl_cost
 
 
-CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "restaurant" / "toy_restaurant.yaml"
+CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "restaurant" / "toy_level_3.yaml"
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -199,6 +199,7 @@ class RestaurantSymbolicEnv(Env):
         super().__init__()
         self._base_config = _load_config(Path(config_path)) if config_path is not None else _load_config(CONFIG_PATH)
         self._rng = np.random.default_rng(rng_seed)
+        self._task_rng = np.random.default_rng(rng_seed + 1 if rng_seed is not None else None)
 
         self.max_steps_per_task = max(1, int(max_steps_per_task))
         self.success_reward = float(success_reward)
@@ -218,6 +219,7 @@ class RestaurantSymbolicEnv(Env):
         # TODO: We can have separate cost for metrics and rewards.
         # See PDDL_ACTION_COSTS in pddl_domain.py 
 
+        # ponytail: _task_library unused by train/infer after task_rng fix; kept for tests.
         self._task_library: List[RestaurantTask] = []
         self._task_library_index = 0
         self._task_source = "iid"
@@ -250,6 +252,7 @@ class RestaurantSymbolicEnv(Env):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
+            self._task_rng = np.random.default_rng(seed + 1)
         options = options or {}
 
         layout = options.get("layout")
@@ -634,21 +637,21 @@ class RestaurantSymbolicEnv(Env):
         return DEFAULT_LOCATIONS[0]
 
     def _resample_first_task_if_auto(self) -> None:
-        if self._task_library:
-            return
         if not self._pending_auto_success:
             return
-        from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
-
         for _ in range(100):
-            task = _sample(self)
-            self.set_task(
-                task.task_type,
-                target_location=task.target_location,
-                target_kind=task.target_kind,
-                object_name=task.object_name,
-                task_source="iid",
-            )
+            if self._task_library:
+                self._resample_task()
+            else:
+                from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
+                task = _sample(self)
+                self.set_task(
+                    task.task_type,
+                    target_location=task.target_location,
+                    target_kind=task.target_kind,
+                    object_name=task.object_name,
+                    task_source="iid",
+                )
             if not self._pending_auto_success:
                 return
 
@@ -1468,12 +1471,13 @@ class RestaurantSymbolicEnv(Env):
         dx, dy = self.location_coords[dst]
         return self.travel_cost_scale * float(abs(sx - dx) + abs(sy - dy))
 
-    def _weighted_choice(self, distribution: Mapping[str, float], candidates: Sequence[str]) -> str:
+    def _weighted_choice(self, distribution: Mapping[str, float], candidates: Sequence[str], *, rng: np.random.Generator | None = None) -> str:
         if not candidates:
             raise ValueError("No candidates available for weighted choice.")
+        _rng = rng if rng is not None else self._rng
         weights = np.array([max(float(distribution.get(name, 0.0)), 0.0) for name in candidates], dtype=np.float64)
         total = float(weights.sum())
         if total <= 0.0:
-            return str(self._rng.choice(candidates))
+            return str(_rng.choice(candidates))
         probs = weights / total
-        return str(self._rng.choice(candidates, p=probs))
+        return str(_rng.choice(candidates, p=probs))

@@ -151,9 +151,97 @@ def test_credit_horizon_documented(monkeypatch):
     assert infer_defaults["tasks_per_reset"] == 200, (
         "Inference default tasks_per_reset changed; anticipatory eval requires > 1."
     )
+    assert train_defaults["env_reset_tasks"] == 200, (
+        "env_reset_tasks default changed; paired myopic/anticipatory runs rely on a shared reset cadence."
+    )
 
     # The invariant: when training anticipatory (tasks_per_episode > 1),
     # inference must NOT reset every task.
     assert infer_defaults["tasks_per_reset"] > 1, (
         "Inference resets every task by default; this suppresses anticipatory effects."
     )
+
+
+def test_generate_task_library_deterministic():
+    """generate_task_library must be a pure function of (env config, seed, n_tasks):
+    two calls with the same seed produce identical task libraries."""
+    from anticipatory_rl.envs.restaurant.task_sampling import generate_task_library
+
+    env = RestaurantSymbolicEnv(config_path="configs/restaurant/toy_level_3.yaml")
+    first = generate_task_library(env, seed=0, n_tasks=50)
+    second = generate_task_library(env, seed=0, n_tasks=50)
+    assert first == second, "generate_task_library is not deterministic across calls with the same seed"
+
+
+def test_inference_pairing(tmp_path, monkeypatch):
+    """run_compare must produce paired task sequences across two different-weight
+    agents. End-to-end inference pairing: both agents reseed env._task_rng on the
+    same reset cadence, so different action streams (different step counts per
+    task) still yield identical task_type/target_location/target_kind sequences.
+    pick_place.object_name is state-conditioned and not asserted."""
+    import json
+
+    from anticipatory_rl.agents.restaurant.dqn import RestaurantQNetwork
+    from anticipatory_rl.agents.restaurant.restaurant_dqn_infer import (
+        make_env,
+        parse_args,
+        run_compare,
+    )
+
+    monkeypatch.setattr(
+        "anticipatory_rl.agents.restaurant.restaurant_dqn_infer.select_device",
+        lambda: torch.device("cpu"),
+    )
+
+    ant_path = tmp_path / "ant.pt"
+    myo_path = tmp_path / "myo.pt"
+    monkeypatch.setattr("sys.argv", [
+        "restaurant_dqn_infer.py",
+        "--anticipatory-weights", str(ant_path),
+        "--myopic-weights", str(myo_path),
+        "--num-tasks", "20",
+        "--tasks-per-reset", "200",
+        "--seed", "0",
+        "--config-path", "configs/restaurant/toy_level_3.yaml",
+        "--output-dir", str(tmp_path / "compare_out"),
+    ])
+    args = parse_args()
+
+    env = make_env(args)
+    obs, _ = env.reset(seed=args.seed)
+    obs_dim = int(np.asarray(obs).shape[0])
+
+    for path, seed in [(ant_path, 42), (myo_path, 64)]:
+        torch.manual_seed(seed)
+        net = RestaurantQNetwork(
+            input_dim=obs_dim,
+            action_type_dim=len(ACTION_TYPES),
+            object_dim=env.action_space["object1"].n,
+            location_dim=env.action_space["location"].n,
+            hidden_dim=args.hidden_dim,
+        )
+        torch.save(net.state_dict(), path)
+
+    run_compare(args)
+
+    with (tmp_path / "compare_out" / "comparison.json").open() as f:
+        comparison = json.load(f)
+    ant_tasks = comparison["anticipatory"]["tasks"]
+    myo_tasks = comparison["myopic"]["tasks"]
+    assert len(ant_tasks) == len(myo_tasks), (
+        f"Task list length mismatch: ant={len(ant_tasks)} myo={len(myo_tasks)}"
+    )
+    n = len(ant_tasks)
+    assert n > 0, "No tasks were evaluated"
+    for i in range(n):
+        assert ant_tasks[i]["task_type"] == myo_tasks[i]["task_type"], (
+            f"Task {i} task_type mismatch: ant={ant_tasks[i]['task_type']} myo={myo_tasks[i]['task_type']}"
+        )
+        assert ant_tasks[i]["target_location"] == myo_tasks[i]["target_location"], (
+            f"Task {i} target_location mismatch: ant={ant_tasks[i]['target_location']} "
+            f"myo={myo_tasks[i]['target_location']}"
+        )
+        assert ant_tasks[i]["target_kind"] == myo_tasks[i]["target_kind"], (
+            f"Task {i} target_kind mismatch: ant={ant_tasks[i]['target_kind']} "
+            f"myo={myo_tasks[i]['target_kind']}"
+        )

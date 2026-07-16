@@ -325,7 +325,6 @@ def apply_planner_action(state: RestaurantPlannerState, action: Tuple[str, List[
         obj_name = args[0]
         obj = state.objects[obj_name]
         obj.dirty = False
-        obj.filled_with = None
         return
     if name == "fill":
         cnt = args[0]

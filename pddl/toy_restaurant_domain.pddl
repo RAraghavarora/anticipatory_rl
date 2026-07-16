@@ -84,8 +84,6 @@
     )
     :effect (and
       (not (is-dirty ?obj))
-      (not (filled-with water ?obj))
-      (not (filled-with coffee ?obj))
       (increase (total-cost) 200)
     )
   )

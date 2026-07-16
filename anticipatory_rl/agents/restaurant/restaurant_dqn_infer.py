@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import matplotlib
 
@@ -22,10 +23,26 @@ from tqdm import tqdm
 from .dqn import RestaurantQNetwork
 from anticipatory_rl.utils import extract_masks, masked_choice, select_device
 from anticipatory_rl.envs.restaurant.env import (
+    ACTION_TYPES,
     CONFIG_PATH as DEFAULT_RESTAURANT_CONFIG_PATH,
     RestaurantSymbolicEnv,
     TASK_TYPES,
 )
+
+
+def _format_action(env: RestaurantSymbolicEnv, action: Dict[str, int]) -> str:
+    at = ACTION_TYPES[action["action_type"]]
+    o1 = None if action["object1"] == env.none_object_index else env.object_names[action["object1"]]
+    loc = None if action["location"] == env.none_location_index else env.locations[action["location"]]
+    o2 = None if action["object2"] == env.none_object_index else env.object_names[action["object2"]]
+    parts = [at]
+    if o1 is not None:
+        parts.append(o1)
+    if loc is not None:
+        parts.append(loc)
+    if o2 is not None:
+        parts.append(o2)
+    return " ".join(parts)
 
 
 def _sample_action_from_q(
@@ -64,6 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--softmax-temperature", type=float, default=0.0)
     parser.add_argument("--tasks-per-reset", type=int, default=200)
     parser.add_argument("--max-task-steps", type=int, default=64)
+    parser.add_argument("--log-plans", type=int, default=0, help="Log readable action sequences for the first N tasks.")
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument("--travel-cost-scale", type=float, default=1.0)
@@ -328,6 +346,8 @@ def evaluate(
     device: torch.device,
     output_dir: Path,
 ) -> Dict[str, Any]:
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     env = make_env(args)
     obs, info = env.reset(seed=args.seed)
     model = _load_model(state_path, args, device)
@@ -346,6 +366,10 @@ def evaluate(
     task_records: List[Dict[str, Any]] = []
     action_gen = torch.Generator(device="cpu")
     action_gen.manual_seed(args.seed)
+
+    plans: List[Dict[str, Any]] = []
+    current_plan: List[str] = []
+    log_plans = int(args.log_plans) > 0
 
     max_steps = None if args.total_steps <= 0 else int(args.total_steps)
     progress = tqdm(total=args.num_tasks, desc=f"Inference [{run_label}]", unit="task")
@@ -372,18 +396,21 @@ def evaluate(
         discounted_return += discount * float(reward)
         discount *= float(args.gamma)
 
+        if log_plans and len(plans) < int(args.log_plans):
+            current_plan.append(_format_action(env, action))
+
         if success or truncated:
             total_tasks += 1
             progress.update(1)
             if success:
                 successes += 1
-                tasks_since_reset += 1
             task_records.append(
                 {
                     "task_number": total_tasks,
                     "task_type": task_snapshot.get("task_type"),
                     "target_location": task_snapshot.get("target_location"),
                     "target_kind": task_snapshot.get("target_kind"),
+                    "object_name": task_snapshot.get("object_name"),
                     "success": bool(success),
                     "truncated": bool(truncated),
                     "steps": int(task_steps),
@@ -391,9 +418,26 @@ def evaluate(
                     "auto_satisfied": auto_snapshot,
                 }
             )
+            if log_plans and len(plans) < int(args.log_plans):
+                plans.append(
+                    {
+                        "task_number": total_tasks,
+                        "task_type": task_snapshot.get("task_type"),
+                        "target_location": task_snapshot.get("target_location"),
+                        "target_kind": task_snapshot.get("target_kind"),
+                        "auto_satisfied": auto_snapshot,
+                        "success": bool(success),
+                        "truncated": bool(truncated),
+                        "steps": int(task_steps),
+                        "return": float(task_return),
+                        "actions": list(current_plan),
+                    }
+                )
+                current_plan = []
             task_return = 0.0
             task_steps = 0
-            reset_required = bool(truncated)
+            tasks_since_reset += 1
+            reset_required = False
             if args.tasks_per_reset > 0 and tasks_since_reset >= args.tasks_per_reset:
                 reset_required = True
             if reset_required:
@@ -427,6 +471,10 @@ def evaluate(
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "rollout_stats.json").open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, default=str)
+    if log_plans and plans:
+        with (output_dir / "plans.json").open("w", encoding="utf-8") as fh:
+            json.dump(plans, fh, indent=2, default=str)
+        print(f"Saved {len(plans)} plans -> {output_dir / 'plans.json'}")
     _print_report(report, run_label)
     if total_tasks < args.num_tasks:
         print(
@@ -455,6 +503,24 @@ def run_compare(args: argparse.Namespace) -> None:
         device=device,
         output_dir=myo_dir,
     )
+    ant_tasks = anticipatory["tasks"]
+    myo_tasks = myopic["tasks"]
+    n = min(len(ant_tasks), len(myo_tasks))
+    paired = all(
+        ant_tasks[i]["task_type"] == myo_tasks[i]["task_type"]
+        and ant_tasks[i]["target_location"] == myo_tasks[i]["target_location"]
+        and ant_tasks[i]["target_kind"] == myo_tasks[i]["target_kind"]
+        for i in range(n)
+    )
+    print(f"Task sequence paired: {paired} ({n} tasks compared)")
+    if not paired:
+        mismatches = [
+            i + 1 for i in range(n)
+            if ant_tasks[i]["task_type"] != myo_tasks[i]["task_type"]
+            or ant_tasks[i]["target_location"] != myo_tasks[i]["target_location"]
+            or ant_tasks[i]["target_kind"] != myo_tasks[i]["target_kind"]
+        ]
+        print(f"  Mismatches at tasks: {mismatches[:10]}{'...' if len(mismatches) > 10 else ''}")
     ant_stats = anticipatory["stats"]
     myo_stats = myopic["stats"]
     comparison = {

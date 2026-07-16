@@ -263,6 +263,9 @@ SEQUENCES = [
     ("refill_water", [
         ("refill_water", {"object1": "cup_0", "object2": "jar_0"}),
     ]),
+    ("wash", [
+        ("wash", {"object1": "cup_0"}),
+    ]),
 ]
 
 
@@ -279,6 +282,12 @@ def test_apply_planner_action_mirrors_env(env, seq_name, raw_steps):
         env.state.objects["jar_0"].location = "shelf"
         env.state.objects["jar_0"].filled_with = "water"
 
+    if seq_name == "wash":
+        env.state.agent_location = "dishwasher"
+        env.state.objects["cup_0"].location = "dishwasher"
+        env.state.objects["cup_0"].dirty = True
+        env.state.objects["cup_0"].filled_with = "water"
+
     ps = RestaurantPlannerState.from_env(env)
 
     for raw_type, raw_params in raw_steps:
@@ -294,6 +303,12 @@ def test_apply_planner_action_mirrors_env(env, seq_name, raw_steps):
         apply_planner_action(ps, planner_action)
 
         _assert_states_equal(env.state, ps)
+
+    if seq_name == "wash":
+        assert env.state.objects["cup_0"].dirty is False
+        assert env.state.objects["cup_0"].filled_with == "water"
+        assert ps.objects["cup_0"].dirty is False
+        assert ps.objects["cup_0"].filled_with == "water"
 
 
 def test_task_goal_clauses(env, planner_state):
