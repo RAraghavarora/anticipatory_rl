@@ -8,7 +8,7 @@ import random
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Dict, List, Mapping, NamedTuple
+from typing import Deque, Dict, List, Mapping, NamedTuple, Tuple
 
 import numpy as np
 import torch
@@ -19,6 +19,7 @@ from torchrl.data import LazyTensorStorage, PrioritizedReplayBuffer, ReplayBuffe
 from tqdm import tqdm
 
 from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, RestaurantSymbolicEnv
+from anticipatory_rl.envs.restaurant.planner import RestaurantPlannerState, solve_restaurant_task_with_fd
 
 
 from anticipatory_rl.logging import AimLogger, CSVLogger, LoggerPair
@@ -313,52 +314,6 @@ def _action_to_string(env: RestaurantSymbolicEnv, action: Mapping[str, int]) -> 
     return f"{action_type}(object1={object1_name}, location={location_name}, object2={object2_name})"
 
 
-def _choose_oracle_pick_place_action(env: RestaurantSymbolicEnv, task: Mapping[str, object]) -> Dict[str, int] | None:
-    if task.get("task_type") != "pick_place":
-        return None
-    object_name = str(task["object_name"])
-    target_location = str(task["target_location"])
-    obj_idx = env.object_name_index[object_name]
-    loc_idx = env.location_index[target_location]
-    obj = env.state.objects[object_name]
-    if env.state.holding == object_name:
-        if env.state.agent_location != target_location:
-            return {
-                "action_type": env.action_type_index["move"],
-                "object1": env.none_object_index,
-                "location": loc_idx,
-                "object2": env.none_object_index,
-            }
-        return {
-            "action_type": env.action_type_index["place"],
-            "object1": env.none_object_index,
-            "location": loc_idx,
-            "object2": env.none_object_index,
-        }
-    if env.state.holding is not None and env.state.holding != object_name:
-        held_target = env.state.agent_location
-        return {
-            "action_type": env.action_type_index["place"],
-            "object1": env.none_object_index,
-            "location": env.location_index[held_target],
-            "object2": env.none_object_index,
-        }
-    if obj.location != env.state.agent_location:
-        assert obj.location is not None
-        return {
-            "action_type": env.action_type_index["move"],
-            "object1": env.none_object_index,
-            "location": env.location_index[obj.location],
-            "object2": env.none_object_index,
-        }
-    return {
-        "action_type": env.action_type_index["pick"],
-        "object1": obj_idx,
-        "location": env.none_location_index,
-        "object2": env.none_object_index,
-    }
-
-
 def _classify_pick_place_failure(env: RestaurantSymbolicEnv, task: Mapping[str, object], actions: List[Mapping[str, int]]) -> str:
     if task.get("task_type") != "pick_place":
         return "non_pick_place_task"
@@ -453,6 +408,35 @@ def _auto_complete_replay_action_and_masks(
     return action, replay_masks
 
 
+def _planner_action_to_env_action(env: RestaurantSymbolicEnv, action: Tuple[str, List[str]]) -> Dict[str, int]:
+    """Convert a planner (name, args) action to an env factored action dict (int indices)."""
+    name, args = action
+    none_obj = env.none_object_index
+    none_loc = env.none_location_index
+    if name == "move":
+        return {"action_type": env.action_type_index["move"], "object1": none_obj, "location": env.location_index[args[-1]], "object2": none_obj}
+    if name == "pick":
+        return {"action_type": env.action_type_index["pick"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "place":
+        return {"action_type": env.action_type_index["place"], "object1": none_obj, "location": env.location_index[args[-1]], "object2": none_obj}
+    if name == "wash":
+        return {"action_type": env.action_type_index["wash"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "fill":
+        return {"action_type": env.action_type_index["fill"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "drain":
+        return {"action_type": env.action_type_index["drain"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "make-coffee":
+        return {"action_type": env.action_type_index["make_coffee"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "pour":
+        return {"action_type": env.action_type_index["pour"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": none_obj}
+    if name == "refill_water":
+        obj2 = env.object_name_index[args[2]] if len(args) > 2 else none_obj
+        return {"action_type": env.action_type_index["refill_water"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": obj2}
+    if name == "make-fruit-bowl":
+        return {"action_type": env.action_type_index["make_fruit_bowl"], "object1": env.object_name_index[args[0]], "location": none_loc, "object2": env.object_name_index[args[1]]}
+    raise ValueError(f"Unknown planner action: {name}")
+
+
 def _seed_replay_with_oracle(
     replay: ReplayBuffer,
     env: RestaurantSymbolicEnv,
@@ -460,15 +444,29 @@ def _seed_replay_with_oracle(
     n_tasks: int,
     max_steps: int,
     seed_base: int,
+    planner_path: Path,
+    domain_path: Path,
+    alias: str = "seq-sat-lama-2011",
+    timeout_s: float = 10.0,
 ) -> int:
-    """Roll out the pick_place oracle and store its transitions. Returns count stored."""
+    """Roll out the myopic (FD) oracle and store its transitions. Returns count stored."""
     stored = 0
     for i in range(n_tasks):
         obs, info = env.reset(seed=seed_base + i)
-        task = dict(info.get("task", {}))
-        for _ in range(max_steps):
+        if env._pending_auto_success:
+            continue
+        state = RestaurantPlannerState.from_env(env)
+        result = solve_restaurant_task_with_fd(
+            env, state, env.task,
+            planner_path=planner_path, domain_path=domain_path, alias=alias, timeout_s=timeout_s,
+        )
+        if not result.success:
+            continue
+        for step_i, plan_action in enumerate(result.plan_actions):
+            if step_i >= max_steps:
+                break
             masks = extract_masks(info)
-            action = _choose_oracle_pick_place_action(env, task)
+            action = _planner_action_to_env_action(env, plan_action)
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
             done = bool(success or truncated)
@@ -1069,7 +1067,8 @@ def train(args: argparse.Namespace) -> Path:
         else:
             target_buffer = replay
         stored = _seed_replay_with_oracle(
-            target_buffer, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000
+            target_buffer, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000,
+            planner_path=args.planner_path, domain_path=args.domain_path,
         )
         dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
         print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} tasks (demo_fraction={demo_fraction}).")
@@ -1097,8 +1096,9 @@ def train(args: argparse.Namespace) -> Path:
     optimize_stats_history: List[OptimizeStats] = []
     action_type_counts = {name: 0 for name in ACTION_TYPES}
     replay_auto_complete_count = 0
-    # Diagnostic counters for Option 3 self-loop detection (auto-success with world unchanged AND same task).
-    # Expected: ~25% of auto_success count on v2.2 (wash_objects dominates and cups-only kind makes repeat draws likely).
+    # Diagnostic counters for Option 3 self-loop detection.
+    # Any auto-success where world is unchanged is terminal for bootstrapping (no task_equality check).
+    # This prevents multi-task loops (A→B→A) from generating degenerate infinite Q-values.
     self_loop_terminal_count = 0           # both conditions match: terminal-for-bootstrap event fired
     self_loop_world_only_count = 0         # auto_success AND world_unchanged (independent of task equality)
     self_loop_task_only_count = 0           # auto_success AND task==pre-task (independent of world check)
@@ -1161,7 +1161,12 @@ def train(args: argparse.Namespace) -> Path:
         world_unchanged = env._action_mask_state_key() == current_world_state_key
         auto_success_flag = bool(next_info.get("auto_success", False))
         task_equality = next_info.get("task") == current_task_snapshot
-        self_loop_auto_success = bool(auto_success_flag and world_unchanged and task_equality)
+        
+        # Option 3 (fixed): Treat ANY auto-success that leaves the world unchanged 
+        # as terminal for bootstrapping, regardless of task_equality. This prevents
+        # multi-task loops (A -> B -> A) from generating degenerate infinite values.
+        self_loop_auto_success = bool(auto_success_flag and world_unchanged)
+        
         if auto_success_flag and world_unchanged:
             self_loop_world_only_count += 1
         if auto_success_flag and task_equality:
@@ -1424,8 +1429,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnostics", action="store_true", help="Enable root-cause diagnostic logging (off by default).")
     parser.add_argument("--diagnostics-interval", type=int, default=1000, help="Steps between periodic greedy-eval / Q-probe diagnostics.")
     parser.add_argument("--no-dueling-centering", action="store_true", help="Ablation C: disable masked-mean advantage centering in all heads.")
-    parser.add_argument("--seed-replay-oracle", type=int, default=0, help="Ablation B: seed replay with oracle pick_place demos from N tasks before training.")
+    parser.add_argument("--seed-replay-oracle", type=int, default=0, help="Ablation B: seed replay with myopic (FD) oracle demos from N tasks before training.")
     parser.add_argument("--protect-demo-fraction", type=float, default=0.0, help="If >0, store oracle demos in a separate never-evicting buffer and draw this fraction of every minibatch from it (prevents demo washout).")
+    parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"), help="Path to Fast Downward planner (for oracle demo seeding).")
+    parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"), help="Path to PDDL domain file (for oracle demo seeding).")
     parser.add_argument("--per-alpha", type=float, default=0.0, help="PER α: 0 = uniform, >0 enables PrioritizedReplayBuffer with this α.")
     parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
     parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")

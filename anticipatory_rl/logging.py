@@ -108,6 +108,13 @@ class CSVLogger:
         self._metadata: dict[str, Any] = {}
         self._tracks_since_flush = 0
         self._closed = False
+        self._session_started = False
+
+        # Truncate any stale metrics.csv from a prior run reusing this label,
+        # so early inspection/crash-before-flush never reads old data.
+        with self.csv_path.open("w", newline="", encoding="utf-8") as fh:
+            csv.DictWriter(fh, fieldnames=["run_label", "step", "metric", "context", "value"]).writeheader()
+        self._session_started = True
 
         # Write hparams as metadata immediately.
         self._metadata["hparams"] = {
@@ -190,12 +197,15 @@ class CSVLogger:
         if not self._rows:
             return
         try:
-            file_exists = self.csv_path.exists()
-            with self.csv_path.open("a", newline="", encoding="utf-8") as fh:
+            # First flush of a fresh session truncates the file so reusing a
+            # run_label across runs does not stack metrics from prior runs.
+            mode = "w" if not self._session_started else "a"
+            with self.csv_path.open(mode, newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(fh, fieldnames=["run_label", "step", "metric", "context", "value"])
-                if not file_exists:
+                if mode == "w":
                     writer.writeheader()
                 writer.writerows(self._rows)
+            self._session_started = True
         except Exception as exc:
             print(f"[CSVLogger] Warning: failed to flush metrics: {exc}")
         finally:

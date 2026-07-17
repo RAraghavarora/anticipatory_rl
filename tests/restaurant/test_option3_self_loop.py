@@ -1,9 +1,12 @@
 """Tests for Option 3 self-loop auto-success detection logic.
 
-A self-loop occurs when: auto_success=True AND world_unchanged=True AND task_equality=True.
+A self-loop occurs when: auto_success=True AND world_unchanged=True.
 - auto_success: task was already satisfied before agent took an action.
 - world_unchanged: consume_delivery was a no-op (e.g., wash_objects, empty clear_containers).
-- task_equality: resampled task is same type as the one just completed.
+
+No task-equality check — any auto-success on a stagnant world is terminal for
+bootstrapping, which prevents multi-task loops (A→B→A) from generating degenerate
+infinite Q-values.
 
 Tasks like serve_water/make_coffee mutate world via consume_delivery,
 so world_unchanged=False even on auto-success — those can never be self-loops.
@@ -26,18 +29,17 @@ def _step_no_op(env: RestaurantSymbolicEnv) -> tuple[bool, dict]:
 
 
 def test_self_loop_detection_logic():
-    """Pure unit test of the 3-condition AND: the logic is just a boolean expression."""
-    assert bool(True and True and True), "all three true -> self-loop"
-    assert not bool(True and True and False), "different task -> not self-loop"
-    assert not bool(True and False and True), "world changed -> not self-loop"
-    assert not bool(False and True and True), "not auto-success -> not self-loop"
+    """Pure unit test of the 2-condition AND: auto_success AND world_unchanged."""
+    assert bool(True and True), "auto_success + world_unchanged -> self-loop"
+    assert not bool(True and False), "world changed -> not self-loop"
+    assert not bool(False and True), "not auto-success -> not self-loop"
 
 
-def test_self_loop_fires_when_all_conditions_met(env: RestaurantSymbolicEnv, monkeypatch):
-    """Integration test: wash_objects auto-success with same-task resample.
+def test_self_loop_fires_on_world_unchanged_auto_success(env: RestaurantSymbolicEnv, monkeypatch):
+    """Integration test: wash_objects auto-success on an unchanged world.
 
-    monkeypatch forces _resample_task to re-set wash_objects, making the test
-    deterministic instead of relying on p(wash)=0.30 IID resample.
+    monkeypatch forces _resample_task to re-set wash_objects. Even though the task
+    stays the same, we only check auto_success+world_unchanged (no task_equality).
     """
     env.state.agent_location = "countertop"
     env.state.objects["cup_0"].location = "countertop"
@@ -68,8 +70,11 @@ def test_self_loop_fires_when_all_conditions_met(env: RestaurantSymbolicEnv, mon
     assert task_equality, "Forced resample should produce same task"
 
 
-def test_self_loop_does_not_fire_on_different_task(env: RestaurantSymbolicEnv, monkeypatch):
-    """When auto-success resamples a different task, self-loop should not fire.
+def test_self_loop_fires_on_different_task_too(env: RestaurantSymbolicEnv, monkeypatch):
+    """When auto-success resamples a different task but world is unchanged, self-loop still fires.
+
+    The fix drops task_equality — multi-task loops (A→B→A) on a stagnant world
+    are equally degenerate, so any world-unchanged auto-success is terminal.
 
     monkeypatch forces _resample_task to set serve_water (different from wash_objects),
     making the test deterministic.
