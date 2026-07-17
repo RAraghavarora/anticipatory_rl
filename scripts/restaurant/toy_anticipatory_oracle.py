@@ -402,7 +402,6 @@ def run_anticipatory_oracle(
 ) -> Dict[str, Any]:
     random.seed(seed)
     np.random.seed(seed)
-    rng = np.random.default_rng(seed + 1)
 
     env = RestaurantSymbolicEnv(config_path=config_path, rng_seed=seed)
     obs, info = env.reset(seed=seed)

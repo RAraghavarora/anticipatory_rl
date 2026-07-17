@@ -56,14 +56,3 @@ def run_planner(
         f"Planner found no plan within {max_search_time_limit}s.\nSTDERR:\n{last_stderr}"
     )
 
-
-def plan_cost(plan_path: Path) -> int:
-    """Count the number of actions in a sas_plan file (unit action costs)."""
-    cost = 0
-    for line in plan_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith(";"):
-            continue
-        if line.startswith("("):
-            cost += 1
-    return cost
