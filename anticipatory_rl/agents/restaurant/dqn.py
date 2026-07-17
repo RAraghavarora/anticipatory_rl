@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 from collections import deque
@@ -467,6 +468,9 @@ def _seed_replay_with_oracle(
                 break
             masks = extract_masks(info)
             action = _planner_action_to_env_action(env, plan_action)
+            parsed = env._normalize_action(action)
+            if not env._is_action_valid(parsed):
+                raise RuntimeError(f"FD plan action invalid in env: {plan_action} → {action}")
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
             done = bool(success or truncated)
@@ -1040,6 +1044,49 @@ def train(args: argparse.Namespace) -> Path:
             rng_seed=args.seed + 7_000_000,
         )
 
+    demo_path = getattr(args, "demo_transitions", None)
+    offline_transitions = None
+    offline_count = 0
+    if demo_path is not None:
+        data = torch.load(demo_path, weights_only=False)
+        offline_metadata = data["metadata"]
+        offline_transitions = data["transitions"]
+        offline_count = len(offline_transitions)
+        for field in ("object_names", "locations", "object_kinds", "contents", "task_types"):
+            stored = offline_metadata.get(field)
+            if stored is None:
+                raise ValueError(f"Demo metadata missing field '{field}'. File may be from an older script version.")
+            if list(stored) != list(getattr(env, field)):
+                raise ValueError(f"Demo {field} mismatch. Demo: {list(stored)}, Env: {list(getattr(env, field))}")
+        for field in ("success_reward", "invalid_action_penalty", "travel_cost_scale",
+                      "pick_cost", "place_cost", "wash_cost", "fill_cost", "brew_cost", "fruit_cost"):
+            stored = offline_metadata.get(field)
+            if stored is None:
+                raise ValueError(f"Demo metadata missing cost field '{field}'. File may be from an older script version.")
+            if float(stored) != float(getattr(args, field)):
+                raise ValueError(f"Demo cost '{field}' mismatch ({stored} vs {getattr(args, field)}).")
+        for field in ("max_steps_per_task",):
+            stored = offline_metadata.get(field)
+            if stored is None:
+                raise ValueError(f"Demo metadata missing field '{field}'. File may be from an older script version.")
+            if int(stored) != int(getattr(args, field)):
+                raise ValueError(f"Demo {field} mismatch ({stored} vs {getattr(args, field)}).")
+        stored_hash = offline_metadata.get("config_hash")
+        current_hash = hashlib.sha256(args.config_path.read_bytes()).hexdigest()
+        if stored_hash is not None and stored_hash != current_hash:
+            raise ValueError(f"Demo config_hash mismatch — config file may have changed since demo generation. "
+                             f"Demo: {stored_hash[:12]}... Current: {current_hash[:12]}...")
+        stored_obs_dim = offline_metadata.get("obs_dim")
+        if stored_obs_dim is None:
+            raise ValueError("Demo metadata missing field 'obs_dim'. File may be from an older script version.")
+        if int(stored_obs_dim) != int(obs_dim):
+            raise ValueError(f"Demo obs_dim {stored_obs_dim} != env obs_dim {obs_dim}. Config drift?")
+        credit = offline_metadata.get("credit_horizon", "unknown")
+        if args.tasks_per_episode > 1 and credit == "myopic":
+            print("[train] WARNING: loading myopic demos (done=True per task) into anticipatory training "
+                  "(tasks_per_episode > 1). Bootstrap mismatch — demos teach terminal targets.")
+        print(f"[train] Validated {offline_count} demo transitions from {demo_path}.")
+
     seed_oracle = int(getattr(args, "seed_replay_oracle", 0) or 0)
     demo_fraction = float(getattr(args, "protect_demo_fraction", 0.0) or 0.0)
     demo_replay: ReplayBuffer | None = None
@@ -1062,7 +1109,8 @@ def train(args: argparse.Namespace) -> Path:
         # that _optimize blends into every minibatch. Otherwise behave as before
         # (demos mixed into the main buffer, free to age out).
         if demo_fraction > 0.0:
-            demo_replay = ReplayBuffer(storage=LazyTensorStorage(max_size=max(seed_oracle * args.max_steps_per_task, args.batch_size)))
+            total_cap = max(seed_oracle * args.max_steps_per_task + offline_count, args.batch_size)
+            demo_replay = ReplayBuffer(storage=LazyTensorStorage(max_size=total_cap))
             target_buffer = demo_replay
         else:
             target_buffer = replay
@@ -1074,6 +1122,18 @@ def train(args: argparse.Namespace) -> Path:
         print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} tasks (demo_fraction={demo_fraction}).")
         logger.set_metadata("oracle_seed_transitions", int(stored))
         logger.set_metadata("protect_demo_fraction", demo_fraction)
+
+    if offline_transitions is not None:
+        if demo_fraction > 0.0:
+            if demo_replay is None:
+                demo_replay = ReplayBuffer(storage=LazyTensorStorage(max_size=max(offline_count, args.batch_size)))
+            target = demo_replay
+        else:
+            target = replay
+        if offline_count > 0:
+            target.extend(torch.stack(offline_transitions))
+        dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
+        print(f"[train] Loaded {offline_count} demo transitions from {demo_path} into {dest}.")
 
     task_return = 0.0
     task_steps = 0
@@ -1433,6 +1493,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--protect-demo-fraction", type=float, default=0.0, help="If >0, store oracle demos in a separate never-evicting buffer and draw this fraction of every minibatch from it (prevents demo washout).")
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"), help="Path to Fast Downward planner (for oracle demo seeding).")
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_domain.pddl"), help="Path to PDDL domain file (for oracle demo seeding).")
+    parser.add_argument("--demo-transitions", type=Path, default=None, help="Load pre-generated demo transitions (.pt) into replay at training start.")
     parser.add_argument("--per-alpha", type=float, default=0.0, help="PER α: 0 = uniform, >0 enables PrioritizedReplayBuffer with this α.")
     parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
     parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")
