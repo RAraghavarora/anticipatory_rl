@@ -1170,6 +1170,8 @@ def train(args: argparse.Namespace) -> Path:
         "mask_or_timeout_issue": 0,
     }
 
+    consecutive_auto_successes = 0
+
     progress = tqdm(range(args.total_steps), desc="Restaurant DQN", unit="step")
     for global_step in progress:
         epsilon = epsilon_by_step(
@@ -1225,7 +1227,16 @@ def train(args: argparse.Namespace) -> Path:
         # Option 3 (fixed): Treat ANY auto-success that leaves the world unchanged 
         # as terminal for bootstrapping, regardless of task_equality. This prevents
         # multi-task loops (A -> B -> A) from generating degenerate infinite values.
-        self_loop_auto_success = bool(auto_success_flag and world_unchanged)
+        auto_success_flag = bool(next_info.get("auto_success", False))
+        if auto_success_flag and world_unchanged:
+            consecutive_auto_successes += 1
+        else:
+            consecutive_auto_successes = 0
+
+        self_loop_auto_success = bool(
+            (auto_success_flag and world_unchanged and task_equality) or 
+            (consecutive_auto_successes > 1)
+        )
         
         if auto_success_flag and world_unchanged:
             self_loop_world_only_count += 1

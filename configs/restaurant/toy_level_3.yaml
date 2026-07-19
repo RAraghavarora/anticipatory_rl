@@ -88,7 +88,10 @@ service_location_distribution:
   servingtable: 1.0
 
 wash_kind_distribution:
-  cup: 1.0
+  # cup excluded: cup_0 always clean at countertop (wash_ready) -> wash_objects(cup) always auto.
+  # bowl/knife start dirty 60% (see reset_dirty_probability) -> wash trajectories land in demos ~60% of tasks.
+  bowl: 0.5
+  knife: 0.5
 
 reset_dirty_probability:
   knife: 0.6
