@@ -24,6 +24,40 @@ def _load_config(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+# Map RL cost YAML keys to RestaurantSymbolicEnv attribute names.
+_RL_COST_KEYS: Dict[str, str] = {
+    "travel_scale": "travel_cost_scale",
+    "pick": "pick_cost",
+    "place": "place_cost",
+    "wash": "wash_cost",
+    "fill": "fill_cost",
+    "make_coffee": "brew_cost",
+    "make_fruit_bowl": "fruit_cost",
+    "apply_spread": "spread_cost",
+    "pour": "pour_cost",
+    "refill_water": "refill_cost",
+    "drain": "drain_cost",
+}
+
+
+def _load_rl_costs(config_dir: Path) -> Dict[str, float]:
+    """Load RL action costs from rl_costs.yaml in the config directory."""
+    path = config_dir / "rl_costs.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"RL cost file not found: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    costs: Dict[str, float] = {}
+    for yaml_key, attr_name in _RL_COST_KEYS.items():
+        if yaml_key not in raw:
+            raise ValueError(f"RL cost file missing required key '{yaml_key}': {path}")
+        value = raw[yaml_key]
+        if not isinstance(value, (int, float)) or value <= 0:
+            raise ValueError(f"RL cost '{yaml_key}' must be a positive number, got {value!r}")
+        costs[attr_name] = float(value)
+    return costs
+
+
 DEFAULT_LOCATIONS: Tuple[str, ...] = (
     "kitchen_counter",
     "coffee_machine",
@@ -184,40 +218,27 @@ class RestaurantSymbolicEnv(Env):
         max_steps_per_task: int = 100,
         success_reward: float = 15.0,
         invalid_action_penalty: float = 6.0,
-        travel_cost_scale: float = 25.0,
-        pick_cost: float = 25.0,
-        place_cost: float = 25.0,
-        wash_cost: float = 25.0,
-        fill_cost: float = 25.0,
-        brew_cost: float = 25.0,
-        fruit_cost: float = 25.0,
-        pour_cost: float = 25.0,
-        refill_cost: float = 25.0,
-        drain_cost: float = 25.0,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__()
-        self._base_config = _load_config(Path(config_path)) if config_path is not None else _load_config(CONFIG_PATH)
+        resolved_config_path = Path(config_path) if config_path is not None else CONFIG_PATH
+        self._base_config = _load_config(resolved_config_path)
         self._rng = np.random.default_rng(rng_seed)
         self._task_rng = np.random.default_rng(rng_seed + 1 if rng_seed is not None else None)
 
         self.max_steps_per_task = max(1, int(max_steps_per_task))
         self.success_reward = float(success_reward)
         self.invalid_action_penalty = float(invalid_action_penalty)
-        self.travel_cost_scale = float(travel_cost_scale) # travel_cost = travel_cost_scale * manhattan_distance
-        # RL reward: Manhattan distance; Paper2 cost: Djisktra distance
-        self.pick_cost = float(pick_cost)
-        self.place_cost = float(place_cost)
-        self.wash_cost = float(wash_cost)
-        self.fill_cost = float(fill_cost)
-        self.brew_cost = float(brew_cost)
-        self.fruit_cost = float(fruit_cost)
-        self.spread_cost = float(fruit_cost)
-        self.pour_cost = float(pour_cost)
-        self.refill_cost = float(refill_cost)
-        self.drain_cost = float(drain_cost)
+
+        # Load RL action costs from the canonical rl_costs.yaml next to the config.
+        # Travel cost uses Manhattan distance; paper2_cost uses Djikstra distance.
+        costs = _load_rl_costs(resolved_config_path.parent)
+        for attr_name, value in costs.items():
+            setattr(self, attr_name, value)
+        # Backward compatibility alias kept for existing code/tests.
+        self.spread_cost = self.fruit_cost
         # TODO: We can have separate cost for metrics and rewards.
-        # See PDDL_ACTION_COSTS in pddl_domain.py 
+        # See PDDL_ACTION_COSTS in pddl_domain.py
 
         # ponytail: _task_library unused by train/infer after task_rng fix; kept for tests.
         self._task_library: List[RestaurantTask] = []

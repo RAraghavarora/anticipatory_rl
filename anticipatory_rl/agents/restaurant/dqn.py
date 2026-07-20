@@ -438,34 +438,64 @@ def _planner_action_to_env_action(env: RestaurantSymbolicEnv, action: Tuple[str,
     raise ValueError(f"Unknown planner action: {name}")
 
 
-def _seed_replay_with_oracle(
-    replay: ReplayBuffer,
+def _persistent_oracle_rollout(
     env: RestaurantSymbolicEnv,
-    *,
-    n_tasks: int,
+    n_outcomes: int,
     max_steps: int,
     seed_base: int,
     planner_path: Path,
     domain_path: Path,
     alias: str = "seq-sat-lama-2011",
     timeout_s: float = 10.0,
-) -> int:
-    """Roll out the myopic (FD) oracle and store its transitions. Returns count stored."""
+    transition_store: ReplayBuffer | None = None,
+    env_reset_tasks: int = 200,
+) -> Dict[str, object]:
+    """Persistent-world myopic oracle roll-out.
+
+    Resets the env once at the start and then every ``env_reset_tasks`` task
+    outcomes. Auto-successes and planner failures advance the world without
+    storing transitions. Successful plans are executed step-by-step with
+    myopic terminal flags (``done=True`` on the task-boundary step).
+
+    Returns
+    -------
+    dict with keys ``stored`` (int), ``outcomes`` (int), and
+    ``successful_plan_rewards`` (list of lists of per-step rewards).
+    """
     stored = 0
-    for i in range(n_tasks):
-        obs, info = env.reset(seed=seed_base + i)
+    outcomes = 0
+    successful_plan_rewards: List[List[float]] = []
+    world_index = 0
+
+    obs, info = env.reset(seed=seed_base + 100_003 * world_index)
+    world_index += 1
+
+    while outcomes < n_outcomes:
+        if env_reset_tasks > 0 and outcomes > 0 and outcomes % env_reset_tasks == 0:
+            obs, info = env.reset(seed=seed_base + 100_003 * world_index)
+            world_index += 1
+
         if env._pending_auto_success:
+            # Settle the auto-success and refresh obs/info for the next task.
+            obs, _, _, _, info = env.step(env.action_space.sample())
+            outcomes += 1
             continue
+
         state = RestaurantPlannerState.from_env(env)
         result = solve_restaurant_task_with_fd(
             env, state, env.task,
             planner_path=planner_path, domain_path=domain_path, alias=alias, timeout_s=timeout_s,
         )
-        if not result.success:
+        if not result.success or len(result.plan_actions) > max_steps:
+            env._resample_task()
+            env._task_steps = 0
+            # Refresh obs/info for the next task without storing a transition.
+            obs, info = env._obs(), env._info(success=False)
+            outcomes += 1
             continue
-        for step_i, plan_action in enumerate(result.plan_actions):
-            if step_i >= max_steps:
-                break
+
+        plan_rewards: List[float] = []
+        for plan_action in result.plan_actions:
             masks = extract_masks(info)
             action = _planner_action_to_env_action(env, plan_action)
             parsed = env._normalize_action(action)
@@ -473,13 +503,48 @@ def _seed_replay_with_oracle(
                 raise RuntimeError(f"FD plan action invalid in env: {plan_action} → {action}")
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
-            done = bool(success or truncated)
-            _store_transition(replay, obs, action, reward, masks, next_obs, next_masks, done, success)
-            stored += 1
+            transition_done = bool(success or truncated)
+            if transition_store is not None:
+                _store_transition(
+                    transition_store, obs, action, reward, masks,
+                    next_obs, next_masks, transition_done, success,
+                )
+                stored += 1
+            plan_rewards.append(float(reward))
             obs, info = next_obs, next_info
             if success or truncated:
                 break
-    return stored
+
+        if plan_rewards:
+            successful_plan_rewards.append(plan_rewards)
+        outcomes += 1
+
+    return {"stored": stored, "outcomes": outcomes, "successful_plan_rewards": successful_plan_rewards}
+
+
+def _seed_replay_with_oracle(
+    replay: ReplayBuffer,
+    env: RestaurantSymbolicEnv,
+    *,
+    n_outcomes: int,
+    max_steps: int,
+    seed_base: int,
+    planner_path: Path,
+    domain_path: Path,
+    alias: str = "seq-sat-lama-2011",
+    timeout_s: float = 10.0,
+    env_reset_tasks: int = 200,
+) -> int:
+    """Thin wrapper around ``_persistent_oracle_rollout`` for replay seeding.
+
+    Returns the number of transitions stored.
+    """
+    result = _persistent_oracle_rollout(
+        env, n_outcomes, max_steps, seed_base,
+        planner_path, domain_path, alias=alias, timeout_s=timeout_s,
+        transition_store=replay, env_reset_tasks=env_reset_tasks,
+    )
+    return int(result["stored"])
 
 
 def _select_action(
@@ -952,13 +1017,6 @@ def train(args: argparse.Namespace) -> Path:
         max_steps_per_task=args.max_steps_per_task,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
-        travel_cost_scale=args.travel_cost_scale,
-        pick_cost=args.pick_cost,
-        place_cost=args.place_cost,
-        wash_cost=args.wash_cost,
-        fill_cost=args.fill_cost,
-        brew_cost=args.brew_cost,
-        fruit_cost=args.fruit_cost,
         rng_seed=args.seed,
     )
 
@@ -1034,13 +1092,6 @@ def train(args: argparse.Namespace) -> Path:
             max_steps_per_task=args.max_steps_per_task,
             success_reward=args.success_reward,
             invalid_action_penalty=args.invalid_action_penalty,
-            travel_cost_scale=args.travel_cost_scale,
-            pick_cost=args.pick_cost,
-            place_cost=args.place_cost,
-            wash_cost=args.wash_cost,
-            fill_cost=args.fill_cost,
-            brew_cost=args.brew_cost,
-            fruit_cost=args.fruit_cost,
             rng_seed=args.seed + 7_000_000,
         )
 
@@ -1059,12 +1110,13 @@ def train(args: argparse.Namespace) -> Path:
             if list(stored) != list(getattr(env, field)):
                 raise ValueError(f"Demo {field} mismatch. Demo: {list(stored)}, Env: {list(getattr(env, field))}")
         for field in ("success_reward", "invalid_action_penalty", "travel_cost_scale",
-                      "pick_cost", "place_cost", "wash_cost", "fill_cost", "brew_cost", "fruit_cost"):
+                      "pick_cost", "place_cost", "wash_cost", "fill_cost", "brew_cost",
+                      "fruit_cost", "spread_cost", "pour_cost", "refill_cost", "drain_cost"):
             stored = offline_metadata.get(field)
             if stored is None:
                 raise ValueError(f"Demo metadata missing cost field '{field}'. File may be from an older script version.")
-            if float(stored) != float(getattr(args, field)):
-                raise ValueError(f"Demo cost '{field}' mismatch ({stored} vs {getattr(args, field)}).")
+            if float(stored) != float(getattr(env, field)):
+                raise ValueError(f"Demo cost '{field}' mismatch ({stored} vs {getattr(env, field)}).")
         for field in ("max_steps_per_task",):
             stored = offline_metadata.get(field)
             if stored is None:
@@ -1096,13 +1148,6 @@ def train(args: argparse.Namespace) -> Path:
             max_steps_per_task=args.max_steps_per_task,
             success_reward=args.success_reward,
             invalid_action_penalty=args.invalid_action_penalty,
-            travel_cost_scale=args.travel_cost_scale,
-            pick_cost=args.pick_cost,
-            place_cost=args.place_cost,
-            wash_cost=args.wash_cost,
-            fill_cost=args.fill_cost,
-            brew_cost=args.brew_cost,
-            fruit_cost=args.fruit_cost,
             rng_seed=args.seed + 3_000_000,
         )
         # When protecting demos, route them into a separate never-evicting buffer
@@ -1115,11 +1160,13 @@ def train(args: argparse.Namespace) -> Path:
         else:
             target_buffer = replay
         stored = _seed_replay_with_oracle(
-            target_buffer, oracle_env, n_tasks=seed_oracle, max_steps=args.max_steps_per_task, seed_base=args.seed + 3_000_000,
+            target_buffer, oracle_env, n_outcomes=seed_oracle, max_steps=args.max_steps_per_task,
+            seed_base=args.seed + 3_000_000,
             planner_path=args.planner_path, domain_path=args.domain_path,
+            env_reset_tasks=args.env_reset_tasks,
         )
         dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
-        print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} tasks (demo_fraction={demo_fraction}).")
+        print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} outcomes (demo_fraction={demo_fraction}).")
         logger.set_metadata("oracle_seed_transitions", int(stored))
         logger.set_metadata("protect_demo_fraction", demo_fraction)
 
@@ -1485,13 +1532,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-steps-per-task", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
-    parser.add_argument("--pick-cost", type=float, default=1.0)
-    parser.add_argument("--place-cost", type=float, default=1.0)
-    parser.add_argument("--wash-cost", type=float, default=2.0)
-    parser.add_argument("--fill-cost", type=float, default=1.0)
-    parser.add_argument("--brew-cost", type=float, default=2.0)
-    parser.add_argument("--fruit-cost", type=float, default=2.0)
     parser.add_argument("--config-path", type=Path, default=Path("configs/restaurant/toy_level_3.yaml"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-label", type=str, default=None)

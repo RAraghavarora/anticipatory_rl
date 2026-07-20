@@ -34,14 +34,15 @@ def test_task_library_index_persists_across_reset(env):
 
 
 def test_library_skips_leading_auto_tasks(env):
-    auto_task = {"task_type": "clear_containers", "target_location": "servingtable"}
+    # cup_0 starts clean/empty on countertop, so wash_objects(cup) is auto at reset.
+    auto_task = {"task_type": "wash_objects", "target_kind": "cup"}
     non_auto = {"task_type": "serve_water", "target_location": "servingtable"}
     library = [auto_task, auto_task, auto_task, auto_task, non_auto]
 
     env.reset(seed=0, options={"task_library": library})
 
     assert env.task.task_type == "serve_water"
-    assert env.task.task_type != "clear_containers"
+    assert env.task.task_type != "wash_objects"
     assert env._task_library_index == len(library)
     assert env.task.target_location == non_auto["target_location"]
 

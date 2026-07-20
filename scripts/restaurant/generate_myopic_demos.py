@@ -40,7 +40,8 @@ def _read_max_steps_from_config(config_path: Path) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate myopic oracle demo transitions")
     parser.add_argument("--config-path", required=True, help="Env YAML config")
-    parser.add_argument("--num-tasks", type=int, default=100)
+    parser.add_argument("--num-tasks", type=int, default=100,
+                        help="Number of task outcomes to demonstrate")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", default=None,
                         help="Output .pt path (default: demos/<config_stem>_myopic_<num_tasks>_seed<seed>.pt)")
@@ -50,13 +51,6 @@ def main() -> None:
     parser.add_argument("--timeout-s", type=float, default=10.0)
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
-    parser.add_argument("--pick-cost", type=float, default=1.0)
-    parser.add_argument("--place-cost", type=float, default=1.0)
-    parser.add_argument("--wash-cost", type=float, default=2.0)
-    parser.add_argument("--fill-cost", type=float, default=1.0)
-    parser.add_argument("--brew-cost", type=float, default=2.0)
-    parser.add_argument("--fruit-cost", type=float, default=2.0)
     args = parser.parse_args()
 
     config_path = Path(args.config_path)
@@ -68,27 +62,20 @@ def main() -> None:
         max_steps_per_task=max_steps,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
-        travel_cost_scale=args.travel_cost_scale,
-        pick_cost=args.pick_cost,
-        place_cost=args.place_cost,
-        wash_cost=args.wash_cost,
-        fill_cost=args.fill_cost,
-        brew_cost=args.brew_cost,
-        fruit_cost=args.fruit_cost,
     )
 
     if args.output is None:
         stem = config_path.stem
         out_dir = Path("demos")
-        out_dir.mkdir(parents=True, exist_ok=True)
         output = out_dir / f"{stem}_myopic_{args.num_tasks}_seed{args.seed}.pt"
     else:
         output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     collector = _Collector()
     stored = _seed_replay_with_oracle(
         collector, env,
-        n_tasks=args.num_tasks,
+        n_outcomes=args.num_tasks,
         max_steps=max_steps,
         seed_base=args.seed,
         planner_path=Path(args.planner_path),
@@ -107,18 +94,23 @@ def main() -> None:
         "none_location_index": env.none_location_index,
         "seed": args.seed,
         "num_tasks": args.num_tasks,
+        "n_outcomes": args.num_tasks,
         "stored": stored,
         "max_steps_per_task": max_steps,
         "credit_horizon": "myopic",
         "success_reward": args.success_reward,
         "invalid_action_penalty": args.invalid_action_penalty,
-        "travel_cost_scale": args.travel_cost_scale,
-        "pick_cost": args.pick_cost,
-        "place_cost": args.place_cost,
-        "wash_cost": args.wash_cost,
-        "fill_cost": args.fill_cost,
-        "brew_cost": args.brew_cost,
-        "fruit_cost": args.fruit_cost,
+        "travel_cost_scale": env.travel_cost_scale,
+        "pick_cost": env.pick_cost,
+        "place_cost": env.place_cost,
+        "wash_cost": env.wash_cost,
+        "fill_cost": env.fill_cost,
+        "brew_cost": env.brew_cost,
+        "fruit_cost": env.fruit_cost,
+        "spread_cost": env.spread_cost,
+        "pour_cost": env.pour_cost,
+        "refill_cost": env.refill_cost,
+        "drain_cost": env.drain_cost,
         "object_names": list(env.object_names),
         "locations": list(env.locations),
         "object_kinds": list(env.object_kinds),

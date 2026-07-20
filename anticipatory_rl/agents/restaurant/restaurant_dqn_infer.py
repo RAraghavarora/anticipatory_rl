@@ -84,13 +84,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-plans", type=int, default=0, help="Log readable action sequences for the first N tasks.")
     parser.add_argument("--success-reward", type=float, default=15.0)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
-    parser.add_argument("--travel-cost-scale", type=float, default=1.0)
-    parser.add_argument("--pick-cost", type=float, default=1.0)
-    parser.add_argument("--place-cost", type=float, default=1.0)
-    parser.add_argument("--wash-cost", type=float, default=2.0)
-    parser.add_argument("--fill-cost", type=float, default=1.0)
-    parser.add_argument("--brew-cost", type=float, default=2.0)
-    parser.add_argument("--fruit-cost", type=float, default=2.0)
     parser.add_argument(
         "--config-path",
         type=str,
@@ -124,13 +117,6 @@ def make_env(args: argparse.Namespace) -> RestaurantSymbolicEnv:
         max_steps_per_task=args.max_task_steps,
         success_reward=args.success_reward,
         invalid_action_penalty=args.invalid_action_penalty,
-        travel_cost_scale=args.travel_cost_scale,
-        pick_cost=args.pick_cost,
-        place_cost=args.place_cost,
-        wash_cost=args.wash_cost,
-        fill_cost=args.fill_cost,
-        brew_cost=args.brew_cost,
-        fruit_cost=args.fruit_cost,
         rng_seed=args.seed,
     )
 

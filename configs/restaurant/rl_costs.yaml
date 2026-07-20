@@ -1,0 +1,11 @@
+travel_scale: 0.25 # Move costs range from 0.25 to 2.25
+pick: 1.0
+place: 1.0
+wash: 2.0
+fill: 10.0
+make_coffee: 0.5
+make_fruit_bowl: 1.0
+apply_spread: 1.0
+pour: 2.0
+refill_water: 0.5
+drain: 0.5

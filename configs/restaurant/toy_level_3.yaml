@@ -51,7 +51,7 @@ wash_ready_locations:
 dirty_drop_locations:
   - dishwasher
 
-object_kinds: [cup, water, apple, bowl, knife, jar]
+object_kinds: [cup, water, apple, bowl, knife, jar, plate]
 contents: [empty, water, coffee]
 
 task_types:
@@ -71,6 +71,7 @@ object_specs:
   - [bowl_0, bowl]
   - [knife_0, knife]
   - [jar_0, jar]
+  - [plate_0, plate]
 
 reset_location_distribution:
   cup:
@@ -116,6 +117,11 @@ reset_object_overrides:
   # Jar as an alternative local water source.
   jar_0:
     location: shelf
+    dirty: false
+    filled_with:
+  # Plate on servingtable so clear_containers(servingtable) is not auto-satisfied at reset.
+  plate_0:
+    location: servingtable
     dirty: false
     filled_with:
 

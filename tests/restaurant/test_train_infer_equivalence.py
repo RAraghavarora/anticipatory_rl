@@ -78,13 +78,6 @@ def test_env_construction_params_match(monkeypatch):
         max_steps_per_task=train_args.max_steps_per_task,
         success_reward=train_args.success_reward,
         invalid_action_penalty=train_args.invalid_action_penalty,
-        travel_cost_scale=train_args.travel_cost_scale,
-        pick_cost=train_args.pick_cost,
-        place_cost=train_args.place_cost,
-        wash_cost=train_args.wash_cost,
-        fill_cost=train_args.fill_cost,
-        brew_cost=train_args.brew_cost,
-        fruit_cost=train_args.fruit_cost,
         rng_seed=train_args.seed,
     )
     infer_env = make_env(infer_args)
@@ -92,15 +85,21 @@ def test_env_construction_params_match(monkeypatch):
     assert train_env.max_steps_per_task == infer_env.max_steps_per_task
     assert train_env.success_reward == infer_env.success_reward
     assert train_env.invalid_action_penalty == infer_env.invalid_action_penalty
-    assert train_env.travel_cost_scale == infer_env.travel_cost_scale
-    assert train_env.pick_cost == infer_env.pick_cost
-    assert train_env.place_cost == infer_env.place_cost
-    assert train_env.wash_cost == infer_env.wash_cost
-    assert train_env.fill_cost == infer_env.fill_cost
-    assert train_env.brew_cost == infer_env.brew_cost
-    assert train_env.fruit_cost == infer_env.fruit_cost
     assert list(train_env.locations) == list(infer_env.locations)
     assert list(train_env.object_names) == list(infer_env.object_names)
+
+    # Costs are loaded from rl_costs.yaml, not constructor arguments.
+    assert train_env.travel_cost_scale == 0.25
+    assert train_env.pick_cost == 1.0
+    assert train_env.place_cost == 1.0
+    assert train_env.wash_cost == 2.0
+    assert train_env.fill_cost == 10.0
+    assert train_env.brew_cost == 0.5
+    assert train_env.fruit_cost == 1.0
+    assert train_env.spread_cost == train_env.fruit_cost
+    assert train_env.pour_cost == 2.0
+    assert train_env.refill_cost == 0.5
+    assert train_env.drain_cost == 0.5
 
 
 def test_default_hyperparams_consistent(monkeypatch):
@@ -116,7 +115,6 @@ def test_default_hyperparams_consistent(monkeypatch):
     pairs = [
         ("gamma", "gamma"),
         ("success_reward", "success_reward"),
-        ("travel_cost_scale", "travel_cost_scale"),
         ("max_steps_per_task", "max_task_steps"),
     ]
     for train_key, infer_key in pairs:
