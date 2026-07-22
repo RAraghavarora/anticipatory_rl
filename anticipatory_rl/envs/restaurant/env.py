@@ -183,6 +183,8 @@ def consume_delivery(objects: Mapping[str, RestaurantObjectState], task_type: st
     Shared by env.step() and the planner-state oracles; operates on a plain
     {name: object} mapping so it is state-representation-agnostic.
     """
+    if task_type == "wash_objects":
+        return  # No consumption: wash_objects leaves the object clean/empty/in-place.
     if target_location is None:
         return
     if task_type == "make_coffee":
