@@ -60,7 +60,15 @@ def run_planner(
             last_stderr = str(exc)
         plan_candidates = sorted(workdir.glob("sas_plan*"))
         if plan_candidates:
-            return plan_candidates[0]
+            # LAMA outputs sas_plan.1, sas_plan.2, etc. where higher numbers are better plans.
+            # We want the last (best) plan found before the timeout.
+            def get_plan_idx(p: Path) -> int:
+                try:
+                    return int(p.suffix.strip('.'))
+                except ValueError:
+                    return 0
+            plan_candidates.sort(key=get_plan_idx)
+            return plan_candidates[-1]
         time_limit *= 2
     raise RuntimeError(
         f"Planner found no plan within {max_search_time_limit}s.\nSTDERR:\n{last_stderr}"
