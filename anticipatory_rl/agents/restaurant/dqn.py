@@ -23,7 +23,7 @@ from anticipatory_rl.envs.restaurant.env import ACTION_HEADS, ACTION_TYPES, Rest
 from anticipatory_rl.envs.restaurant.planner import RestaurantPlannerState, solve_restaurant_task_with_fd
 
 
-from anticipatory_rl.logging import AimLogger, CSVLogger, LoggerPair
+from anticipatory_rl.logging import AimLogger, CSVLogger, LoggerPair, WandbLogger
 from anticipatory_rl.utils import extract_masks, masked_choice, random_valid_index, select_device
 
 
@@ -1027,7 +1027,8 @@ def train(args: argparse.Namespace) -> Path:
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
     aim_logger = AimLogger(args, run_label)
     csv_logger = CSVLogger(args, run_label, run_dir)
-    logger = LoggerPair(aim_logger, csv_logger)
+    wandb_logger = WandbLogger(args, run_label)
+    logger = LoggerPair(aim_logger, csv_logger, wandb_logger)
     logger.set_metadata("run_dir", str(run_dir.resolve()))
     logger.set_metadata("config_path", str(Path(args.config_path).resolve()))
 

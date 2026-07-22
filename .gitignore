@@ -6,8 +6,12 @@ __pycache__/
 .DS_Store
 keyconfig.py
 
+# Secrets / local env files
+.env
+
 # Logs / recordings / run artifacts
 runs/
+demos/
 *.mp4
 *.gif
 

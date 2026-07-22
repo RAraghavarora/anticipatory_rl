@@ -1,10 +1,11 @@
-"""Aim and CSV logging for restaurant RL training."""
+"""Experiment logging for restaurant RL training."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -69,6 +70,78 @@ class AimLogger:
             self._run.track(Image(str(image_path)), name=name, step=step, context=dict(context or {}))
         except Exception:
             self._run.track(str(image_path), name=name, step=step, context=dict(context or {}))
+
+
+class WandbLogger:
+    def __init__(self, args: argparse.Namespace, run_label: str) -> None:
+        self._run = None
+        try:
+            from dotenv import load_dotenv  # type: ignore
+            load_dotenv()
+        except Exception:
+            pass
+        try:
+            import wandb  # type: ignore
+        except ImportError:
+            print("[train] W&B logging disabled: install `wandb` to enable experiment tracking.")
+            return
+
+        self._wandb = wandb
+        try:
+            self._run = wandb.init(
+                project=os.environ.get("WANDB_PROJECT", "restaurant_rl_factored"),
+                entity=os.environ.get("WANDB_ENTITY"),
+                name=run_label,
+                config={
+                    key: (str(value) if isinstance(value, Path) else value)
+                    for key, value in vars(args).items()
+                },
+            )
+        except Exception as exc:
+            print(f"[train] W&B logging disabled: wandb.init() failed ({exc!r}).")
+            return
+        self._defined_metrics: set[str] = set()
+        self._run.config.update({"action_space": {"action_types": list(ACTION_TYPES), "factored": True}})
+        print("[train] W&B logging enabled.")
+
+    @staticmethod
+    def _metric_name(name: str, context: Mapping[str, object] | None) -> str:
+        if not context:
+            return name
+        suffix = "/".join(f"{key}={value}" for key, value in sorted(context.items()))
+        return f"{name}/{suffix}"
+
+    def set_metadata(self, key: str, value: object) -> None:
+        if self._run is not None:
+            self._run.config.update({key: value}, allow_val_change=True)
+
+    def track(
+        self,
+        value: float | int,
+        *,
+        name: str,
+        step: int,
+        context: Mapping[str, object] | None = None,
+    ) -> None:
+        if self._run is not None:
+            metric_name = self._metric_name(name, context)
+            step_name = f"{metric_name}_step"
+            if metric_name not in self._defined_metrics:
+                self._run.define_metric(metric_name, step_metric=step_name)
+                self._defined_metrics.add(metric_name)
+            self._run.log({metric_name: value, step_name: step})
+
+    def track_text(self, text: str, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
+        if self._run is not None:
+            self._run.log({self._metric_name(name, context): self._wandb.Html(f"<pre>{text}</pre>")})
+
+    def track_image(self, image_path: Path, *, name: str, step: int, context: Mapping[str, object] | None = None) -> None:
+        if self._run is not None:
+            self._run.log({self._metric_name(name, context): self._wandb.Image(str(image_path))})
+
+    def close(self) -> None:
+        if self._run is not None:
+            self._run.finish()
 
 
 class CSVLogger:
@@ -220,21 +293,25 @@ class CSVLogger:
 
 
 class LoggerPair:
-    """Dispatch calls to an AimLogger and a CSVLogger with one interface."""
+    """Dispatch calls to configured experiment loggers with one interface."""
 
     def __init__(
         self,
         aim_logger: AimLogger | None = None,
         csv_logger: CSVLogger | None = None,
+        wandb_logger: WandbLogger | None = None,
     ) -> None:
         self.aim = aim_logger
         self.csv = csv_logger
+        self.wandb = wandb_logger
 
     def set_metadata(self, key: str, value: object) -> None:
         if self.aim is not None:
             self.aim.set_metadata(key, value)
         if self.csv is not None:
             self.csv.set_metadata(key, value)
+        if self.wandb is not None:
+            self.wandb.set_metadata(key, value)
 
     def track(
         self,
@@ -248,6 +325,8 @@ class LoggerPair:
             self.aim.track(value, name=name, step=step, context=context)
         if self.csv is not None:
             self.csv.track(value, name=name, step=step, context=context)
+        if self.wandb is not None:
+            self.wandb.track(value, name=name, step=step, context=context)
 
     def track_text(
         self,
@@ -259,6 +338,8 @@ class LoggerPair:
     ) -> None:
         if self.aim is not None:
             self.aim.track_text(text, name=name, step=step, context=context)
+        if self.wandb is not None:
+            self.wandb.track_text(text, name=name, step=step, context=context)
 
     def track_image(
         self,
@@ -270,9 +351,13 @@ class LoggerPair:
     ) -> None:
         if self.aim is not None:
             self.aim.track_image(image_path, name=name, step=step, context=context)
+        if self.wandb is not None:
+            self.wandb.track_image(image_path, name=name, step=step, context=context)
 
     def close(self) -> None:
         if self.aim is not None:
             self.aim.close()
         if self.csv is not None:
             self.csv.close()
+        if self.wandb is not None:
+            self.wandb.close()
