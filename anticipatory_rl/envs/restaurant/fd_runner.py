@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def run_planner(
@@ -14,28 +15,37 @@ def run_planner(
     workdir: Path,
     *,
     alias: str = "seq-sat-lama-2011",
+    search: Optional[str] = None,
     initial_search_time_limit: float = 10.0,
     max_search_time_limit: float = 320.0,
 ) -> Path:
-    """Invoke Fast Downward with a portfolio alias and doubling search-time-limit.
+    """Invoke Fast Downward and double the search-time-limit on retry.
 
     Starts with *initial_search_time_limit* seconds. If no plan is found, doubles
     the limit and retries, up to *max_search_time_limit* seconds total.
     Returns the path to the first sas_plan* file produced.
+
+    *alias* selects a portfolio alias (default: ``seq-sat-lama-2011``). When
+    *search* is provided, it is passed to Fast Downward via ``--search`` and the
+    portfolio alias is bypassed.
     """
     time_limit = initial_search_time_limit
     last_stderr = ""
     while time_limit <= max_search_time_limit:
-        cmd = [
-            sys.executable,
-            str(planner.resolve()),
-            "--alias",
-            alias,
+        # Driver options come before the input files; component options
+        # (`--search "..."`) come after them. `--alias` is a driver option,
+        # so it is consistent with the previous wrapper behaviour.
+        cmd = [sys.executable, str(planner.resolve())]
+        if search is None:
+            cmd.extend(["--alias", alias])
+        cmd.extend([
             "--search-time-limit",
             f"{int(time_limit)}s",
             str(domain.resolve()),
             str(problem.resolve()),
-        ]
+        ])
+        if search is not None:
+            cmd.extend(["--search", search])
         try:
             proc = subprocess.run(
                 cmd,
@@ -55,4 +65,3 @@ def run_planner(
     raise RuntimeError(
         f"Planner found no plan within {max_search_time_limit}s.\nSTDERR:\n{last_stderr}"
     )
-

@@ -1151,7 +1151,7 @@ class RestaurantSymbolicEnv(Env):
             if "dirty" in override:
                 dirty = bool(override["dirty"])
             if "filled_with" in override:
-                filled_with = str(override["filled_with"])
+                filled_with = None if override["filled_with"] is None else str(override["filled_with"])
             objects[name] = RestaurantObjectState(
                 name=name,
                 kind=kind,
