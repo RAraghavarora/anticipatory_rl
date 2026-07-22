@@ -68,15 +68,21 @@ def _seed_replay_with_anticipatory_oracle(
     # Generate extra tasks to allow lookahead at the end
     total_tasks_needed = n_outcomes + K + (n_outcomes // env_reset_tasks) * K
     
-    # We create a dummy env just to sample IID tasks cleanly
+    # We create a dummy env just to sample IID tasks cleanly, exactly synchronized with env resets
     dummy_env = RestaurantSymbolicEnv(
         config_path=config_path,
         rng_seed=seed_base,
     )
-    dummy_env.reset(seed=seed_base)
     
     tasks_pool = []
-    for _ in range(total_tasks_needed):
+    dummy_world_index = 0
+    dummy_env.reset(seed=seed_base + 100_003 * dummy_world_index)
+    dummy_world_index += 1
+    
+    for i in range(total_tasks_needed):
+        if env_reset_tasks > 0 and i > 0 and i % env_reset_tasks == 0:
+            dummy_env.reset(seed=seed_base + 100_003 * dummy_world_index)
+            dummy_world_index += 1
         dummy_env._resample_task()
         tasks_pool.append(dummy_env.task)
         
