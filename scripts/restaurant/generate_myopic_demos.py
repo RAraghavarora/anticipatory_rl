@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--domain-path", default="pddl/toy_restaurant_domain.pddl")
     parser.add_argument("--alias", default="seq-sat-lama-2011")
     parser.add_argument("--timeout-s", type=float, default=10.0)
-    parser.add_argument("--success-reward", type=float, default=15.0)
+    parser.add_argument("--success-reward", type=float, default=95.31)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     args = parser.parse_args()
 
@@ -82,6 +82,7 @@ def main() -> None:
         domain_path=Path(args.domain_path),
         alias=args.alias,
         timeout_s=args.timeout_s,
+        n_tasks=len(env.enumerate_task_distribution()),
     )
 
     metadata: Dict[str, Any] = {

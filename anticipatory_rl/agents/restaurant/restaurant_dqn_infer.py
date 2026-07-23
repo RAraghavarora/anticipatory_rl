@@ -76,13 +76,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-tasks", type=int, default=5_000)
     parser.add_argument("--total-steps", type=int, default=200_000)
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--gamma", type=float, default=0.95)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--softmax-temperature", type=float, default=0.0)
-    parser.add_argument("--tasks-per-reset", type=int, default=200)
+    parser.add_argument("--tasks-per-reset", type=int, default=50)
     parser.add_argument("--max-task-steps", type=int, default=64)
     parser.add_argument("--log-plans", type=int, default=0, help="Log readable action sequences for the first N tasks.")
-    parser.add_argument("--success-reward", type=float, default=15.0)
+    parser.add_argument("--success-reward", type=float, default=95.31)
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     parser.add_argument(
         "--config-path",
