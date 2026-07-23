@@ -150,7 +150,7 @@ def _task_is_auto_satisfied(
 
 def _enumerate_future_tasks(
     env: RestaurantSymbolicEnv,
-    state: RestaurantPlannerState,
+    _state: RestaurantPlannerState,
 ) -> List[Tuple[RestaurantTask, float]]:
     """Enumerate all possible future tasks with their probabilities."""
     tasks: List[Tuple[RestaurantTask, float]] = []
@@ -175,19 +175,17 @@ def _enumerate_future_tasks(
                     tasks.append((RestaurantTask(task_type=ttype, target_location=loc), p))
 
         elif ttype == "pick_place":
-            valid_objects = [
-                name for name, obj in state.objects.items()
-                if obj.kind not in {"water", "coffeegrinds"} and obj.contained_in is None
-            ]
             locations = list(env.locations)
-            if not valid_objects or not locations:
+            object_dist = env.pick_place_object_distribution
+            object_total = sum(object_dist.values())
+            if object_total <= 0 or not locations:
                 continue
-            p_each = p_type / len(valid_objects) / len(locations)
-            for obj_name in valid_objects:
+            for obj_name, obj_w in object_dist.items():
                 for loc in locations:
+                    p = p_type * (obj_w / object_total) / len(locations)
                     tasks.append((RestaurantTask(
                         task_type=ttype, target_location=loc, object_name=obj_name,
-                    ), p_each))
+                    ), p))
 
         elif ttype == "wash_objects":
             kind_dist = env.wash_kind_distribution

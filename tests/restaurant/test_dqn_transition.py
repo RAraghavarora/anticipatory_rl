@@ -6,7 +6,7 @@ Guards the research-critical myopic-vs-anticipatory distinction:
 - bootstrap_done: truncated alone NEVER sets it. For tpe=1 every boundary is
   terminal; for tpe=200 only the 200-task reset / step-limit is terminal.
 - train(): a per-task timeout does NOT call env.reset() (world persists).
-- env.step(): truncated and auto_success are mutually exclusive (Option 3 safety).
+- env.step(): truncated and auto_success are mutually exclusive by environment contract.
 """
 from __future__ import annotations
 

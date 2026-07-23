@@ -42,6 +42,7 @@ def test_wandb_logger_uses_default_project(monkeypatch):
     fake_wandb = _fake_wandb(run)
     fake_wandb.init = lambda **kwargs: init_kwargs.append(kwargs) or run
     monkeypatch.delenv("WANDB_PROJECT", raising=False)
+    monkeypatch.setitem(sys.modules, "dotenv", SimpleNamespace(load_dotenv=lambda: None))
     monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
 
     WandbLogger(argparse.Namespace(gamma=0.99), "test-run")

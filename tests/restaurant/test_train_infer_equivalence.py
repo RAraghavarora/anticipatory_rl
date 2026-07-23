@@ -175,8 +175,7 @@ def test_inference_pairing(tmp_path, monkeypatch):
     """run_compare must produce paired task sequences across two different-weight
     agents. End-to-end inference pairing: both agents reseed env._task_rng on the
     same reset cadence, so different action streams (different step counts per
-    task) still yield identical task_type/target_location/target_kind sequences.
-    pick_place.object_name is state-conditioned and not asserted."""
+    task) still yield identical complete task tuples including object_name."""
     import json
 
     from anticipatory_rl.agents.restaurant.dqn import RestaurantQNetwork
@@ -242,4 +241,8 @@ def test_inference_pairing(tmp_path, monkeypatch):
         assert ant_tasks[i]["target_kind"] == myo_tasks[i]["target_kind"], (
             f"Task {i} target_kind mismatch: ant={ant_tasks[i]['target_kind']} "
             f"myo={myo_tasks[i]['target_kind']}"
+        )
+        assert ant_tasks[i]["object_name"] == myo_tasks[i]["object_name"], (
+            f"Task {i} object_name mismatch: ant={ant_tasks[i]['object_name']} "
+            f"myo={myo_tasks[i]['object_name']}"
         )

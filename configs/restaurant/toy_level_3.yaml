@@ -94,6 +94,17 @@ wash_kind_distribution:
   bowl: 0.5
   knife: 0.5
 
+# State-independent pick_place object distribution (sampled via task_rng, not live world).
+# apple_0 excluded: can become contained/unrecoverable during pick_place.
+# water objects excluded: not pickable.
+pick_place_object_distribution:
+  cup_0: 1.0
+  cup_1: 1.0
+  bowl_0: 1.0
+  knife_0: 1.0
+  jar_0: 1.0
+  plate_0: 1.0
+
 reset_dirty_probability:
   knife: 0.6
   bowl: 0.6

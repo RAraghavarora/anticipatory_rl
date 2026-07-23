@@ -475,6 +475,7 @@ class RestaurantSymbolicEnv(Env):
             name: float(schema.get("wash_kind_distribution", {}).get(name, 0.0))
             for name in self.object_kinds
         }
+        self._parse_pick_place_object_distribution(schema)
         reset_loc_cfg = schema.get("reset_location_distribution", {})
         self.reset_location_distribution = {
             kind: {loc: float(reset_loc_cfg.get(kind, {}).get(loc, 0.0)) for loc in self.locations}
@@ -535,6 +536,60 @@ class RestaurantSymbolicEnv(Env):
             + (self.num_objects + 1)
         )
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
+
+    def _parse_pick_place_object_distribution(self, schema: Mapping[str, Any]) -> None:
+        """Parse and strictly validate pick_place_object_distribution from config.
+
+        Validates that configured names exist, remain feasible regardless of live
+        world state, and have nonnegative weights with positive total mass.
+        Stores strictly-validated distribution on ``self.pick_place_object_distribution``.
+
+        When the config has no ``pick_place_object_distribution`` key, falls back to
+        a uniform distribution over all statically-pickable objects.
+        """
+        raw = dict(schema.get("pick_place_object_distribution", {}))
+        if not raw:
+            kind_by_name = {str(n): str(k) for n, k in self.object_specs}
+            raw = {
+                name: 1.0
+                for name in self.object_names
+                if self._is_pickable_kind(kind_by_name[name])
+                and kind_by_name[name] not in {"apple", "coffeegrinds"}
+            }
+        else:
+            for name in list(raw):
+                if str(name) not in self.object_name_index:
+                    raise ValueError(
+                        f"pick_place_object_distribution: unknown object '{name}'. "
+                        f"Known: {tuple(self.object_name_index.keys())}"
+                    )
+                weight = float(raw[name])
+                if weight < 0.0:
+                    raise ValueError(
+                        f"pick_place_object_distribution: negative weight for '{name}': {weight}"
+                    )
+                raw[name] = weight
+
+        total = sum(raw.values())
+        if total <= 0.0:
+            raise ValueError("pick_place_object_distribution: total weight must be positive.")
+        self.pick_place_object_distribution = {name: w / total for name, w in raw.items()}
+
+        # Apples can become irretrievably contained; coffeegrinds were never part
+        # of the pick_place task support.
+        kind_by_name = {str(n): str(k) for n, k in self.object_specs}
+        for name in self.pick_place_object_distribution:
+            kind = kind_by_name[name]
+            if not self._is_pickable_kind(kind):
+                raise ValueError(
+                    f"pick_place_object_distribution: '{name}' has kind '{kind}', "
+                    f"which is not pickable."
+                )
+            if kind in {"apple", "coffeegrinds"}:
+                raise ValueError(
+                    f"pick_place_object_distribution: '{name}' has kind '{kind}', "
+                    "which is not eligible for state-independent pick_place tasks."
+                )
 
     def _parse_locations(
         self,

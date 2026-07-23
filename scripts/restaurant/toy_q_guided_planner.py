@@ -118,9 +118,8 @@ def _compute_v_q_ap(
 ) -> float:
     """E_tau[V_Q(s, tau)] via the trained DQN, with caching by state signature.
 
-    Cache key is just the state signature: future_tasks is deterministic given
-    (state, fixed config) because the only state-conditioned part of task
-    enumeration is pick_place valid objects, captured in the state signature.
+    Cache key is just the state signature; future_tasks is fixed by the config's
+    state-independent task distribution.
 
     Saves and restores env.state/env.task so the temporary syncs to candidate
     terminal states do not leak into the caller.

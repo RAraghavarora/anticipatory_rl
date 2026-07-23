@@ -14,10 +14,12 @@ def sample_task(
 ) -> RestaurantTask:
     """Sample a restaurant task from the environment's task distribution.
 
-    Paired draws (task_type, target_location, target_kind, pick_place.target_location)
-    come from ``env._task_rng`` so agents with different action streams see identical
-    task sequences. ``pick_place.object_name`` is state-conditioned and drawn from
-    ``env._rng`` (variable retry count must not desync ``_task_rng``).
+    All random draws (task_type, target_location, target_kind,
+    pick_place.target_location, pick_place.object_name) come from
+    ``env._task_rng`` so agents with different action streams see identical
+    complete task sequences. ``pick_place.object_name`` is sampled from
+    ``env.pick_place_object_distribution`` (a state-independent config) and
+    is therefore fully paired across agents.
 
     Args:
         env: The restaurant environment.
@@ -28,8 +30,6 @@ def sample_task(
         A sampled RestaurantTask.
     """
     trng = env._task_rng
-    # ponytail: trng.random() always drawn (even when uniform_task_type_prob=0.0) and pick_place
-    # object_name kept on env._rng so task_rng consumes a fixed 3 draws/task regardless of world state.
     if trng.random() < uniform_task_type_prob:
         ttype = trng.choice(list(env.task_types))
     else:
@@ -40,12 +40,11 @@ def sample_task(
         return RestaurantTask(task_type=ttype, target_location=target_location, target_kind=None)
 
     if ttype == "pick_place":
-        for _ in range(50):
-            object_name = env._rng.choice(list(env.object_names))
-            obj = env.state.objects[object_name]
-            if obj.kind in {"water", "coffeegrinds"} or obj.contained_in is not None:
-                continue
-            break
+        object_name = env._weighted_choice(
+            env.pick_place_object_distribution,
+            tuple(env.pick_place_object_distribution),
+            rng=trng,
+        )
         target_location = trng.choice(list(env.locations))
         return RestaurantTask(task_type=ttype, target_location=target_location, target_kind=None, object_name=object_name)
 

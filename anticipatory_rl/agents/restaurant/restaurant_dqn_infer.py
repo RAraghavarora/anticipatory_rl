@@ -496,6 +496,7 @@ def run_compare(args: argparse.Namespace) -> None:
         ant_tasks[i]["task_type"] == myo_tasks[i]["task_type"]
         and ant_tasks[i]["target_location"] == myo_tasks[i]["target_location"]
         and ant_tasks[i]["target_kind"] == myo_tasks[i]["target_kind"]
+        and ant_tasks[i]["object_name"] == myo_tasks[i]["object_name"]
         for i in range(n)
     )
     print(f"Task sequence paired: {paired} ({n} tasks compared)")
@@ -505,6 +506,7 @@ def run_compare(args: argparse.Namespace) -> None:
             if ant_tasks[i]["task_type"] != myo_tasks[i]["task_type"]
             or ant_tasks[i]["target_location"] != myo_tasks[i]["target_location"]
             or ant_tasks[i]["target_kind"] != myo_tasks[i]["target_kind"]
+            or ant_tasks[i]["object_name"] != myo_tasks[i]["object_name"]
         ]
         print(f"  Mismatches at tasks: {mismatches[:10]}{'...' if len(mismatches) > 10 else ''}")
     ant_stats = anticipatory["stats"]
