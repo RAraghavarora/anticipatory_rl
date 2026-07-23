@@ -1663,7 +1663,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tau", type=float, default=1.0)
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--tasks-per-episode", type=int, default=1)
-    parser.add_argument("--env-reset-tasks", type=int, default=200, help="Physical env reset interval in tasks.")
+    parser.add_argument("--env-reset-tasks", type=int, default=50, help="Physical env reset interval in tasks.")
     parser.add_argument("--episode-step-limit", type=int, default=None, help="Maximum primitive steps allowed between resets; <=0 disables. None -> derived from env_reset_tasks * max_steps_per_task.")
     parser.add_argument("--max-steps-per-task", type=int, default=64)
     parser.add_argument("--success-reward", type=float, default=95.31)
