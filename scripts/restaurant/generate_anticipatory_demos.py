@@ -141,13 +141,14 @@ def _seed_replay_with_anticipatory_oracle(
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
             
-            # Note: Because this is K=3, the agent is trained on K=1 task boundaries. 
-            # So the transition is done when the CURRENT task succeeds.
-            transition_done = bool(success or truncated)
+            task_boundary = bool(success)
+            # Anticipatory demos ONLY set done=True at the env-reset horizon (or on truncation).
+            # If we set done=True on every task, it trains a myopic value function!
+            transition_done = bool(truncated or (task_boundary and (outcomes + 1) % env_reset_tasks == 0))
             
             _store_transition(
                 replay, obs, action, reward, masks,
-                next_obs, next_masks, transition_done, success,
+                next_obs, next_masks, transition_done, task_boundary,
             )
             stored += 1
             obs, info = next_obs, next_info
@@ -173,7 +174,10 @@ def main() -> None:
     parser.add_argument("--domain-path", default="pddl/toy_restaurant_sequence_domain.pddl")
     parser.add_argument("--alias", default="seq-sat-lama-2011")
     parser.add_argument("--timeout-s", type=float, default=120.0)
-    parser.add_argument("--success-reward", type=float, default=15.0)
+    parser.add_argument("--env-reset-tasks", type=int, default=50,
+                        help="Episode horizon (tasks per episode)")
+    parser.add_argument("--success-reward", type=float, default=95.31,
+                        help="Task success reward (should match rl_costs.yaml R_star)")
     parser.add_argument("--invalid-action-penalty", type=float, default=6.0)
     args = parser.parse_args()
 
@@ -208,7 +212,7 @@ def main() -> None:
         domain_path=Path(args.domain_path),
         alias=args.alias,
         timeout_s=args.timeout_s,
-        env_reset_tasks=50,
+        env_reset_tasks=args.env_reset_tasks,
     )
 
     metadata: Dict[str, Any] = {
@@ -222,6 +226,7 @@ def main() -> None:
         "seed": args.seed,
         "num_tasks": args.num_tasks,
         "n_outcomes": args.num_tasks,
+        "env_reset_tasks": args.env_reset_tasks,
         "stored": stored,
         "max_steps_per_task": max_steps,
         "credit_horizon": "anticipatory",
