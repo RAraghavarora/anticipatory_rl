@@ -700,29 +700,78 @@ class RestaurantSymbolicEnv(Env):
             task_source="iid",
         )
 
-    def _task_already_satisfied(self) -> bool:
-        if self.task.task_type == "serve_water":
-            assert self.task.target_location is not None
+    def enumerate_task_distribution(self) -> list[tuple[RestaurantTask, float]]:
+        """All (task, P(task)) pairs. Probabilities MUST match sample_task exactly."""
+        tasks: list[tuple[RestaurantTask, float]] = []
+        dist = self.task_distribution
+        total_weight = sum(dist.values())
+        if total_weight <= 0:
+            return tasks
+
+        for ttype, weight in dist.items():
+            p_type = weight / total_weight
+            if p_type <= 0:
+                continue
+
+            if ttype in {"serve_water", "make_coffee", "make_fruit_bowl", "clear_containers"}:
+                loc_dist = self.service_location_distribution
+                loc_total = sum(loc_dist.values())
+                if loc_total <= 0:
+                    continue
+                for loc, loc_w in loc_dist.items():
+                    p = p_type * (loc_w / loc_total)
+                    if p > 0:
+                        tasks.append((RestaurantTask(task_type=ttype, target_location=loc), p))
+
+            elif ttype == "pick_place":
+                locations = list(self.locations)
+                obj_dist = self.pick_place_object_distribution
+                obj_total = sum(obj_dist.values())
+                if obj_total <= 0 or not locations:
+                    continue
+                for obj_name, obj_w in obj_dist.items():
+                    for loc in locations:
+                        p = p_type * (obj_w / obj_total) / len(locations)
+                        tasks.append((RestaurantTask(
+                            task_type=ttype, target_location=loc, object_name=obj_name,
+                        ), p))
+
+            elif ttype == "wash_objects":
+                kind_dist = self.wash_kind_distribution
+                kind_total = sum(kind_dist.values())
+                if kind_total <= 0:
+                    continue
+                for kind, kind_w in kind_dist.items():
+                    p = p_type * (kind_w / kind_total)
+                    if p > 0:
+                        tasks.append((RestaurantTask(task_type=ttype, target_kind=kind), p))
+
+        return tasks
+
+    def _task_already_satisfied(self, task: RestaurantTask | None = None) -> bool:
+        t = task if task is not None else self.task
+        if t.task_type == "serve_water":
+            assert t.target_location is not None
             return any(
-                obj.location == self.task.target_location
+                obj.location == t.target_location
                 and obj.kind in {"cup", "mug"}
                 and obj.filled_with == "water"
                 for obj in self.state.objects.values()
             )
-        if self.task.task_type == "make_coffee":
-            assert self.task.target_location is not None
+        if t.task_type == "make_coffee":
+            assert t.target_location is not None
             return any(
-                obj.location == self.task.target_location
+                obj.location == t.target_location
                 and obj.kind in {"cup", "mug"}
                 and obj.filled_with == "coffee"
                 for obj in self.state.objects.values()
             )
-        if self.task.task_type == "make_fruit_bowl":
-            assert self.task.target_location is not None
+        if t.task_type == "make_fruit_bowl":
+            assert t.target_location is not None
             bowls = [
                 obj.name
                 for obj in self.state.objects.values()
-                if obj.kind == "bowl" and obj.location == self.task.target_location
+                if obj.kind == "bowl" and obj.location == t.target_location
             ]
             if not bowls:
                 return False
@@ -730,24 +779,24 @@ class RestaurantSymbolicEnv(Env):
                 apple.kind == "apple" and apple.contained_in in bowls
                 for apple in self.state.objects.values()
             )
-        if self.task.task_type == "clear_containers":
-            assert self.task.target_location is not None
-            return not any(obj.location == self.task.target_location for obj in self.state.objects.values())
-        if self.task.task_type == "wash_objects":
-            assert self.task.target_kind is not None
+        if t.task_type == "clear_containers":
+            assert t.target_location is not None
+            return not any(obj.location == t.target_location for obj in self.state.objects.values())
+        if t.task_type == "wash_objects":
+            assert t.target_kind is not None
             return any(
-                obj.kind == self.task.target_kind
+                obj.kind == t.target_kind
                 and not obj.dirty
                 and obj.filled_with is None
                 and obj.location in self.wash_ready_locations
                 and obj.contained_in is None
                 for obj in self.state.objects.values()
             )
-        if self.task.task_type == "pick_place":
-            assert self.task.object_name is not None and self.task.target_location is not None
-            obj = self.state.objects.get(self.task.object_name)
-            return obj is not None and obj.location == self.task.target_location and self.state.holding is None
-        raise ValueError(f"Unsupported task type: {self.task.task_type}")
+        if t.task_type == "pick_place":
+            assert t.object_name is not None and t.target_location is not None
+            obj = self.state.objects.get(t.object_name)
+            return obj is not None and obj.location == t.target_location and self.state.holding is None
+        raise ValueError(f"Unsupported task type: {t.task_type}")
 
     def _update_pending_auto_success(self) -> None:
         self._pending_auto_success = self._task_already_satisfied()
@@ -1228,25 +1277,39 @@ class RestaurantSymbolicEnv(Env):
             bread_spread_vec[self.object_name_index[self.state.bread_spread]] = 1.0
         pieces.append(bread_spread_vec)
 
+        task_enc = self._task_obs_encoding(self.task)
+        pieces.append(task_enc)
+        return np.concatenate(pieces, axis=0)
+
+    def _task_obs_encoding(self, task: RestaurantTask) -> np.ndarray:
         task_type_vec = np.zeros((len(self.task_types),), dtype=np.float32)
-        task_type_vec[self.task_type_index[self.task.task_type]] = 1.0
+        task_type_vec[self.task_type_index[task.task_type]] = 1.0
         target_location_vec = np.zeros((self.num_locations + 1,), dtype=np.float32)
-        if self.task.target_location is None:
+        if task.target_location is None:
             target_location_vec[self.none_location_index] = 1.0
         else:
-            target_location_vec[self.location_index[self.task.target_location]] = 1.0
+            target_location_vec[self.location_index[task.target_location]] = 1.0
         target_kind_vec = np.zeros((len(self.object_kinds) + 1,), dtype=np.float32)
-        if self.task.target_kind is None:
+        if task.target_kind is None:
             target_kind_vec[-1] = 1.0
         else:
-            target_kind_vec[self.object_kind_index[self.task.target_kind]] = 1.0
+            target_kind_vec[self.object_kind_index[task.target_kind]] = 1.0
         target_object_vec = np.zeros((self.num_objects + 1,), dtype=np.float32)
-        if self.task.object_name is None:
+        if task.object_name is None:
             target_object_vec[self.none_object_index] = 1.0
         else:
-            target_object_vec[self.object_name_index[self.task.object_name]] = 1.0
-        pieces.extend([task_type_vec, target_location_vec, target_kind_vec, target_object_vec])
-        return np.concatenate(pieces, axis=0)
+            target_object_vec[self.object_name_index[task.object_name]] = 1.0
+        return np.concatenate([task_type_vec, target_location_vec, target_kind_vec, target_object_vec], axis=0)
+
+    @property
+    def task_obs_offset(self) -> int:
+        return (
+            self.observation_space.shape[0]
+            - len(self.task_types)
+            - (self.num_locations + 1)
+            - (len(self.object_kinds) + 1)
+            - (self.num_objects + 1)
+        )
 
     def _action_mask_state_key(self) -> tuple[object, ...]:
         object_state = []

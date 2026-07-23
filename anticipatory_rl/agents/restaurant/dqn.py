@@ -101,6 +101,17 @@ class OptimizeStats:
     value_vs_meanq_gap: float = float("nan")
 
 
+@dataclass
+class TaskExpectationContext:
+    """Pre-computed context for zero-variance boundary bootstrap."""
+    n_tasks: int
+    probabilities: torch.Tensor      # (n_tasks,) on device
+    obs_slices: torch.Tensor         # (n_tasks, task_obs_dim) on device
+    obs_offset: int
+    auto_complete_action: dict       # action dict with auto_complete type + none indices
+    auto_complete_masks: dict        # masks with only auto_complete valid
+
+
 class RestaurantQNetwork(nn.Module):
     def __init__(
         self,
@@ -357,9 +368,11 @@ def _store_transition(
     next_obs: np.ndarray,
     next_masks: Dict[str, np.ndarray],
     transition_done: bool,
-    success: bool,
+    task_boundary: bool,
+    next_auto_satisfied_mask: torch.Tensor | None = None,
 ) -> None:
     """Append one transition to the replay buffer (shared by training loop and oracle seeding)."""
+    auto_mask = next_auto_satisfied_mask if next_auto_satisfied_mask is not None else torch.zeros(1)
     replay.add(
         TensorDict({
             "state": torch.tensor(np.asarray(obs, dtype=np.float32)),
@@ -378,7 +391,8 @@ def _store_transition(
             "next_object1_mask": torch.tensor(np.asarray(next_masks["valid_object1_mask"], dtype=np.float32)),
             "next_location_mask": torch.tensor(np.asarray(next_masks["valid_location_mask"], dtype=np.float32)),
             "next_object2_mask": torch.tensor(np.asarray(next_masks["valid_object2_mask"], dtype=np.float32)),
-            "task_boundary": torch.tensor(float(success)),
+            "task_boundary": torch.tensor(float(task_boundary)),
+            "next_auto_satisfied_mask": auto_mask,
         }, batch_size=torch.Size([]))
     )
 
@@ -407,6 +421,33 @@ def _auto_complete_replay_action_and_masks(
     if "valid_action_mask" in replay_masks:
         replay_masks["valid_action_mask"] = replay_masks["valid_action_type_mask"].copy()
     return action, replay_masks
+
+
+def _build_task_expectation_context(env, device: torch.device) -> TaskExpectationContext:
+    enumerated = env.enumerate_task_distribution()
+    n_tasks = len(enumerated)
+    probabilities = torch.tensor([p for _, p in enumerated], dtype=torch.float32, device=device)
+    obs_slices = torch.stack([
+        torch.tensor(env._task_obs_encoding(task), dtype=torch.float32)
+        for task, _ in enumerated
+    ]).to(device)
+
+    auto_action, auto_masks = _auto_complete_replay_action_and_masks(env, env._empty_action_masks())
+    auto_masks_t = {
+        "action_type_mask": torch.tensor(auto_masks["valid_action_type_mask"], dtype=torch.float32, device=device),
+        "object1_mask": torch.tensor(auto_masks["valid_object1_mask"], dtype=torch.float32, device=device),
+        "location_mask": torch.tensor(auto_masks["valid_location_mask"], dtype=torch.float32, device=device),
+        "object2_mask": torch.tensor(auto_masks["valid_object2_mask"], dtype=torch.float32, device=device),
+    }
+
+    return TaskExpectationContext(
+        n_tasks=n_tasks,
+        probabilities=probabilities,
+        obs_slices=obs_slices,
+        obs_offset=env.task_obs_offset,
+        auto_complete_action=auto_action,
+        auto_complete_masks=auto_masks_t,
+    )
 
 
 def _planner_action_to_env_action(env: RestaurantSymbolicEnv, action: Tuple[str, List[str]]) -> Dict[str, int]:
@@ -449,6 +490,7 @@ def _persistent_oracle_rollout(
     timeout_s: float = 10.0,
     transition_store: ReplayBuffer | None = None,
     env_reset_tasks: int = 200,
+    n_tasks: int = 1,
 ) -> Dict[str, object]:
     """Persistent-world myopic oracle roll-out.
 
@@ -507,7 +549,8 @@ def _persistent_oracle_rollout(
             if transition_store is not None:
                 _store_transition(
                     transition_store, obs, action, reward, masks,
-                    next_obs, next_masks, transition_done, success,
+                    next_obs, next_masks, transition_done, bool(success or truncated),
+                    next_auto_satisfied_mask=torch.zeros(n_tasks, dtype=torch.float32),
                 )
                 stored += 1
             plan_rewards.append(float(reward))
@@ -534,6 +577,7 @@ def _seed_replay_with_oracle(
     alias: str = "seq-sat-lama-2011",
     timeout_s: float = 10.0,
     env_reset_tasks: int = 200,
+    n_tasks: int = 1,
 ) -> int:
     """Thin wrapper around ``_persistent_oracle_rollout`` for replay seeding.
 
@@ -542,7 +586,7 @@ def _seed_replay_with_oracle(
     result = _persistent_oracle_rollout(
         env, n_outcomes, max_steps, seed_base,
         planner_path, domain_path, alias=alias, timeout_s=timeout_s,
-        transition_store=replay, env_reset_tasks=env_reset_tasks,
+        transition_store=replay, env_reset_tasks=env_reset_tasks, n_tasks=n_tasks,
     )
     return int(result["stored"])
 
@@ -805,6 +849,86 @@ def _select_greedy_actions_batch(
     )
 
 
+def _compute_weighted_next_q(
+    q_net: RestaurantQNetwork,
+    target_net: RestaurantQNetwork,
+    td: TensorDict,
+    task_ctx: TaskExpectationContext,
+    boundary_mask: torch.Tensor,
+    device: torch.device,
+) -> torch.Tensor:
+    n_boundary = int(boundary_mask.sum().item())
+    n_tasks = task_ctx.n_tasks
+    obs_dim = td["next_state"].shape[1]
+    world_dim = task_ctx.obs_offset
+
+    world_obs = td["next_state"][boundary_mask, :world_dim]
+
+    world_expanded = world_obs.unsqueeze(1).expand(-1, n_tasks, -1)
+    task_expanded = task_ctx.obs_slices.unsqueeze(0).expand(n_boundary, -1, -1)
+    all_obs = torch.cat([world_expanded, task_expanded], dim=-1).reshape(n_boundary * n_tasks, obs_dim)
+
+    def expand_mask(m):
+        return m[boundary_mask].unsqueeze(1).expand(-1, n_tasks, *m.shape[1:]).reshape(n_boundary * n_tasks, *m.shape[1:])
+
+    normal_atm = expand_mask(td["next_action_type_mask"])
+    normal_o1m = expand_mask(td["next_object1_mask"])
+    normal_lm = expand_mask(td["next_location_mask"])
+    normal_o2m = expand_mask(td["next_object2_mask"])
+
+    auto_mask = td["next_auto_satisfied_mask"][boundary_mask].reshape(n_boundary, n_tasks)
+
+    # Policy Q for all (n_boundary * n_tasks) combos
+    next_at, next_o1, next_loc, next_o2 = q_net(
+        all_obs,
+        action_type_masks=normal_atm,
+        object1_masks=normal_o1m,
+        location_masks=normal_lm,
+        object2_masks=normal_o2m,
+        decode_greedy=True,
+    )
+    policy_q = target_net(
+        all_obs,
+        action_types=next_at,
+        object1=next_o1,
+        location=next_loc,
+        object2=next_o2,
+        action_type_masks=normal_atm,
+        object1_masks=normal_o1m,
+        location_masks=normal_lm,
+        object2_masks=normal_o2m,
+    ).reshape(n_boundary, n_tasks)
+
+    # V(s', τ_k) via auto_complete — per-task since encoder is task-conditioned
+    ac_atm = task_ctx.auto_complete_masks["action_type_mask"].unsqueeze(0).expand(n_boundary * n_tasks, -1)
+    ac_o1m = task_ctx.auto_complete_masks["object1_mask"].unsqueeze(0).expand(n_boundary * n_tasks, -1, -1)
+    ac_lm = task_ctx.auto_complete_masks["location_mask"].unsqueeze(0).expand(n_boundary * n_tasks, -1, -1)
+    ac_o2m = task_ctx.auto_complete_masks["object2_mask"].unsqueeze(0).expand(n_boundary * n_tasks, -1, -1, -1)
+
+    ac_action = task_ctx.auto_complete_action
+    ac_at = torch.full((n_boundary * n_tasks, 1), ac_action["action_type"], dtype=torch.long, device=device)
+    ac_o1 = torch.full((n_boundary * n_tasks, 1), ac_action["object1"], dtype=torch.long, device=device)
+    ac_loc = torch.full((n_boundary * n_tasks, 1), ac_action["location"], dtype=torch.long, device=device)
+    ac_o2 = torch.full((n_boundary * n_tasks, 1), ac_action["object2"], dtype=torch.long, device=device)
+
+    v_per_task = target_net(
+        all_obs,
+        action_types=ac_at,
+        object1=ac_o1,
+        location=ac_loc,
+        object2=ac_o2,
+        action_type_masks=ac_atm,
+        object1_masks=ac_o1m,
+        location_masks=ac_lm,
+        object2_masks=ac_o2m,
+    ).reshape(n_boundary, n_tasks)
+
+    selected_q = torch.where(auto_mask.bool(), v_per_task, policy_q)
+    weighted_q = (selected_q * task_ctx.probabilities.unsqueeze(0)).sum(dim=1)
+
+    return weighted_q.unsqueeze(1)
+
+
 def _optimize(
     q_net: RestaurantQNetwork,
     target_net: RestaurantQNetwork,
@@ -814,6 +938,7 @@ def _optimize(
     device: torch.device,
     demo_replay: ReplayBuffer | None = None,
     demo_fraction: float = 0.0,
+    task_ctx: TaskExpectationContext | None = None,
 ) -> OptimizeStats | None:
     if len(replay) < args.batch_size:
         return None
@@ -860,25 +985,52 @@ def _optimize(
         object2_masks=td["object2_mask"],
     )
     with torch.no_grad():
-        next_action_type, next_object1, next_location, next_object2 = q_net(
-            td["next_state"],
-            action_type_masks=td["next_action_type_mask"],
-            object1_masks=td["next_object1_mask"],
-            location_masks=td["next_location_mask"],
-            object2_masks=td["next_object2_mask"],
-            decode_greedy=True,
-        )
-        next_q = target_net(
-            td["next_state"],
-            action_types=next_action_type,
-            object1=next_object1,
-            location=next_location,
-            object2=next_object2,
-            action_type_masks=td["next_action_type_mask"],
-            object1_masks=td["next_object1_mask"],
-            location_masks=td["next_location_mask"],
-            object2_masks=td["next_object2_mask"],
-        )
+        boundary_mask = (td["task_boundary"] == 1) & (td["done"] == 0)
+
+        if task_ctx is not None and boundary_mask.any():
+            weighted_q = _compute_weighted_next_q(q_net, target_net, td, task_ctx, boundary_mask, device)
+
+            next_action_type, next_object1, next_location, next_object2 = q_net(
+                td["next_state"],
+                action_type_masks=td["next_action_type_mask"],
+                object1_masks=td["next_object1_mask"],
+                location_masks=td["next_location_mask"],
+                object2_masks=td["next_object2_mask"],
+                decode_greedy=True,
+            )
+            single_q = target_net(
+                td["next_state"],
+                action_types=next_action_type,
+                object1=next_object1,
+                location=next_location,
+                object2=next_object2,
+                action_type_masks=td["next_action_type_mask"],
+                object1_masks=td["next_object1_mask"],
+                location_masks=td["next_location_mask"],
+                object2_masks=td["next_object2_mask"],
+            )
+            next_q = single_q.clone()
+            next_q[boundary_mask] = weighted_q
+        else:
+            next_action_type, next_object1, next_location, next_object2 = q_net(
+                td["next_state"],
+                action_type_masks=td["next_action_type_mask"],
+                object1_masks=td["next_object1_mask"],
+                location_masks=td["next_location_mask"],
+                object2_masks=td["next_object2_mask"],
+                decode_greedy=True,
+            )
+            next_q = target_net(
+                td["next_state"],
+                action_types=next_action_type,
+                object1=next_object1,
+                location=next_location,
+                object2=next_object2,
+                action_type_masks=td["next_action_type_mask"],
+                object1_masks=td["next_object1_mask"],
+                location_masks=td["next_location_mask"],
+                object2_masks=td["next_object2_mask"],
+            )
         targets = td["reward"].unsqueeze(1) + args.gamma * (1.0 - td["done"].unsqueeze(1)) * next_q
 
     td_error = q_values - targets
@@ -1058,6 +1210,12 @@ def train(args: argparse.Namespace) -> Path:
     target_net.load_state_dict(q_net.state_dict())
     target_net.eval()
     optimizer = optim.Adam(q_net.parameters(), lr=args.lr)
+
+    enumerated_tasks = env.enumerate_task_distribution()
+    task_ctx = None
+    if args.boundary_bootstrap == "weighted":
+        task_ctx = _build_task_expectation_context(env, device)
+        print(f"[train] Weighted boundary bootstrap: {task_ctx.n_tasks} tasks, obs_offset={task_ctx.obs_offset}")
     per_alpha = float(getattr(args, "per_alpha", 0.0) or 0.0)
     per_beta = float(getattr(args, "per_beta", 0.4) or 0.4)
     per_eps = float(getattr(args, "per_eps", 1e-6) or 1e-6)
@@ -1138,6 +1296,15 @@ def train(args: argparse.Namespace) -> Path:
         if args.tasks_per_episode > 1 and credit == "myopic":
             print("[train] WARNING: loading myopic demos (done=True per task) into anticipatory training "
                   "(tasks_per_episode > 1). Bootstrap mismatch — demos teach terminal targets.")
+        # Backward-compat: old demo .pt files lack next_auto_satisfied_mask. Fill with zeros.
+        n_tasks_for_fill = len(enumerated_tasks)
+        missing_mask = 0
+        for td_item in offline_transitions:
+            if "next_auto_satisfied_mask" not in td_item.keys():
+                td_item["next_auto_satisfied_mask"] = torch.zeros(n_tasks_for_fill)
+                missing_mask += 1
+        if missing_mask > 0:
+            print(f"[train] Patched {missing_mask}/{offline_count} demo transitions with missing next_auto_satisfied_mask (filled zeros).")
         print(f"[train] Validated {offline_count} demo transitions from {demo_path}.")
 
     seed_oracle = int(getattr(args, "seed_replay_oracle", 0) or 0)
@@ -1164,7 +1331,7 @@ def train(args: argparse.Namespace) -> Path:
             target_buffer, oracle_env, n_outcomes=seed_oracle, max_steps=args.max_steps_per_task,
             seed_base=args.seed + 3_000_000,
             planner_path=args.planner_path, domain_path=args.domain_path,
-            env_reset_tasks=args.env_reset_tasks,
+            env_reset_tasks=args.env_reset_tasks, n_tasks=len(enumerated_tasks),
         )
         dest = "protected demo buffer" if demo_fraction > 0.0 else "main replay"
         print(f"[train] Seeded {dest} with {stored} oracle transitions from {seed_oracle} outcomes (demo_fraction={demo_fraction}).")
@@ -1254,11 +1421,21 @@ def train(args: argparse.Namespace) -> Path:
         if bool(next_info.get("next_auto_satisfied", False)):
             _, store_next_masks = _auto_complete_replay_action_and_masks(env, next_masks)
         transition_done = bool(bootstrap_done)
-        _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, success)
+
+        if (success or truncated) and args.boundary_bootstrap == "weighted" and task_ctx is not None:
+            next_auto_mask = torch.zeros(task_ctx.n_tasks, dtype=torch.float32)
+            for k, (tau_k, _) in enumerate(enumerated_tasks):
+                if env._task_already_satisfied(task=tau_k):
+                    next_auto_mask[k] = 1.0
+        else:
+            next_auto_mask = torch.zeros(len(enumerated_tasks), dtype=torch.float32)
+
+        _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, bool(success or truncated),
+                          next_auto_satisfied_mask=next_auto_mask)
         if reward > 0.0:
             positive_reward_transitions += 1
 
-        optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device, demo_replay=demo_replay, demo_fraction=demo_fraction)
+        optimize_stats = _optimize(q_net, target_net, replay, optimizer, args, device, demo_replay=demo_replay, demo_fraction=demo_fraction, task_ctx=task_ctx)
         if per_alpha > 0.0:
             frac = min(1.0, float(global_step) / max(1, args.total_steps))
             current_beta = per_beta + (1.0 - per_beta) * frac
@@ -1508,6 +1685,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--per-beta", type=float, default=0.4, help="PER β initial value (annealed linearly to 1.0 over total_steps).")
     parser.add_argument("--per-eps", type=float, default=1e-6, help="PER ε added to |TD| before raising to α.")
     parser.add_argument("--per-clip", type=float, default=10.0, help="Clip |TD| at this value before computing PER priority (breaks feedback loop).")
+    parser.add_argument("--boundary-bootstrap", choices=["single", "weighted"], default="weighted",
+                        help="Boundary bootstrap mode: single (one env-drawn tau') or weighted (exact E over P)")
     return parser
 
 

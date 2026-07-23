@@ -63,31 +63,23 @@ def _seed_replay_with_anticipatory_oracle(
     outcomes = 0
     world_index = 0
 
-    # We need to generate a fixed sequence of tasks upfront so we can look ahead
-    rng = np.random.RandomState(seed_base)
-    # Generate extra tasks to allow lookahead at the end
     total_tasks_needed = n_outcomes + K + (n_outcomes // env_reset_tasks) * K
-    
-    # We create a dummy env just to sample IID tasks cleanly, exactly synchronized with env resets
-    dummy_env = RestaurantSymbolicEnv(
-        config_path=config_path,
-        rng_seed=seed_base,
-    )
-    
-    tasks_pool = []
+
+    dummy_env = RestaurantSymbolicEnv(config_path=config_path, rng_seed=seed_base)
+    tasks_pool: List[RestaurantTask] = []
     dummy_world_index = 0
     dummy_env.reset(seed=seed_base + 100_003 * dummy_world_index)
     dummy_world_index += 1
-    
+
     for i in range(total_tasks_needed):
         if env_reset_tasks > 0 and i > 0 and i % env_reset_tasks == 0:
             dummy_env.reset(seed=seed_base + 100_003 * dummy_world_index)
             dummy_world_index += 1
         dummy_env._resample_task()
         tasks_pool.append(dummy_env.task)
-        
-    env._task_library = tasks_pool
-    env._task_library_index = 0
+
+    task_index = 0
+    n_tasks = len(env.enumerate_task_distribution())
 
     obs, info = env.reset(seed=seed_base + 100_003 * world_index)
     world_index += 1
@@ -96,40 +88,48 @@ def _seed_replay_with_anticipatory_oracle(
         if env_reset_tasks > 0 and outcomes > 0 and outcomes % env_reset_tasks == 0:
             obs, info = env.reset(seed=seed_base + 100_003 * world_index)
             world_index += 1
+            task_index = outcomes
+
+        env.set_task(
+            tasks_pool[task_index].task_type,
+            target_location=tasks_pool[task_index].target_location,
+            target_kind=tasks_pool[task_index].target_kind,
+            object_name=tasks_pool[task_index].object_name,
+            task_source="library",
+        )
+        env._task_steps = 0
+        env._pending_auto_success = env._task_already_satisfied()
+        obs, info = env._obs(), env._info(success=False)
 
         if env._pending_auto_success:
             obs, _, _, _, info = env.step(env.action_space.sample())
             outcomes += 1
+            task_index += 1
             continue
 
         state = RestaurantPlannerState.from_env(env)
-        
-        # Lookahead tasks
+
         current_task = env.task
-        future_tasks = env._task_library[env._task_library_index : env._task_library_index + K - 1]
+        seg_end = ((outcomes // env_reset_tasks) + 1) * env_reset_tasks if env_reset_tasks > 0 else len(tasks_pool)
+        future_tasks = tasks_pool[task_index + 1 : min(task_index + K, seg_end)]
         window = [current_task] + future_tasks
 
         result = solve_restaurant_sequence_with_fd(
             env, state, window,
             planner_path=planner_path, domain_path=domain_path, timeout_s=timeout_s,
         )
-        
+
         if not result.success:
             print(f"Planner failed on task {outcomes}. Advancing without transition...")
-            env._resample_task()
-            env._task_steps = 0
-            obs, info = env._obs(), env._info(success=False)
             outcomes += 1
+            task_index += 1
             continue
 
-        # Execute ONLY the first task's physical actions
         first_segment = result.task_segments[0]
         if len(first_segment.physical_actions) > max_steps:
             print(f"Planner produced >max_steps on task {outcomes}. Advancing...")
-            env._resample_task()
-            env._task_steps = 0
-            obs, info = env._obs(), env._info(success=False)
             outcomes += 1
+            task_index += 1
             continue
 
         for plan_action in first_segment.physical_actions:
@@ -140,15 +140,21 @@ def _seed_replay_with_anticipatory_oracle(
                 raise RuntimeError(f"FD plan action invalid in env: {plan_action} → {action}")
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
-            
-            task_boundary = bool(success)
-            # Anticipatory demos ONLY set done=True at the env-reset horizon (or on truncation).
-            # If we set done=True on every task, it trains a myopic value function!
-            transition_done = bool(truncated or (task_boundary and (outcomes + 1) % env_reset_tasks == 0))
-            
+
+            task_boundary = bool(success or truncated)
+            at_horizon = env_reset_tasks > 0 and (outcomes + 1) % env_reset_tasks == 0
+            transition_done = bool(at_horizon)
+
+            next_auto_mask = torch.zeros(n_tasks, dtype=torch.float32)
+            if task_boundary:
+                for k, (tau_k, _) in enumerate(env.enumerate_task_distribution()):
+                    if env._task_already_satisfied(task=tau_k):
+                        next_auto_mask[k] = 1.0
+
             _store_transition(
                 replay, obs, action, reward, masks,
                 next_obs, next_masks, transition_done, task_boundary,
+                next_auto_satisfied_mask=next_auto_mask,
             )
             stored += 1
             obs, info = next_obs, next_info
@@ -156,6 +162,7 @@ def _seed_replay_with_anticipatory_oracle(
                 break
 
         outcomes += 1
+        task_index += 1
         print(f"Generated {outcomes}/{n_outcomes} outcomes ({stored} transitions so far)")
 
     return stored
