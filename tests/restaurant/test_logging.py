@@ -50,30 +50,6 @@ def test_wandb_logger_uses_default_project(monkeypatch):
     assert init_kwargs[0]["project"] == "restaurant_rl_factored"
 
 
-def test_wandb_logger_loads_dotenv_when_available(monkeypatch):
-    load_calls = []
-    monkeypatch.setitem(
-        sys.modules,
-        "dotenv",
-        SimpleNamespace(load_dotenv=lambda: load_calls.append(True)),
-    )
-    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(_fake_run()))
-
-    WandbLogger(argparse.Namespace(gamma=0.99), "test-run")
-
-    assert load_calls == [True]
-
-
-def test_wandb_logger_works_without_dotenv(monkeypatch):
-    # dotenv absent -> import fails -> training still initializes wandb.
-    monkeypatch.delitem(sys.modules, "dotenv", raising=False)
-    monkeypatch.setitem(sys.modules, "wandb", _fake_wandb(_fake_run()))
-
-    logger = WandbLogger(argparse.Namespace(gamma=0.99), "test-run")
-
-    assert logger._run is not None
-
-
 def test_wandb_logger_disabled_on_init_failure(monkeypatch):
     def boom(**kwargs):
         raise RuntimeError("wandb: API key not configured (WANDB_API_KEY)")

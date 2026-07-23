@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
 
 
@@ -50,29 +48,3 @@ def sample_task(
 
     target_kind = env._weighted_choice(env.wash_kind_distribution, env.object_kinds, rng=trng)
     return RestaurantTask(task_type=ttype, target_location=None, target_kind=target_kind)
-
-
-def generate_task_library(
-    env: RestaurantSymbolicEnv,
-    seed: int,
-    n_tasks: int,
-) -> List[Dict[str, Any]]:
-    """Pre-generate a fixed task sequence from a seeded RNG.
-
-    Resets the env (seeding env._rng and env._task_rng) then samples n_tasks tasks
-    via sample_task(env). Returns dicts with keys task_type, target_location,
-    target_kind, object_name — the shape env._parse_task_library consumes.
-
-    Test-only utility after the task_rng refactor (train/infer use online task_rng).
-    """
-    env.reset(seed=seed)
-    library: List[Dict[str, Any]] = []
-    for _ in range(n_tasks):
-        task = sample_task(env)
-        library.append({
-            "task_type": task.task_type,
-            "target_location": task.target_location,
-            "target_kind": task.target_kind,
-            "object_name": task.object_name,
-        })
-    return library

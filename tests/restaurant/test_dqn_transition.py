@@ -132,3 +132,28 @@ def test_truncated_and_auto_success_mutually_exclusive(env: RestaurantSymbolicEn
         _, _, _, truncated, info = env.step(action)
         auto_success = bool(info.get("auto_success", False))
         assert not (truncated and auto_success), "truncated and auto_success both True on same step"
+
+
+def test_env_truncation_preserves_world(env):
+    env.set_task("serve_water", target_location="servingtable")
+    agent_before = env.state.agent_location
+    holding_before = env.state.holding
+    locations_before = {n: o.location for n, o in env.state.objects.items()}
+
+    noop = {
+        "action_type": env.action_type_index["move"],
+        "object1": env.none_object_index,
+        "location": env.none_location_index,
+        "object2": env.none_object_index,
+    }
+    truncated = False
+    for _ in range(env.max_steps_per_task):
+        _, _, _, truncated, _ = env.step(noop)
+        if truncated:
+            break
+    assert truncated
+
+    assert env.state.agent_location == agent_before
+    assert env.state.holding == holding_before
+    for name, loc in locations_before.items():
+        assert env.state.objects[name].location == loc

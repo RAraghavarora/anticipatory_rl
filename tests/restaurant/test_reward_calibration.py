@@ -28,7 +28,4 @@ def test_calibration_formula():
         sum((-r) * (gamma ** (t - 1)) for t, r in enumerate(plan_b)),
     )
     assert R_star == pytest.approx((1.0 + margin) * expected_D)
-
-
-def test_calibration_formula_empty():
     assert _calibrate_R_star([], gamma=0.95, margin=0.2) == 0.0

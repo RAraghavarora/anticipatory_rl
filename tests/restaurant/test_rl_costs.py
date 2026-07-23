@@ -34,6 +34,8 @@ def test_rl_costs_match_yaml(costs):
     assert env.pour_cost == costs["pour"]
     assert env.refill_cost == costs["refill_water"]
     assert env.drain_cost == costs["drain"]
+    assert env._travel_cost("countertop", "fountain") == pytest.approx(9 * costs["travel_scale"])
+    assert env._travel_cost("countertop", "coffeemachine") == pytest.approx(1 * costs["travel_scale"])
 
 
 def test_pddl_cost_ratios():
@@ -48,12 +50,6 @@ def test_pddl_cost_ratios():
     assert env.pour_cost / PDDL_ACTION_COSTS["pour"] == pytest.approx(0.01)
     assert env.refill_cost / PDDL_ACTION_COSTS["refill_water"] == pytest.approx(0.01)
     assert env.drain_cost / PDDL_ACTION_COSTS["drain"] == pytest.approx(0.01)
-
-
-def test_move_cost_normalized():
-    env = RestaurantSymbolicEnv(config_path=CONFIG_PATH)
-    assert env._travel_cost("countertop", "fountain") == pytest.approx(9 * 0.25)
-    assert env._travel_cost("countertop", "coffeemachine") == pytest.approx(1 * 0.25)
 
 
 def test_train_infer_cost_parity(monkeypatch):

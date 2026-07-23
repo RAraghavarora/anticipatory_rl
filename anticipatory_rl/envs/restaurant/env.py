@@ -242,9 +242,6 @@ class RestaurantSymbolicEnv(Env):
         # TODO: We can have separate cost for metrics and rewards.
         # See PDDL_ACTION_COSTS in pddl_domain.py
 
-        # ponytail: _task_library unused by train/infer after task_rng fix; kept for tests.
-        self._task_library: List[RestaurantTask] = []
-        self._task_library_index = 0
         self._task_source = "iid"
         self._pending_auto_success = False
         self._task_steps = 0
@@ -287,14 +284,6 @@ class RestaurantSymbolicEnv(Env):
             self._apply_schema(self._base_config)
             self._configure_paper2_cost(self._base_config.get("paper2_cost", {}))
             self._active_layout_id = None
-
-        task_library_cfg = options.get("task_library")
-        if isinstance(task_library_cfg, Sequence) and not isinstance(task_library_cfg, (str, bytes)):
-            self._task_library = self._parse_task_library(task_library_cfg)
-            self._task_library_index = 0
-        elif bool(options.get("clear_task_library", False)):
-            self._task_library = []
-            self._task_library_index = 0
 
         task_distribution_override = options.get("task_distribution")
         if isinstance(task_distribution_override, Mapping):
@@ -506,8 +495,6 @@ class RestaurantSymbolicEnv(Env):
                         raise ValueError(f"Unknown reset override fill for {name}: {filled_with}")
                     override["filled_with"] = str(filled_with)
                 self.reset_object_overrides[str(name)] = override
-        self._task_library = self._parse_task_library(schema.get("task_library", []))
-        self._task_library_index = 0
 
         self.action_space = spaces.Dict(
             {
@@ -678,35 +665,6 @@ class RestaurantSymbolicEnv(Env):
             }
         return result
 
-    def _parse_task_library(self, task_library_cfg: Any) -> List[RestaurantTask]:
-        parsed: List[RestaurantTask] = []
-        if not isinstance(task_library_cfg, Sequence) or isinstance(task_library_cfg, (str, bytes)):
-            return parsed
-        for item in task_library_cfg:
-            if not isinstance(item, Mapping):
-                continue
-            task_type = str(item.get("task_type", ""))
-            if task_type not in self.task_type_index:
-                continue
-            target_location = item.get("target_location")
-            target_kind = item.get("target_kind")
-            object_name = item.get("object_name")
-            if target_location is not None and str(target_location) not in self.location_index:
-                continue
-            if target_kind is not None and str(target_kind) not in self.object_kind_index:
-                continue
-            if object_name is not None and str(object_name) not in self.object_name_index:
-                continue
-            parsed.append(
-                RestaurantTask(
-                    task_type=task_type,
-                    target_location=None if target_location is None else str(target_location),
-                    target_kind=None if target_kind is None else str(target_kind),
-                    object_name=None if object_name is None else str(object_name),
-                )
-            )
-        return parsed
-
     def _default_agent_location(self) -> str:
         if hasattr(self, "location_index") and "kitchen_counter" in self.location_index:
             return "kitchen_counter"
@@ -718,34 +676,19 @@ class RestaurantSymbolicEnv(Env):
         if not self._pending_auto_success:
             return
         for _ in range(100):
-            if self._task_library:
-                self._resample_task()
-            else:
-                from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
-                task = _sample(self)
-                self.set_task(
-                    task.task_type,
-                    target_location=task.target_location,
-                    target_kind=task.target_kind,
-                    object_name=task.object_name,
-                    task_source="iid",
-                )
-            if not self._pending_auto_success:
-                return
-
-    def _resample_task(self) -> None:
-        if self._task_library:
-            task = self._task_library[self._task_library_index % len(self._task_library)]
-            self._task_library_index += 1
+            from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
+            task = _sample(self)
             self.set_task(
                 task.task_type,
                 target_location=task.target_location,
                 target_kind=task.target_kind,
                 object_name=task.object_name,
-                task_source="library",
+                task_source="iid",
             )
-            return
+            if not self._pending_auto_success:
+                return
 
+    def _resample_task(self) -> None:
         from anticipatory_rl.envs.restaurant.task_sampling import sample_task as _sample
 
         task = _sample(self)

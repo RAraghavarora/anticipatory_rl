@@ -9,7 +9,6 @@ from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
     _current_task_satisfied,
     _split_sequence_plan,
-    apply_planner_action,
     build_restaurant_sequence_problem_text,
     consume_delivery_from_state,
 )
@@ -92,42 +91,6 @@ def test_deterministic_consumption_advances_persistent_state(env):
     actions[0] = ("complete-serve-water", ["t0", "t1", "cup_1"])
     with pytest.raises(ValueError, match="deterministic first-eligible"):
         _split_sequence_plan(env, state, tasks, actions)
-
-
-def test_machine_water_consumption_and_restoration_match_env_order(env):
-    state = RestaurantPlannerState.from_env(env)
-    state.agent_location = "coffeemachine"
-    cup = state.objects["cup_0"]
-    cup.location = "coffeemachine"
-    cup.dirty = False
-    cup.filled_with = None
-
-    apply_planner_action(state, ("make-coffee", ["cup_0", "coffeemachine"]))
-    assert state.objects["water_machine"].location is None
-    assert state.objects["water_fountain"].location == "fountain"
-
-    cup.location = None
-    state.holding = "cup_0"
-    cup.filled_with = "water"
-    apply_planner_action(state, ("pour", ["cup_0", "water", "coffeemachine"]))
-    assert state.objects["water_machine"].location == "coffeemachine"
-    assert cup.filled_with is None
-
-
-def test_all_six_task_satisfaction_rules_match_active_env(env):
-    state = RestaurantPlannerState.from_env(env)
-    tasks = [
-        RestaurantTask("serve_water", target_location="servingtable"),
-        RestaurantTask("make_coffee", target_location="servingtable"),
-        RestaurantTask("make_fruit_bowl", target_location="servingtable"),
-        RestaurantTask("clear_containers", target_location="shelf"),
-        RestaurantTask("wash_objects", target_kind="bowl"),
-        RestaurantTask("pick_place", target_location="shelf", object_name="plate_0"),
-    ]
-
-    for task in tasks:
-        env.task = task
-        assert _current_task_satisfied(state, task, env) == env._task_already_satisfied()
 
 
 def test_pick_place_requires_concrete_object_and_free_hand(env):

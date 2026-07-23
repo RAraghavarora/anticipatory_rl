@@ -245,3 +245,27 @@ def test_future_task_enumeration_uses_fixed_pick_place_distribution():
     assert sum(probability for _, probability in pick_place) == pytest.approx(
         env.task_distribution["pick_place"] / sum(env.task_distribution.values())
     )
+
+
+def test_sample_object_layout_reset_seed_determinism():
+    env_a = RestaurantSymbolicEnv(config_path=CONFIG)
+    env_b = RestaurantSymbolicEnv(config_path=CONFIG)
+    env_a.reset(seed=0)
+    env_b.reset(seed=0)
+
+    for _ in range(20):
+        sample_task(env_a)
+    for _ in range(5):
+        sample_task(env_b)
+
+    env_a.reset(seed=42)
+    env_b.reset(seed=42)
+
+    assert env_a.state.agent_location == env_b.state.agent_location
+    assert set(env_a.state.objects) == set(env_b.state.objects)
+    for name in env_a.state.objects:
+        oa = env_a.state.objects[name]
+        ob = env_b.state.objects[name]
+        assert oa.location == ob.location, f"{name} location"
+        assert oa.dirty == ob.dirty, f"{name} dirty"
+        assert oa.filled_with == ob.filled_with, f"{name} filled_with"

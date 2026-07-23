@@ -160,17 +160,6 @@ def test_credit_horizon_documented(monkeypatch):
     )
 
 
-def test_generate_task_library_deterministic():
-    """generate_task_library must be a pure function of (env config, seed, n_tasks):
-    two calls with the same seed produce identical task libraries."""
-    from anticipatory_rl.envs.restaurant.task_sampling import generate_task_library
-
-    env = RestaurantSymbolicEnv(config_path="configs/restaurant/toy_level_3.yaml")
-    first = generate_task_library(env, seed=0, n_tasks=50)
-    second = generate_task_library(env, seed=0, n_tasks=50)
-    assert first == second, "generate_task_library is not deterministic across calls with the same seed"
-
-
 def test_inference_pairing(tmp_path, monkeypatch):
     """run_compare must produce paired task sequences across two different-weight
     agents. End-to-end inference pairing: both agents reseed env._task_rng on the
