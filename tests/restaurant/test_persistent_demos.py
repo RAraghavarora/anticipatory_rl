@@ -166,7 +166,7 @@ def test_plan_terminal_flags(monkeypatch):
     )
     assert len(collector.items) == 2
     assert float(collector.items[0]["done"]) == 0.0
-    assert float(collector.items[1]["done"]) == 1.0
+    assert float(collector.items[1]["done"]) == 0.0
 
 
 def test_world_reset_every_n_outcomes(monkeypatch):

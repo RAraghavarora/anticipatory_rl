@@ -3,8 +3,8 @@
 Guards the research-critical myopic-vs-anticipatory distinction:
 - _decide_task_transition: timeouts count toward both horizons but never wipe the
   world on per-task truncation; only the step-limit safety resets the world.
-- bootstrap_done: truncated alone NEVER sets it. For tpe=1 every boundary is
-  terminal; for tpe=200 only the 200-task reset / step-limit is terminal.
+- bootstrap_done: ONLY myopic task success sets it (success AND tpe<=1). All
+  artificial cutoffs (timeout, env_reset, step_limit) are non-terminal under PEB.
 - train(): a per-task timeout does NOT call env.reset() (world persists).
 - env.step(): truncated and auto_success are mutually exclusive by environment contract.
 """
@@ -46,7 +46,7 @@ def test_decide_myopic_success_terminal():
 def test_decide_myopic_timeout_terminal_no_world_wipe():
     t = _transition(success=False, truncated=True, tasks=0, tpe=1)
     assert t.episode_done_flag
-    assert t.bootstrap_done
+    assert not t.bootstrap_done
     assert not t.trunc_reset_flag
     assert t.tasks_since_reset == 0
 
@@ -62,7 +62,7 @@ def test_decide_env_reset_fires():
     t = _transition(success=True, truncated=False, tasks=199, env_tasks=199, tpe=200, env_reset=200)
     assert t.env_reset_flag
     assert t.episode_done_flag
-    assert t.bootstrap_done
+    assert not t.bootstrap_done
     assert t.env_tasks_since_reset == 0
 
 
@@ -71,7 +71,7 @@ def test_decide_step_limit_fires():
         success=False, truncated=False, tasks=5, env_tasks=5, steps=100, tpe=200, step_limit=100
     )
     assert t.trunc_reset_flag
-    assert t.bootstrap_done
+    assert not t.bootstrap_done
     assert t.tasks_since_reset == 0
     assert t.env_tasks_since_reset == 0
 
@@ -157,3 +157,32 @@ def test_env_truncation_preserves_world(env):
     assert env.state.holding == holding_before
     for name, loc in locations_before.items():
         assert env.state.objects[name].location == loc
+
+
+def test_timeout_replay_uses_old_task():
+    """Timeout splice: replay next_obs must carry old task, post-action world."""
+    import numpy as np
+    # Simulate the splice from the train loop (dqn.py lines 1423-1427)
+    obs = np.arange(132, dtype=np.float32)       # pre-step obs (old task in task slice)
+    next_obs = np.arange(132, 264, dtype=np.float32)  # post-step obs (env resampled → new task)
+    task_obs_offset = 100  # example split point
+
+    # Apply the same logic as the train loop
+    truncated, success = True, False
+    if truncated and not success:
+        replay_next_obs = next_obs.copy()
+        replay_next_obs[task_obs_offset:] = obs[task_obs_offset:]
+    else:
+        replay_next_obs = next_obs
+
+    # World slice (before offset) comes from post-action state
+    np.testing.assert_array_equal(replay_next_obs[:task_obs_offset], next_obs[:task_obs_offset])
+    # Task slice (after offset) comes from pre-step state (old task)
+    np.testing.assert_array_equal(replay_next_obs[task_obs_offset:], obs[task_obs_offset:])
+
+
+def test_myopic_and_anticipatory_timeout_parity():
+    """Both agents store timeout as done=0, task_boundary=0 (PEB)."""
+    for tpe in (1, 200):
+        t = _transition(success=False, truncated=True, tasks=0, tpe=tpe)
+        assert not t.bootstrap_done, f"tpe={tpe}: timeout should not be terminal"

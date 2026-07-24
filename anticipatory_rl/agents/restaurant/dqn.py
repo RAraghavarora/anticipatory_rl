@@ -68,18 +68,17 @@ def _decide_task_transition(
     if success or truncated:
         new_tasks += 1
         new_env_tasks += 1
+        if success and tasks_per_episode <= 1:
+            bootstrap_done = True
         if tasks_per_episode > 0 and new_tasks >= tasks_per_episode:
             episode_done_flag = True
-            bootstrap_done = True
             new_tasks = 0
         if env_reset_tasks is not None and env_reset_tasks > 0 and new_env_tasks >= env_reset_tasks:
             env_reset_flag = True
             episode_done_flag = True
-            bootstrap_done = True
             new_env_tasks = 0
     if episode_step_limit > 0 and steps_since_reset >= episode_step_limit:
         trunc_reset_flag = True
-        bootstrap_done = True
         new_tasks = 0
         new_env_tasks = 0
     return TaskTransition(episode_done_flag, env_reset_flag, trunc_reset_flag, bootstrap_done,
@@ -545,11 +544,11 @@ def _persistent_oracle_rollout(
                 raise RuntimeError(f"FD plan action invalid in env: {plan_action} → {action}")
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
-            transition_done = bool(success or truncated)
+            transition_done = bool(success)
             if transition_store is not None:
                 _store_transition(
                     transition_store, obs, action, reward, masks,
-                    next_obs, next_masks, transition_done, bool(success or truncated),
+                    next_obs, next_masks, transition_done, bool(success),
                     next_auto_satisfied_mask=torch.zeros(n_tasks, dtype=torch.float32),
                 )
                 stored += 1
@@ -1418,11 +1417,16 @@ def train(args: argparse.Namespace) -> Path:
             store_action, store_masks = _auto_complete_replay_action_and_masks(env, masks)
             replay_auto_complete_count += 1
         store_next_masks = next_masks
-        if bool(next_info.get("next_auto_satisfied", False)):
+        if bool(next_info.get("next_auto_satisfied", False)) and not truncated:
             _, store_next_masks = _auto_complete_replay_action_and_masks(env, next_masks)
         transition_done = bool(bootstrap_done)
+        if truncated and not success:
+            replay_next_obs = next_obs.copy()
+            replay_next_obs[env.task_obs_offset:] = obs[env.task_obs_offset:]
+        else:
+            replay_next_obs = next_obs
 
-        if (success or truncated) and args.boundary_bootstrap == "weighted" and task_ctx is not None:
+        if success and args.boundary_bootstrap == "weighted" and task_ctx is not None:
             next_auto_mask = torch.zeros(task_ctx.n_tasks, dtype=torch.float32)
             for k, (tau_k, _) in enumerate(enumerated_tasks):
                 if env._task_already_satisfied(task=tau_k):
@@ -1430,7 +1434,7 @@ def train(args: argparse.Namespace) -> Path:
         else:
             next_auto_mask = torch.zeros(len(enumerated_tasks), dtype=torch.float32)
 
-        _store_transition(replay, obs, store_action, reward, store_masks, next_obs, store_next_masks, transition_done, bool(success or truncated),
+        _store_transition(replay, obs, store_action, reward, store_masks, replay_next_obs, store_next_masks, transition_done, bool(success),
                           next_auto_satisfied_mask=next_auto_mask)
         if reward > 0.0:
             positive_reward_transitions += 1

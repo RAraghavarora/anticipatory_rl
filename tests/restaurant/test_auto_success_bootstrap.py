@@ -131,14 +131,14 @@ def test_myopic_auto_success_is_terminal_at_credit_boundary(env: RestaurantSymbo
     assert _bootstrap_done(success=success, tasks_per_episode=1)
 
 
-def test_50th_auto_success_is_terminal_at_world_boundary(env: RestaurantSymbolicEnv):
+def test_50th_auto_success_bootstraps_at_world_boundary(env: RestaurantSymbolicEnv):
     _prepare_clean_cup(env)
     success, _, _ = _auto_step(
         env,
         lambda: env.set_task("wash_objects", target_kind="cup", task_source="iid"),
     )
 
-    assert _bootstrap_done(success=success, tasks=49, env_tasks=49)
+    assert not _bootstrap_done(success=success, tasks=49, env_tasks=49)
 
 
 def test_auto_success_uses_replay_only_auto_complete(env: RestaurantSymbolicEnv):

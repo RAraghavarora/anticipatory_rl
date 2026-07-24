@@ -141,9 +141,8 @@ def _seed_replay_with_anticipatory_oracle(
             next_obs, reward, success, truncated, next_info = env.step(action)
             next_masks = extract_masks(next_info)
 
-            task_boundary = bool(success or truncated)
-            at_horizon = env_reset_tasks > 0 and (outcomes + 1) % env_reset_tasks == 0
-            transition_done = bool(at_horizon and task_boundary)
+            task_boundary = bool(success)
+            transition_done = False
 
             next_auto_mask = torch.zeros(n_tasks, dtype=torch.float32)
             if task_boundary:
