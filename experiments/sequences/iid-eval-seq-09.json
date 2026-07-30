@@ -191,17 +191,16 @@
     },
     {
       "task_type": "pick_place",
-      "target_location": "fountain",
-      "object_name": "cup_1"
+      "target_location": "servingtable",
+      "object_name": "cup_0"
+    },
+    {
+      "task_type": "clear_containers",
+      "target_location": "servingtable"
     },
     {
       "task_type": "make_coffee",
       "target_location": "servingtable"
-    },
-    {
-      "task_type": "pick_place",
-      "target_location": "countertop",
-      "object_name": "knife_0"
     }
   ]
 }

@@ -108,11 +108,12 @@ def _run_myopic(
     domain_path: Path,
     alias: str,
     fd_timeout_s: float,
+    search: Optional[str] = None,
 ) -> _MyopicResult:
     result = solve_restaurant_task_with_fd(
         env, init_state.copy(), task,
         planner_path=planner_path, domain_path=domain_path,
-        alias=alias, timeout_s=fd_timeout_s,
+        alias=alias, search=search, timeout_s=fd_timeout_s,
     )
     if not result.success:
         return _MyopicResult(
@@ -203,6 +204,7 @@ def run_sequence(
     cost_ratio: float,
     q_weights: Optional[Path] = None,
     max_tasks: Optional[int] = None,
+    search: Optional[str] = None,
 ) -> Dict[str, Any]:
     assert policy in ("myopic", "cost_bounded")
 
@@ -278,7 +280,7 @@ def run_sequence(
                 r = _run_myopic(
                     env, state, task,
                     planner_path=planner_path, domain_path=domain_path,
-                    alias=alias, fd_timeout_s=fd_timeout_s,
+                    alias=alias, fd_timeout_s=fd_timeout_s, search=search,
                 )
                 rec.update(
                     success=r.success, cost=r.cost, actions=r.num_actions,
@@ -379,6 +381,8 @@ def main() -> None:
     parser.add_argument("--planner-path", type=Path,
                         default=Path("downward/fast-downward.py"))
     parser.add_argument("--alias", type=str, default="seq-sat-lama-2011")
+    parser.add_argument("--search", type=str, default=None,
+                        help="Raw FD --search string (e.g. 'astar(blind())'); bypasses --alias.")
     parser.add_argument("--fd-timeout-s", type=float, default=20.0)
     parser.add_argument("--gamma", type=float, default=0.95)
     parser.add_argument("--success-reward", type=float, default=81.06943684690286)
@@ -412,6 +416,7 @@ def main() -> None:
             # myopic ignores q_weights; cost_bounded raises inside run_sequence.
             q_weights=args.q_weights if args.policy != "myopic" else None,
             max_tasks=args.max_tasks,
+            search=args.search,
         )
 
     if args.policy == "both":

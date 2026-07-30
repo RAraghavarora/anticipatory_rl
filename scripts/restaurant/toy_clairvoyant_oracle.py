@@ -135,6 +135,7 @@ def run_oracle(
         record.update(
             first_segment_cost=segment.paper2_cost,
             first_segment_actions=action_count,
+            first_segment_plan=segment.physical_actions,
             auto_success=segment.auto_success,
         )
         windows.append(record)

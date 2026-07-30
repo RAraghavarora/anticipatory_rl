@@ -127,6 +127,7 @@ class WandbLogger:
             metric_name = self._metric_name(name, context)
             step_name = f"{metric_name}_step"
             if metric_name not in self._defined_metrics:
+                self._run.define_metric(step_name, hidden=True)
                 self._run.define_metric(metric_name, step_metric=step_name)
                 self._defined_metrics.add(metric_name)
             self._run.log({metric_name: value, step_name: step})

@@ -9,7 +9,7 @@ from anticipatory_rl.logging import WandbLogger
 def _fake_run():
     return SimpleNamespace(
         config=SimpleNamespace(update=lambda *args, **kwargs: None),
-        define_metric=lambda name, step_metric: None,
+        define_metric=lambda *args, **kwargs: None,
         log=lambda values: None,
         finish=lambda: None,
     )

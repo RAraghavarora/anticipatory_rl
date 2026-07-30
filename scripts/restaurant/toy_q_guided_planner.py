@@ -39,6 +39,7 @@ from anticipatory_rl.agents.restaurant.dqn import RestaurantQNetwork
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, RestaurantTask
 from anticipatory_rl.envs.restaurant.planner import (
     RestaurantPlannerState,
+    consume_delivery_from_state,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,
     task_goal_clauses,
@@ -260,9 +261,11 @@ def _solve_q_guided_task(
         terminal, prefix = apply_plan_until_first_task_satisfied(
             state, myopic_result.plan_actions, task, env,
         )
+        consumed_terminal = terminal.copy()
+        consume_delivery_from_state(consumed_terminal, task.task_type, task.target_location)
         prefix_cost = planner_actions_paper2_cost(prefix, env)
         v_q_ap = _compute_v_q_ap(
-            terminal, env, future_tasks,
+            consumed_terminal, env, future_tasks,
             model=model,
             device=device,
             cache=v_ap_cache,
@@ -271,7 +274,7 @@ def _solve_q_guided_task(
         best = AnticipatoryPlan(
             prefix_actions=prefix,
             prefix_cost=float(prefix_cost),
-            terminal_state=terminal,
+            terminal_state=consumed_terminal,
             strategy="myopic",
             v_ap=float(v_q_ap),
             full_plan_steps=len(myopic_result.plan_actions),
@@ -298,9 +301,11 @@ def _solve_q_guided_task(
         terminal, prefix = apply_plan_until_first_task_satisfied(
             state, result.plan_actions, task, env,
         )
+        consumed_terminal = terminal.copy()
+        consume_delivery_from_state(consumed_terminal, task.task_type, task.target_location)
         prefix_cost = planner_actions_paper2_cost(prefix, env)
         v_q_ap = _compute_v_q_ap(
-            terminal, env, future_tasks,
+            consumed_terminal, env, future_tasks,
             model=model,
             device=device,
             cache=v_ap_cache,
@@ -310,7 +315,7 @@ def _solve_q_guided_task(
             best = AnticipatoryPlan(
                 prefix_actions=prefix,
                 prefix_cost=float(prefix_cost),
-                terminal_state=terminal,
+                terminal_state=consumed_terminal,
                 strategy=f"joint+{fut.task_type}",
                 v_ap=float(v_q_ap),
                 full_plan_steps=len(result.plan_actions),
@@ -425,8 +430,11 @@ def run_q_guided_planner(
 
         strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
 
-        if result_success and plan is not None:
-            state = plan.terminal_state
+        if result_success:
+            if plan is not None:
+                state = plan.terminal_state
+            else:
+                consume_delivery_from_state(state, task_type, task.target_location)
             env.state.agent_location = state.agent_location
             env.state.holding = state.holding
             env.state.bread_spread = state.bread_spread
@@ -435,7 +443,7 @@ def run_q_guided_planner(
                 env.state.objects[name].dirty = obj.dirty
                 env.state.objects[name].filled_with = obj.filled_with
                 env.state.objects[name].contained_in = obj.contained_in
-        elif not result_success:
+        else:
             failures += 1
 
         records.append({

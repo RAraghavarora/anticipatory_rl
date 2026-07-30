@@ -1307,6 +1307,7 @@ def solve_restaurant_task_with_fd(
     planner_path: Path,
     domain_path: Path,
     alias: str = "seq-sat-lama-2011",
+    search: str | None = None,
     extra_goal_clauses: Sequence[str] | None = None,
     timeout_s: float = 10.0,
 ) -> PlannerResult:
@@ -1331,6 +1332,7 @@ def solve_restaurant_task_with_fd(
                 problem_path,
                 tmpdir,
                 alias=alias,
+                search=search,
                 initial_search_time_limit=timeout_s,
             )
             plan_text = plan_path.read_text(encoding="utf-8")

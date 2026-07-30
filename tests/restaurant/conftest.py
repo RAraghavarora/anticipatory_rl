@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
 from anticipatory_rl.envs.restaurant.planner import RestaurantPlannerState
+
+
+os.environ.setdefault("WANDB_MODE", "disabled")
 
 
 @pytest.fixture(scope="session")

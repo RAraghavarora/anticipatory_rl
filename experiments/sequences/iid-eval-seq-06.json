@@ -8,30 +8,18 @@
     {
       "task_type": "pick_place",
       "target_location": "countertop",
-      "object_name": "apple_0"
+      "object_name": "knife_0"
+    },
+    {
+      "task_type": "clear_containers",
+      "target_location": "servingtable"
     },
     {
       "task_type": "wash_objects",
       "target_kind": "knife"
     },
     {
-      "task_type": "wash_objects",
-      "target_kind": "knife"
-    },
-    {
       "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_fruit_bowl",
       "target_location": "servingtable"
     },
     {
@@ -39,45 +27,20 @@
       "target_kind": "bowl"
     },
     {
-      "task_type": "make_fruit_bowl",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "wash_objects",
-      "target_kind": "knife"
-    },
-    {
-      "task_type": "make_coffee",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "wash_objects",
-      "target_kind": "bowl"
-    },
-    {
-      "task_type": "pick_place",
-      "target_location": "shelf",
-      "object_name": "plate_0"
-    },
-    {
-      "task_type": "make_fruit_bowl",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_coffee",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_coffee",
-      "target_location": "servingtable"
-    },
-    {
       "task_type": "serve_water",
       "target_location": "servingtable"
     },
     {
       "task_type": "wash_objects",
       "target_kind": "knife"
+    },
+    {
+      "task_type": "serve_water",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "serve_water",
+      "target_location": "servingtable"
     },
     {
       "task_type": "make_coffee",
@@ -92,11 +55,27 @@
       "target_location": "servingtable"
     },
     {
-      "task_type": "make_coffee",
+      "task_type": "serve_water",
       "target_location": "servingtable"
     },
     {
-      "task_type": "make_coffee",
+      "task_type": "wash_objects",
+      "target_kind": "bowl"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "bowl"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "bowl"
+    },
+    {
+      "task_type": "serve_water",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "clear_containers",
       "target_location": "servingtable"
     },
     {
@@ -104,8 +83,20 @@
       "target_location": "servingtable"
     },
     {
+      "task_type": "serve_water",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "bowl"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
+    },
+    {
       "task_type": "pick_place",
-      "target_location": "servingtable",
+      "target_location": "countertop",
       "object_name": "cup_1"
     },
     {
@@ -113,32 +104,8 @@
       "target_kind": "knife"
     },
     {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_coffee",
-      "target_location": "servingtable"
-    },
-    {
       "task_type": "wash_objects",
       "target_kind": "knife"
-    },
-    {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_coffee",
-      "target_location": "servingtable"
-    },
-    {
-      "task_type": "make_fruit_bowl",
-      "target_location": "servingtable"
     },
     {
       "task_type": "wash_objects",
@@ -147,6 +114,14 @@
     {
       "task_type": "make_coffee",
       "target_location": "servingtable"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "bowl"
     },
     {
       "task_type": "serve_water",
@@ -161,12 +136,40 @@
       "target_kind": "knife"
     },
     {
-      "task_type": "clear_containers",
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "serve_water",
       "target_location": "servingtable"
     },
     {
       "task_type": "wash_objects",
       "target_kind": "bowl"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "knife"
+    },
+    {
+      "task_type": "wash_objects",
+      "target_kind": "knife"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "serve_water",
+      "target_location": "servingtable"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
     },
     {
       "task_type": "wash_objects",
@@ -181,28 +184,25 @@
       "target_location": "servingtable"
     },
     {
-      "task_type": "clear_containers",
-      "target_location": "servingtable"
-    },
-    {
       "task_type": "make_coffee",
       "target_location": "servingtable"
     },
     {
-      "task_type": "wash_objects",
-      "target_kind": "bowl"
+      "task_type": "pick_place",
+      "target_location": "fountain",
+      "object_name": "cup_0"
     },
     {
       "task_type": "serve_water",
       "target_location": "servingtable"
     },
     {
-      "task_type": "serve_water",
-      "target_location": "servingtable"
-    },
-    {
       "task_type": "wash_objects",
       "target_kind": "bowl"
+    },
+    {
+      "task_type": "make_coffee",
+      "target_location": "servingtable"
     }
   ]
 }
