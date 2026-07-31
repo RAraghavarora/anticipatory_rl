@@ -4,7 +4,8 @@
 Usage:
     python scripts/gnn/train_gnn.py \
         --data-path runs/toy3_2k.pt \
-        --output-dir runs/gnn_train
+        --output-dir runs/gnn_train \
+        --run-label gnn_toy3_2k
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from torch.optim import Adagrad
 from torch.optim.lr_scheduler import StepLR
 from torch_geometric.loader import DataLoader
 
+from anticipatory_rl.logging import CSVLogger, LoggerPair, WandbLogger
 from gnn.graph_encoder import NODE_TYPES, SBERT_DIM, BINARY_ATTRS
 from gnn.model import APCostEstimator
 
@@ -33,6 +35,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Train APCostEstimator GNN")
     ap.add_argument("--data-path", type=Path, required=True)
     ap.add_argument("--output-dir", type=Path, required=True)
+    ap.add_argument("--run-label", type=str, default=None)
     ap.add_argument("--hidden-dim", type=int, default=64)
     ap.add_argument("--lr", type=float, default=0.01)
     ap.add_argument("--batch-size", type=int, default=8)
@@ -43,7 +46,16 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
+    if args.run_label is None:
+        args.run_label = f"gnn_{args.data_path.stem}_h{args.hidden_dim}"
+
     torch.manual_seed(args.seed)
+
+    logger = LoggerPair(
+        csv_logger=CSVLogger(args, args.run_label, run_dir=args.output_dir),
+        wandb_logger=WandbLogger(args, args.run_label),
+    )
+    logger.set_metadata("dataset", str(args.data_path))
 
     dataset = torch.load(args.data_path, weights_only=False)
     graphs = [d["graph"] for d in dataset]
@@ -53,6 +65,8 @@ def main() -> None:
     mean = targets.mean().item()
     std = targets.std().item()
     print(f"V_A.P.  mean={mean:.2f}  std={std:.2f}")
+    logger.set_metadata("target_mean", mean)
+    logger.set_metadata("target_std", std)
 
     train_idx, val_idx = split_indices(len(graphs), args.train_frac, args.seed)
     train_loader = DataLoader([graphs[i] for i in train_idx], batch_size=args.batch_size, shuffle=True)
@@ -70,6 +84,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     best_val_loss = float("inf")
+    step = 0
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -82,6 +97,7 @@ def main() -> None:
             optimizer.step()
             scheduler.step()
             train_loss += loss.item() * batch.num_graphs
+            step += 1
 
         train_loss /= len(train_idx)
 
@@ -94,6 +110,11 @@ def main() -> None:
         val_loss /= len(val_idx)
 
         lr = scheduler.get_last_lr()[0]
+
+        logger.track(train_loss, name="loss", step=epoch, context={"split": "train"})
+        logger.track(val_loss, name="loss", step=epoch, context={"split": "val"})
+        logger.track(lr, name="lr", step=epoch)
+
         mark = "*" if val_loss < best_val_loss else " "
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -104,6 +125,8 @@ def main() -> None:
     print(f"\nBest val loss: {best_val_loss:.2f}")
     torch.save(model.state_dict(), args.output_dir / "last_model.pt")
     print(f"Saved to {args.output_dir}")
+
+    logger.close()
 
 
 if __name__ == "__main__":
