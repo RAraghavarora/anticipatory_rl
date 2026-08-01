@@ -5,12 +5,17 @@ Anticipatory planning: for each task, evaluates myopic + augmented FD plans,
 scores each via prefix_cost + gamma * V_AP(post), and selects the best.
 
 Usage:
-    python scripts/gnn/eval_sequence.py \
-        --sequence-path experiments/sequences/iid-eval-seq-00.json \
-        --gnn-model runs/gnn_train/best_model.pt \
-        --max-tasks 3 \
-        --max-augs 5 \
-        --seed 42
+    # GNN anticipatory only
+    python scripts/gnn/eval_sequence.py \\
+        --sequence-path experiments/sequences/iid-eval-seq-00.json \\
+        --gnn-model runs/gnn_train/best_model.pt \\
+        --max-tasks 3 --max-augs 5 --seed 42
+
+    # Paired: myopic vs GNN anticipatory
+    python scripts/gnn/eval_sequence.py \\
+        --sequence-path experiments/sequences/iid-eval-seq-00.json \\
+        --gnn-model runs/gnn_train/best_model.pt \\
+        --policy both --seed 42
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -41,14 +46,12 @@ from gnn.model import APCostEstimator
 
 INPUT_DIM = SBERT_DIM + len(NODE_TYPES) + 2 + len(BINARY_ATTRS)  # 399
 
-
 # ---------------------------------------------------------------------------
 # GNN helpers
 # ---------------------------------------------------------------------------
 
 
 def load_gnn_model(checkpoint_path: Path, hidden_dim: int, device: torch.device) -> APCostEstimator:
-    """Load saved state_dict, return eval-mode model."""
     model = APCostEstimator(INPUT_DIM, hidden_dim=hidden_dim)
     state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
@@ -63,7 +66,6 @@ def predict_v_ap(
     env: RestaurantSymbolicEnv,
     device: torch.device,
 ) -> float:
-    """state_to_graph → GNN forward → float. Returns scalar."""
     graph = state_to_graph(state, env)
     with torch.no_grad():
         batch = torch.zeros(graph.num_nodes, dtype=torch.long, device=device)
@@ -82,10 +84,6 @@ def extract_encountered_objects(
     prefix: list[tuple[str, list[str]]],
     state: RestaurantPlannerState,
 ) -> tuple[set[str], set[str]]:
-    """Extract object names and visited locations from prefix action arguments.
-
-    Returns (encountered_objects, visited_locations).
-    """
     encountered: set[str] = set()
     visited_locations: set[str] = set()
 
@@ -110,11 +108,6 @@ def generate_augmented_clauses(
     state: RestaurantPlannerState,
     env: RestaurantSymbolicEnv,
 ) -> list[str]:
-    """Generate p_add predicate clauses per object kind.
-
-    fountain-gated rules only trigger when fountain is in visited_locations.
-    coffeemachine-gated rules only trigger when coffeemachine is visited.
-    """
     coffeemachine_locs = {
         loc for loc in env.locations if env._is_location(loc, "coffeemachine")
     }
@@ -167,14 +160,11 @@ def _evaluate_plan(
     gamma: float,
     strategy: str,
 ) -> _Candidate:
-    """Score a plan: apply until task satisfied → post → GNN → score."""
     terminal, prefix = tao.apply_plan_until_first_task_satisfied(
         state, plan_actions, task, env,
     )
     if not tao._task_is_auto_satisfied(terminal, task, env):
-        raise ValueError(
-            f"Terminal state does not satisfy task {task.task_type}"
-        )
+        raise ValueError(f"Terminal state does not satisfy task {task.task_type}")
 
     prefix_cost = planner_actions_paper2_cost(prefix, env)
 
@@ -202,32 +192,32 @@ def _evaluate_plan(
 
 
 # ---------------------------------------------------------------------------
-# Sequence runner
+# Sequence runner — shared state-advance logic
 # ---------------------------------------------------------------------------
 
 
-def run_sequence(args: argparse.Namespace) -> dict:
-    """Main sequence runner. Returns {summary: {...}, tasks: [...]}."""
+_TaskRec = Dict[str, Any]
 
-    # Set up device
-    device = torch.device("cpu")
 
-    # Load env and initial state
+def run_sequence(
+    args: argparse.Namespace,
+    *,
+    model: Optional[APCostEstimator] = None,
+    device: Optional[torch.device] = None,
+) -> dict:
+    """Run a persistent task sequence. If model is None, uses pure myopic FD.
+    Otherwise uses GNN anticipatory planning with augmented candidates."""
+
     env = RestaurantSymbolicEnv(config_path=args.config_path)
-    obs, info = env.reset(seed=args.seed)
+    env.reset(seed=args.seed)
     state = RestaurantPlannerState.from_env(env)
 
-    # Load task sequence
     with open(args.sequence_path, "r", encoding="utf-8") as fh:
         seq_data = json.load(fh)
     all_tasks_raw: list[dict] = seq_data["tasks"]
     if args.max_tasks is not None and args.max_tasks > 0:
         all_tasks_raw = all_tasks_raw[: args.max_tasks]
 
-    # Load GNN model
-    model = load_gnn_model(args.gnn_model, args.hidden_dim, device)
-
-    # Build RestaurantTask objects
     tasks: list[RestaurantTask] = []
     for raw in all_tasks_raw:
         tasks.append(RestaurantTask(
@@ -237,17 +227,20 @@ def run_sequence(args: argparse.Namespace) -> dict:
             object_name=raw.get("object_name"),
         ))
 
-    t_start = time.perf_counter()
-    records: list[dict] = []
+    if model is not None and device is None:
+        device = torch.device("cpu")
 
+    t_start = time.perf_counter()
+    records: list[_TaskRec] = []
     total_fd_calls = 0
     total_gnn_calls = 0
     completed = 0
     auto_count = 0
-    myopic_total_cost = 0.0
     total_cost = 0.0
     strategy_counts: dict[str, int] = {}
     search = args.search
+
+    gnn_mode = model is not None
 
     for idx, task in enumerate(tasks):
         task_type = str(task.task_type)
@@ -258,56 +251,62 @@ def run_sequence(args: argparse.Namespace) -> dict:
         if tao._task_is_auto_satisfied(state, task, env):
             consume_delivery_from_state(state, task_type, task.target_location)
             records.append({
-                "index": idx,
-                "task_type": task_type,
-                "auto": True,
-                "success": True,
-                "cost": 0.0,
-                "actions": 0,
-                "strategy": "auto",
-                "v_ap": 0.0,
-                "fd_calls": 0,
-                "gnn_calls": 0,
-                "trace": [],
-                "augments_tried": 0,
-                "augments_accepted": 0,
+                "index": idx, "task_type": task_type,
+                "auto": True, "success": True,
+                "cost": 0.0, "actions": 0, "strategy": "auto",
+                "v_ap": 0.0, "fd_calls": 0, "gnn_calls": 0,
+                "trace": [], "augments_tried": 0, "augments_accepted": 0,
             })
             auto_count += 1
             completed += 1
             strategy_counts["auto"] = strategy_counts.get("auto", 0) + 1
             continue
 
-        # --- Step 2: myopic candidate ---
+        # --- Step 2: myopic FD plan ---
         result: PlannerResult = solve_restaurant_task_with_fd(
-            env=env,
-            state=state,
-            task=task,
-            planner_path=args.planner_path,
-            domain_path=args.domain_path,
-            search=search,
-            timeout_s=args.fd_timeout_s,
+            env=env, state=state, task=task,
+            planner_path=args.planner_path, domain_path=args.domain_path,
+            search=search, timeout_s=args.fd_timeout_s,
         )
         fd_calls += 1
 
         if not result.success:
             records.append({
-                "index": idx,
-                "task_type": task_type,
-                "auto": False,
-                "success": False,
-                "cost": float("inf"),
-                "actions": 0,
-                "strategy": "failed_myopic",
-                "v_ap": 0.0,
-                "fd_calls": fd_calls,
-                "gnn_calls": 0,
-                "trace": [],
-                "augments_tried": 0,
-                "augments_accepted": 0,
+                "index": idx, "task_type": task_type,
+                "auto": False, "success": False,
+                "cost": float("inf"), "actions": 0,
+                "strategy": "failed_myopic", "v_ap": 0.0,
+                "fd_calls": fd_calls, "gnn_calls": 0,
+                "trace": [], "augments_tried": 0, "augments_accepted": 0,
             })
             total_fd_calls += fd_calls
             continue
 
+        # --- Pure myopic mode: apply prefix, consume, advance ---
+        if not gnn_mode:
+            terminal, prefix = tao.apply_plan_until_first_task_satisfied(
+                state, result.plan_actions, task, env,
+            )
+            prefix_cost = planner_actions_paper2_cost(prefix, env)
+            consume_delivery_from_state(terminal, task_type, task.target_location)
+            state = terminal
+
+            records.append({
+                "index": idx, "task_type": task_type,
+                "auto": False, "success": True,
+                "cost": float(prefix_cost), "actions": len(prefix),
+                "strategy": "myopic", "v_ap": 0.0,
+                "fd_calls": fd_calls, "gnn_calls": 0,
+                "trace": [f"{name}({', '.join(a)})" for name, a in prefix],
+                "augments_tried": 0, "augments_accepted": 0,
+            })
+            completed += 1
+            total_cost += prefix_cost
+            total_fd_calls += fd_calls
+            strategy_counts["myopic"] = strategy_counts.get("myopic", 0) + 1
+            continue
+
+        # --- GNN mode: evaluate myopic candidate ---
         try:
             myopic_candidate = _evaluate_plan(
                 state, result.plan_actions, task, env,
@@ -327,7 +326,6 @@ def run_sequence(args: argparse.Namespace) -> dict:
 
         best = myopic_candidate
         best_score = best["score"]
-        candidates = [myopic_candidate]
 
         # --- Step 3: augmented candidates ---
         prefix = best["prefix"]
@@ -338,13 +336,9 @@ def run_sequence(args: argparse.Namespace) -> dict:
         augments_accepted = 0
         for p_add in p_add_list[: args.max_augs]:
             aug_result = solve_restaurant_task_with_fd(
-                env=env,
-                state=state,
-                task=task,
-                planner_path=args.planner_path,
-                domain_path=args.domain_path,
-                search=search,
-                extra_goal_clauses=[p_add],
+                env=env, state=state, task=task,
+                planner_path=args.planner_path, domain_path=args.domain_path,
+                search=search, extra_goal_clauses=[p_add],
                 timeout_s=args.fd_timeout_s,
             )
             fd_calls += 1
@@ -366,29 +360,22 @@ def run_sequence(args: argparse.Namespace) -> dict:
                 best = aug_candidate
                 best_score = aug_candidate["score"]
                 augments_accepted += 1
-            candidates.append(aug_candidate)
 
-        # --- Step 4: execute best ---
+        # --- Step 4: advance state ---
         state = best["post"]
 
         records.append({
-            "index": idx,
-            "task_type": task_type,
-            "auto": False,
-            "success": True,
-            "cost": best["prefix_cost"],
-            "actions": best["actions"],
-            "strategy": best["strategy"],
-            "v_ap": best["v_ap"],
-            "fd_calls": fd_calls,
-            "gnn_calls": gnn_calls,
-            "trace": [f"{name}({', '.join(args)})" for name, args in best["prefix"]],
+            "index": idx, "task_type": task_type,
+            "auto": False, "success": True,
+            "cost": best["prefix_cost"], "actions": best["actions"],
+            "strategy": best["strategy"], "v_ap": best["v_ap"],
+            "fd_calls": fd_calls, "gnn_calls": gnn_calls,
+            "trace": [f"{name}({', '.join(a)})" for name, a in best["prefix"]],
             "augments_tried": augments_tried,
             "augments_accepted": augments_accepted,
         })
         completed += 1
         total_cost += best["prefix_cost"]
-        myopic_total_cost += myopic_candidate["prefix_cost"]
         total_fd_calls += fd_calls
         total_gnn_calls += gnn_calls
         strategy_counts[best["strategy"]] = strategy_counts.get(best["strategy"], 0) + 1
@@ -396,28 +383,40 @@ def run_sequence(args: argparse.Namespace) -> dict:
     wall_seconds = time.perf_counter() - t_start
     attempted = len(tasks)
     mean_cost = total_cost / completed if completed > 0 else float("inf")
-    cost_delta = total_cost - myopic_total_cost if completed > 0 else 0.0
 
     summary = {
         "sequence_path": str(args.sequence_path),
-        "policy": "gnn_anticipatory",
-        "gnn_model": str(args.gnn_model),
+        "policy": "gnn_anticipatory" if gnn_mode else "myopic",
+        "gnn_model": str(args.gnn_model) if args.gnn_model else None,
         "gamma": args.gamma,
         "attempted": attempted,
         "completed": completed,
         "auto_count": auto_count,
         "total_cost": float(total_cost),
         "mean_cost": float(mean_cost),
-        "myopic_cost": float(myopic_total_cost),
-        "cost_delta": float(cost_delta),
         "total_fd_calls": total_fd_calls,
         "total_gnn_calls": total_gnn_calls,
         "strategy_distribution": strategy_counts,
         "wall_seconds": wall_seconds,
     }
 
-    result = {"summary": summary, "tasks": records}
-    return result
+    return {"summary": summary, "tasks": records}
+
+
+# ---------------------------------------------------------------------------
+# Paired evaluation
+# ---------------------------------------------------------------------------
+
+
+def _pair_results(myopic: dict, gnn: dict) -> dict:
+    mc = myopic["summary"]["total_cost"]
+    gc = gnn["summary"]["total_cost"]
+    return {
+        "myopic": myopic,
+        "gnn_anticipatory": gnn,
+        "cost_delta": round(gc - mc, 6),
+        "cost_reduction_pct": round((gc - mc) / mc * 100, 2) if mc > 0 else 0.0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -436,40 +435,48 @@ def main() -> None:
     parser.add_argument("--output-path", type=Path, default=None,
                         help="Optional JSON output file")
     parser.add_argument("--config-path", type=Path,
-                        default=Path("configs/restaurant/toy_level_3.yaml"),
-                        help="Env config")
+                        default=Path("configs/restaurant/toy_level_3.yaml"))
     parser.add_argument("--domain-path", type=Path,
-                        default=Path("pddl/toy_restaurant_domain.pddl"),
-                        help="PDDL domain")
+                        default=Path("pddl/toy_restaurant_domain.pddl"))
     parser.add_argument("--planner-path", type=Path,
-                        default=Path("downward/fast-downward.py"),
-                        help="FD binary")
-    parser.add_argument("--search", type=str, default="astar(ff())",
-                        help="FD --search string")
-    parser.add_argument("--fd-timeout-s", type=float, default=20.0,
-                        help="Per-FD-call timeout")
-    parser.add_argument("--gamma", type=float, default=1.0,
-                        help="Discount (paper: 1.0 = no discount)")
-    parser.add_argument("--hidden-dim", type=int, default=64,
-                        help="GNN hidden dim")
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Random seed")
-    parser.add_argument("--max-tasks", type=int, default=None,
-                        help="Truncate first N tasks")
-    parser.add_argument("--max-augs", type=int, default=10,
-                        help="Max augmented candidates per task")
+                        default=Path("downward/fast-downward.py"))
+    parser.add_argument("--search", type=str, default="astar(ff())")
+    parser.add_argument("--fd-timeout-s", type=float, default=20.0)
+    parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--hidden-dim", type=int, default=64)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max-tasks", type=int, default=None)
+    parser.add_argument("--max-augs", type=int, default=10)
+    parser.add_argument("--policy", type=str, default="gnn_anticipatory",
+                        choices=["gnn_anticipatory", "myopic", "both"])
     args = parser.parse_args()
 
-    result = run_sequence(args)
+    if args.policy == "both":
+        device = torch.device("cpu")
+        model = load_gnn_model(args.gnn_model, args.hidden_dim, device)
 
-    # Always print to stdout
-    print(json.dumps(result["summary"], indent=2))
+        myopic_result = run_sequence(args, model=None)
+        gnn_result = run_sequence(args, model=model, device=device)
+        output = _pair_results(myopic_result, gnn_result)
+    else:
+        if args.policy == "gnn_anticipatory":
+            device = torch.device("cpu")
+            model = load_gnn_model(args.gnn_model, args.hidden_dim, device)
+            output = run_sequence(args, model=model, device=device)
+        else:
+            output = run_sequence(args, model=None)
 
-    # Optionally write to file
+    print(json.dumps(output["summary"] if args.policy != "both" else {
+        "myopic": output["myopic"]["summary"],
+        "gnn_anticipatory": output["gnn_anticipatory"]["summary"],
+        "cost_delta": output["cost_delta"],
+        "cost_reduction_pct": output["cost_reduction_pct"],
+    }, indent=2))
+
     if args.output_path is not None:
         args.output_path.parent.mkdir(parents=True, exist_ok=True)
         with args.output_path.open("w", encoding="utf-8") as fh:
-            json.dump(result, fh, indent=2, default=str)
+            json.dump(output, fh, indent=2, default=str)
         print(f"\nResults written to {args.output_path}")
 
 
