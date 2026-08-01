@@ -281,15 +281,9 @@ def train_agent(
         # even though the environment continues to Task 2.
         bellman_done = done or (myopic and info.get("task1_done", False))
 
-        # For the myopic agent, only store Task 1 transitions.
-        # Storing Task 2 transitions would let Task 2 gradients
-        # contaminate the shared network weights, leaking information
-        # about the Task 2 distribution into Task 1 Q-values.
-        in_task2 = myopic and info.get("task_phase") == 2 and not info.get("task1_done", False)
-        if not in_task2:
-            replay.push(
-                Transition(state, action, float(reward), next_state, bellman_done)
-            )
+        replay.push(
+            Transition(state, action, float(reward), next_state, bellman_done)
+        )
         ep_return += reward
 
         # ---- track drop location ----
@@ -573,7 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prob-a", type=float, default=0.2)
     p.add_argument("--max-episode-steps", type=int, default=200)
     p.add_argument("--eval-episodes", type=int, default=500)
-    p.add_argument("--eval-temperature", type=float, default=1.0)
+    p.add_argument("--eval-temperature", type=float, default=0.0)
     p.add_argument("--render-tile-px", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--inference-only", action="store_true")
