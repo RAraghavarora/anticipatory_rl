@@ -24,6 +24,7 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -37,6 +38,7 @@ from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, Restauran
 from anticipatory_rl.envs.restaurant.planner import (
     PlannerResult,
     RestaurantPlannerState,
+    apply_plan,
     consume_delivery_from_state,
     planner_actions_paper2_cost,
     solve_restaurant_task_with_fd,
@@ -76,71 +78,175 @@ def predict_v_ap(
 
 
 # ---------------------------------------------------------------------------
-# Augmented-clause generation
+# Augmented-clause representation
 # ---------------------------------------------------------------------------
 
 
-def extract_encountered_objects(
+@dataclass(frozen=True)
+class AugmentedClause:
+    """Immutable augmentation carrying the PDDL clause and metadata for validation.
+
+    Covers the four existing clause forms: clean object, object filled with
+    water, object at location, and machine water at coffee machine.  No
+    generic predicate framework — just enough metadata to validate and
+    describe each clause.
+    """
+    pddl_clause: str
+    clause_type: str        # "clean", "fill", "jar_position", "machine_water"
+    object_name: str
+    target_location: str    # empty string when not applicable
+
+
+# ---------------------------------------------------------------------------
+# p_add clause verification
+# ---------------------------------------------------------------------------
+
+
+def _p_add_is_satisfied(state: RestaurantPlannerState, clause: AugmentedClause) -> bool:
+    """Check whether a single augmented-goal clause is satisfied in *state*."""
+    obj = state.objects.get(clause.object_name)
+    if clause.clause_type == "clean":
+        return obj is not None and not obj.dirty
+    elif clause.clause_type == "fill":
+        return obj is not None and obj.filled_with == "water"
+    elif clause.clause_type == "jar_position":
+        return obj is not None and obj.location == clause.target_location
+    elif clause.clause_type == "machine_water":
+        # Any concrete water-kind object at the target location matches the
+        # abstract PDDL water constant (Talukder et al. 2024, Section 4).
+        return any(
+            o.kind == "water" and o.location == clause.target_location
+            for o in state.objects.values()
+        )
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Focused augmented-clause generation
+# ---------------------------------------------------------------------------
+#
+# Talukder et al. describe a bounded-region rule for proposal but do not
+# publish the exact region radius.  We reconstruct the focused region as the
+# path locations (initial agent location + every move source/destination from
+# the myopic prefix) plus every map location within one Dijkstra hop of any
+# path location:
+#
+#     bounded_region = path_locations ∪ {loc | ∃ p∈path_locations : d(p, loc) ≤ 1.0}
+#
+# with d(·,·) = env._dijkstra_distance.  Directly manipulated objects and
+# objects physically in the bounded region are eligible.  The rules:
+#   • clean object     — dirty fillable/knife/plate
+#   • fill with water   — empty cup/mug/jar, fountain in region
+#   • jar → coffee      — both jar location and coffee station in region
+#   • machine water     — non-fountain water-kind object depleted (location
+#                          is None) when coffee station is in region
+
+
+def _generate_focused_augmentations(
     prefix: list[tuple[str, list[str]]],
     state: RestaurantPlannerState,
-) -> tuple[set[str], set[str]]:
-    encountered: set[str] = set()
-    visited_locations: set[str] = set()
-
+    initial_agent_location: str,
+    env: RestaurantSymbolicEnv,
+) -> list[AugmentedClause]:
+    # 1. Path locations: initial agent location + every move source/destination
+    path_locations: set[str] = {initial_agent_location}
     for name, args in prefix:
         if name == "move":
+            if len(args) >= 1:
+                path_locations.add(args[0])  # source
             if len(args) >= 2:
-                visited_locations.add(args[1])
+                path_locations.add(args[1])  # destination
+
+    # 2. Bounded region: path locations + one-hop
+    bounded_region = set(path_locations)
+    for path_loc in path_locations:
+        for candidate in env.locations:
+            if env._dijkstra_distance(path_loc, candidate) <= 1.0:
+                bounded_region.add(candidate)
+
+    # 3. Relevant objects: directly manipulated + physically in region
+    relevant_objects: set[str] = set()
+    for _name, args in prefix:
         for arg in args:
             if arg in state.objects:
-                encountered.add(arg)
-
+                relevant_objects.add(arg)
     for obj_name, obj in state.objects.items():
-        if obj.location in visited_locations:
-            encountered.add(obj_name)
+        if obj.location in bounded_region:
+            relevant_objects.add(obj_name)
+        # Also include depleted non-fountain water objects even though they
+        # have no physical location, because restoration is triggered solely
+        # by the coffee station being in the bounded region.
+        if obj.kind == "water" and obj_name != "water_fountain" and obj.location is None:
+            relevant_objects.add(obj_name)
 
-    return encountered, visited_locations
-
-
-def generate_augmented_clauses(
-    encountered: set[str],
-    visited_locations: set[str],
-    state: RestaurantPlannerState,
-    env: RestaurantSymbolicEnv,
-) -> list[str]:
+    # 4. Station presence in bounded region
     coffeemachine_locs = {
         loc for loc in env.locations if env._is_location(loc, "coffeemachine")
     }
     fountain_locs = {
         loc for loc in env.locations if env._is_location(loc, "fountain")
     }
-    fountain_visited = bool(visited_locations & fountain_locs)
-    coffee_visited = bool(visited_locations & coffeemachine_locs)
+    coffee_in_region = bool(bounded_region & coffeemachine_locs)
+    fountain_in_region = bool(bounded_region & fountain_locs)
 
-    clauses: set[str] = set()
+    # 5. Generate clauses (deterministic order, deduplicated)
+    clauses: list[AugmentedClause] = []
+    seen: set[str] = set()
 
-    for obj_name in encountered:
-        if obj_name not in state.objects:
+    def _emit(clause: AugmentedClause) -> None:
+        if clause.pddl_clause not in seen:
+            seen.add(clause.pddl_clause)
+            clauses.append(clause)
+
+    for obj_name in sorted(relevant_objects):
+        obj = state.objects.get(obj_name)
+        if obj is None:
             continue
-        obj = state.objects[obj_name]
 
+        # clean object (retain existing rule)
+        if obj.kind in {"cup", "mug", "jar", "bowl", "knife", "plate"} and obj.dirty:
+            _emit(AugmentedClause(
+                pddl_clause=f"(not (is-dirty {obj_name}))",
+                clause_type="clean",
+                object_name=obj_name,
+                target_location="",
+            ))
+
+        # object filled with water (retain existing rule)
+        if obj.kind in {"cup", "mug", "jar"} and obj.filled_with is None and fountain_in_region:
+            _emit(AugmentedClause(
+                pddl_clause=f"(filled-with water {obj_name})",
+                clause_type="fill",
+                object_name=obj_name,
+                target_location="",
+            ))
+
+        # jar positioning: only when both jar location and coffee station in region
+        # Skip when the jar is already at the target coffee location.
+        if obj.kind == "jar" and obj.location is not None:
+            if obj.location in bounded_region and coffee_in_region:
+                for cm_loc in sorted(coffeemachine_locs & bounded_region):
+                    if obj.location == cm_loc:
+                        continue  # already there — nothing to do
+                    _emit(AugmentedClause(
+                        pddl_clause=f"(is-at {obj_name} {cm_loc})",
+                        clause_type="jar_position",
+                        object_name=obj_name,
+                        target_location=cm_loc,
+                    ))
+
+        # machine water at coffee: restore depleted non-fountain water
         if obj.kind == "water" and obj_name != "water_fountain":
-            if obj.location is None:
-                clauses.add(f"(is-at water {env.station_coffee})")
+            if obj.location is None and coffee_in_region:
+                for cm_loc in sorted(coffeemachine_locs & bounded_region):
+                    _emit(AugmentedClause(
+                        pddl_clause=f"(is-at water {cm_loc})",
+                        clause_type="machine_water",
+                        object_name=obj_name,
+                        target_location=cm_loc,
+                    ))
 
-        if obj.kind in {"cup", "mug", "jar", "bowl", "knife", "plate"}:
-            if obj.dirty:
-                clauses.add(f"(not (is-dirty {obj_name}))")
-
-        if obj.kind in {"cup", "mug", "jar"}:
-            if obj.filled_with is None and fountain_visited:
-                clauses.add(f"(filled-with water {obj_name})")
-
-        if obj.kind == "jar":
-            if obj.location not in coffeemachine_locs and coffee_visited:
-                clauses.add(f"(is-at {obj_name} {env.station_coffee})")
-
-    return list(clauses)
+    return clauses
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +294,70 @@ def _evaluate_plan(
         "v_ap": v_ap,
         "score": float(score),
         "actions": len(prefix),
+    }
+
+
+def _evaluate_augmented_plan(
+    state: RestaurantPlannerState,
+    plan_actions: list[tuple[str, list[str]]],
+    task: RestaurantTask,
+    aug_clause: AugmentedClause,
+    env: RestaurantSymbolicEnv,
+    model: APCostEstimator,
+    device: torch.device,
+    gamma: float,
+    strategy: str,
+) -> _Candidate:
+    """Apply the *complete* FD plan as an atomic anticipatory macro.
+
+    This matches Talukder et al.'s ``Tail(plan)`` construction (Section 4):
+    the full augmented plan executes without truncation at first-task
+    satisfaction.  Both the base task *and* the extra ``p_add`` clause are
+    verified at the FD-planned terminal state; delivery consumption follows
+    afterward to produce the post-consumption next-task state that this
+    project's GNN training labels score.  p_add need not remain true after
+    consumption — only at the terminal is checked.
+    """
+    # 1. Apply full plan — no truncation at first task satisfaction
+    full = apply_plan(state, plan_actions)
+
+    # 2. Verify base task is satisfied
+    if not tao._task_is_auto_satisfied(full, task, env):
+        raise ValueError(
+            f"Augmented plan terminal does not satisfy base task {task.task_type}"
+        )
+
+    # 3. Verify p_add clause is satisfied (uses record metadata, not regex)
+    if not _p_add_is_satisfied(full, aug_clause):
+        raise ValueError(
+            f"Augmented plan terminal does not satisfy p_add clause: {aug_clause.pddl_clause}"
+        )
+
+    # 4. Charge complete plan cost
+    full_cost = planner_actions_paper2_cost(plan_actions, env)
+
+    # 5. Consume delivery only after both are satisfied
+    post = full.copy()
+    consume_delivery_from_state(post, task.task_type, task.target_location)
+
+    assert post.agent_location in env.location_index, (
+        f"Agent at invalid location {post.agent_location}"
+    )
+
+    # 6. GNN-score the post-consumption state (matching training-label semantics)
+    v_ap = predict_v_ap(post, model, env, device)
+
+    discount = gamma ** len(plan_actions)
+    score = full_cost + discount * v_ap
+
+    return {
+        "prefix": plan_actions,       # full plan, not truncated
+        "prefix_cost": float(full_cost),
+        "post": post,
+        "strategy": strategy,
+        "v_ap": v_ap,
+        "score": float(score),
+        "actions": len(plan_actions),
     }
 
 
@@ -307,6 +477,9 @@ def run_sequence(
             continue
 
         # --- GNN mode: evaluate myopic candidate ---
+        # Capture initial location before the myopic prefix for focused sampling.
+        initial_agent_location = state.agent_location
+
         try:
             myopic_candidate = _evaluate_plan(
                 state, result.plan_actions, task, env,
@@ -327,18 +500,19 @@ def run_sequence(
         best = myopic_candidate
         best_score = best["score"]
 
-        # --- Step 3: augmented candidates ---
+        # --- Step 3: augmented candidates (focused bounded-region sampling) ---
         prefix = best["prefix"]
-        encountered, visited_locs = extract_encountered_objects(prefix, state)
-        p_add_list = generate_augmented_clauses(encountered, visited_locs, state, env)
+        clauses = _generate_focused_augmentations(
+            prefix, state, initial_agent_location, env,
+        )
 
         augments_tried = 0
         augments_accepted = 0
-        for p_add in p_add_list[: args.max_augs]:
+        for clause in clauses[: args.max_augs]:
             aug_result = solve_restaurant_task_with_fd(
                 env=env, state=state, task=task,
                 planner_path=args.planner_path, domain_path=args.domain_path,
-                search=search, extra_goal_clauses=[p_add],
+                search=search, extra_goal_clauses=[clause.pddl_clause],
                 timeout_s=args.fd_timeout_s,
             )
             fd_calls += 1
@@ -348,9 +522,10 @@ def run_sequence(
                 continue
 
             try:
-                aug_candidate = _evaluate_plan(
-                    state, aug_result.plan_actions, task, env,
-                    model, device, args.gamma, f"aug+{p_add}",
+                aug_candidate = _evaluate_augmented_plan(
+                    state, aug_result.plan_actions, task, clause,
+                    env, model, device, args.gamma,
+                    f"aug+{clause.clause_type}+{clause.object_name}",
                 )
             except ValueError:
                 continue
