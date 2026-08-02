@@ -33,6 +33,7 @@ from anticipatory_rl.envs.restaurant.planner import (
     consume_delivery_from_state,
     solve_restaurant_task_with_fd,
 )
+from anticipatory_rl.envs.restaurant.task_sampling import sample_task
 from gnn.graph_encoder import state_to_graph
 
 
@@ -94,7 +95,7 @@ def main() -> None:
     t0 = time.time()
 
     for i in range(args.num_states):
-        task, _ = tasks[env._task_rng.integers(len(tasks))]
+        task = sample_task(env)
 
         result = solve_restaurant_task_with_fd(
             env=env,
