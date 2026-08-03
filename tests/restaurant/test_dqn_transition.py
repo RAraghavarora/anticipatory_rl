@@ -82,6 +82,7 @@ def test_decide_timeout_drives_env_reset():
 
 
 def test_train_loop_timeout_no_world_wipe(monkeypatch, tmp_path):
+    import json
     from anticipatory_rl.agents.restaurant.dqn import build_parser, train
 
     config_abs = Path("configs/restaurant/toy_level_3.yaml").resolve()
@@ -113,6 +114,19 @@ def test_train_loop_timeout_no_world_wipe(monkeypatch, tmp_path):
     # With the fix, per-task timeouts do NOT call env.reset (world persists across tasks).
     # With the bug, this would be ~baseline + 10 (one reset per timeout).
     assert reset_count == 1, f"expected baseline 1 reset, got {reset_count}"
+
+    # Best checkpoint: 40 steps / 4 steps-per-task = at most 10 outcomes,
+    # far below the 100-outcome window threshold.
+    run_dir = Path("runs") / "_test_timeout_integration"
+    best_path = run_dir / "restaurant_dqn_best.pt"
+    assert not best_path.exists(), f"Best checkpoint should not exist with <100 outcomes: {best_path}"
+
+    summary = json.loads((run_dir / "train_summary.json").read_text())
+    assert summary["best_checkpoint_path"] is None
+    assert summary["best_checkpoint_metric"] is None
+    assert summary["best_checkpoint_value"] is None
+    assert summary["best_checkpoint_step"] is None
+    assert summary["best_checkpoint_task"] is None
 
 
 def _random_valid_action(env: RestaurantSymbolicEnv, masks):
@@ -186,3 +200,73 @@ def test_myopic_and_anticipatory_timeout_parity():
     for tpe in (1, 200):
         t = _transition(success=False, truncated=True, tasks=0, tpe=tpe)
         assert not t.bootstrap_done, f"tpe={tpe}: timeout should not be terminal"
+
+
+def test_best_checkpoint_saved_and_valid(monkeypatch, tmp_path):
+    """Best checkpoint written when 100-task rolling success window fills.
+
+    Verifies exact metadata by recomputing rolling success from task_records.json
+    and asserting the recorded best is the first strict global maximum."""
+    import json
+    import torch
+    import numpy as np
+    from anticipatory_rl.agents.restaurant.dqn import build_parser, train
+
+    config_abs = Path("configs/restaurant/toy_level_3.yaml").resolve()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "anticipatory_rl.agents.restaurant.dqn.select_device", lambda: torch.device("cpu")
+    )
+
+    args = build_parser().parse_args([
+        "--total-steps", "500",
+        "--tasks-per-episode", "200",
+        "--max-steps-per-task", "4",
+        "--config-path", str(config_abs),
+        "--run-label", "_test_best_ckpt",
+        "--output-name", "test_dqn.pt",
+    ])
+    train(args)
+
+    run_dir = Path("runs") / "_test_best_ckpt"
+    final_path = run_dir / "test_dqn.pt"
+    best_path = run_dir / "test_dqn_best.pt"
+    assert final_path.exists(), f"Final checkpoint missing: {final_path}"
+    assert best_path.exists(), f"Best checkpoint missing: {best_path}"
+
+    # --- Exact recomputation from task_records.json ---
+    records = json.loads((run_dir / "task_records.json").read_text())
+    assert len(records) >= 100, f"Need >=100 outcomes, got {len(records)}"
+
+    recomputed_best_value = -1.0
+    recomputed_best_task = 0
+    recomputed_best_step = 0
+    window_size = 100
+    for i in range(window_size, len(records) + 1):
+        window_success = np.mean([r["success"] for r in records[i - window_size : i]])
+        cum_steps = sum(r["steps"] for r in records[:i])
+        if window_success > recomputed_best_value:
+            recomputed_best_value = window_success
+            recomputed_best_task = i
+            recomputed_best_step = cum_steps
+
+    summary = json.loads((run_dir / "train_summary.json").read_text())
+    assert summary["best_checkpoint_metric"] == "success_rate_rolling"
+    assert summary["best_checkpoint_value"] == recomputed_best_value, (
+        f"Expected {recomputed_best_value}, got {summary['best_checkpoint_value']}"
+    )
+    assert summary["best_checkpoint_task"] == recomputed_best_task, (
+        f"Expected task {recomputed_best_task}, got {summary['best_checkpoint_task']}"
+    )
+    assert summary["best_checkpoint_step"] == recomputed_best_step, (
+        f"Expected step {recomputed_best_step}, got {summary['best_checkpoint_step']}"
+    )
+    assert str(best_path) in summary["best_checkpoint_path"]
+
+    # Also verify that the final checkpoint is untouched (unchanged behavior).
+    assert final_path.exists()
+
+    # Quick sanity: best checkpoint is loadable and has same structure as final.
+    best_state = torch.load(best_path, map_location="cpu")
+    final_state = torch.load(final_path, map_location="cpu")
+    assert set(best_state.keys()) == set(final_state.keys())

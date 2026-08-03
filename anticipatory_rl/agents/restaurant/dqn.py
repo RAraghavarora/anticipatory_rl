@@ -1175,6 +1175,7 @@ def train(args: argparse.Namespace) -> Path:
     run_dir = Path("runs") / run_label
     run_dir.mkdir(parents=True, exist_ok=True)
     output_path = run_dir / args.output_name
+    best_path = run_dir / (Path(args.output_name).stem + "_best" + Path(args.output_name).suffix)
     print(f"[train] Run artifacts -> {run_dir.resolve()} ({run_label})")
     aim_logger = AimLogger(args, run_label)
     csv_logger = CSVLogger(args, run_label, run_dir)
@@ -1364,6 +1365,8 @@ def train(args: argparse.Namespace) -> Path:
     recent_returns: Deque[float] = deque(maxlen=100)
     recent_success: Deque[int] = deque(maxlen=100)
     recent_auto: Deque[int] = deque(maxlen=100)
+    best_success_rate = -1.0
+    best_checkpoint_info = None
     loss_history: List[float] = []
     step_reward_history: List[float] = []
     task_records: List[Dict[str, float | int | bool | str | None]] = []
@@ -1565,6 +1568,20 @@ def train(args: argparse.Namespace) -> Path:
             current_task_actions = []
             current_task_action_strings = []
 
+            # Best checkpoint: save q_net whenever rolling training success rate reaches a new maximum.
+            if len(recent_success) == recent_success.maxlen:
+                current_success_rate = float(np.mean(recent_success))
+                if current_success_rate > best_success_rate:
+                    best_success_rate = current_success_rate
+                    torch.save(q_net.state_dict(), best_path)
+                    best_checkpoint_info = {
+                        "best_checkpoint_path": str(best_path),
+                        "best_checkpoint_metric": "success_rate_rolling",
+                        "best_checkpoint_value": current_success_rate,
+                        "best_checkpoint_step": int(global_step + 1),
+                        "best_checkpoint_task": int(total_tasks),
+                    }
+
         if env_reset_flag or trunc_reset_flag:
             episode_index += 1
             reset_seed = args.seed + 100_003 * episode_index
@@ -1639,6 +1656,11 @@ def train(args: argparse.Namespace) -> Path:
         "tasks_per_episode": int(args.tasks_per_episode),
         "env_reset_tasks": None if env_reset_tasks is None else int(env_reset_tasks),
         "seed": int(args.seed),
+        "best_checkpoint_path": best_checkpoint_info["best_checkpoint_path"] if best_checkpoint_info else None,
+        "best_checkpoint_metric": best_checkpoint_info["best_checkpoint_metric"] if best_checkpoint_info else None,
+        "best_checkpoint_value": best_checkpoint_info["best_checkpoint_value"] if best_checkpoint_info else None,
+        "best_checkpoint_step": best_checkpoint_info["best_checkpoint_step"] if best_checkpoint_info else None,
+        "best_checkpoint_task": best_checkpoint_info["best_checkpoint_task"] if best_checkpoint_info else None,
     }
     with (run_dir / "train_summary.json").open("w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
