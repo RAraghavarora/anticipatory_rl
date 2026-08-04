@@ -23,7 +23,8 @@ def run_planner(
 
     Starts with *initial_search_time_limit* seconds. If no plan is found, doubles
     the limit and retries, up to *max_search_time_limit* seconds total.
-    Returns the path to the first sas_plan* file produced.
+    Returns the *best* plan found: LAMA is anytime and writes sas_plan.1, sas_plan.2,
+    ... with increasing quality, so the highest-numbered file is returned.
 
     *alias* selects a portfolio alias (default: ``seq-sat-lama-2011``). When
     *search* is provided, it is passed to Fast Downward via ``--search`` and the

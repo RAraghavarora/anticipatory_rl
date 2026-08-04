@@ -1230,6 +1230,7 @@ def solve_restaurant_sequence_with_fd(
     planner_path: Path,
     domain_path: Path,
     alias: str = "seq-sat-lama-2011",
+    search: str | None = None,
     timeout_s: float = 120.0,
 ) -> SequencePlannerResult:
     """Solve a K-task chain with the sequence domain and a satisficing planner.
@@ -1263,6 +1264,7 @@ def solve_restaurant_sequence_with_fd(
                 problem_path,
                 tmpdir,
                 alias=alias,
+                search=search,
                 initial_search_time_limit=timeout_s,
                 max_search_time_limit=timeout_s,
             )
@@ -1282,7 +1284,7 @@ def solve_restaurant_sequence_with_fd(
                 raw_fd_cost=_parse_raw_fd_cost(plan_text),
                 solve_time_s=float(time.perf_counter() - t0),
                 completion_count=len(segments),
-                selected_search=f"alias:{alias}",
+                selected_search=f"search:{search}" if search else f"alias:{alias}",
             )
         except Exception as exc:
             elapsed = float(time.perf_counter() - t0)

@@ -1,5 +1,8 @@
-# Proposal 1: Far-pantry jug
-# pantry is 35 steps from everything. jar_0 starts full at pantry, never depletes.
+# v5: far pantry + EMPTY jar, so the two changes compound instead of cancelling.
+# pantry is 35 steps from everything. jar_0 starts EMPTY at pantry (as in toy_level_3),
+# so the investment is fetch + a fill that only amortizes from the 2nd water task on.
+# v4 kept the distance but pre-filled the jar, which cancelled the distance and left
+# break-even at ~1.4 water tasks (K=2, same as v3). Empty + far should push it past 2.
 # Only one jar exists, so nothing nearer can cannibalize the far-pantry investment.
 # The name must stay jar_0: experiments/sequences/*.json are generated from
 # toy_level_3.yaml and reference jar_0 in pick_place tasks.
@@ -105,7 +108,7 @@ reset_object_overrides:
   jar_0:
     location: pantry
     dirty: false
-    filled_with: water
+    filled_with:
   plate_0:
     location: servingtable
     dirty: false
