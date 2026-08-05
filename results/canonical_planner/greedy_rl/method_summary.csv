@@ -1,0 +1,3 @@
+method_id,seed_count,tasks_per_seed,success_rate_mean,success_rate_sd,auto_success_rate_mean,auto_success_rate_sd,mean_steps_mean,mean_steps_sd,mean_cost_pddl_mean,mean_cost_pddl_sd
+myopic_dqn_greedy,4,500,0.925,0.1114330889,0.2295,0.0160312195,11.423,6.2095883922,1554.775,275.0538326098
+anticipatory_dqn_greedy,4,500,0.9595,0.0085440037,0.2365,0.0059721576,9.427,0.4585382572,1431.8625,48.6804610872

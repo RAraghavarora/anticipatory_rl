@@ -48,4 +48,6 @@ opencode.json
 package.json
 node_modules/
 .opencode/
-results/
+results/*
+!results/canonical_planner/
+!results/canonical_planner/**

@@ -8,6 +8,19 @@
     "task_index": "zero-based"
   },
   "persistence": "one environment reset per 50-task sequence; no reset between tasks",
+  "archive_layout": {
+    "planner_summaries": "planner/",
+    "raw_results": {
+      "anticipatory_dqn_beta1_25": "planner/raw/anticipatory_dqn_guided/",
+      "myopic_dqn_beta1": "planner/raw/myopic_dqn_guided/",
+      "myopic_fd_optimal": "planner/raw/myopic_fd_optimal/",
+      "clairvoyant_k3_lama": "planner/raw/clairvoyant_k3/"
+    },
+    "greedy_rl": "greedy_rl/",
+    "checkpoints": "checkpoints/",
+    "figures": "figures/",
+    "sequence_snapshot": "sequences/"
+  },
   "canonical_sequences": [
     {
       "sequence_index": 0,
@@ -126,8 +139,8 @@
     }
   },
   "row_counts": {
-    "task_results.csv": 5000,
-    "run_summary.csv": 100
+    "planner/task_results.csv": 5000,
+    "planner/run_summary.csv": 100
   },
   "expected_when_complete": {
     "task_rows": 5000,
@@ -137,37 +150,37 @@
   "checkpoint_files": {
     "anticipatory_dqn_beta1_25": {
       "0": {
-        "path": "runs/v3_ant_g0.97_peb/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/anticipatory/seed0/restaurant_dqn.pt",
         "sha256": "1d7fc97334d68a97c264fc312a7d02a52914866034b1addcecbeac86d3523998"
       },
       "4": {
-        "path": "runs/v3_ant_g0.97_peb_s4/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/anticipatory/seed4/restaurant_dqn.pt",
         "sha256": "531df476f2d7d814767c0884e0ae52118679181eeb7875e9b88ef6ce28511056"
       },
       "8": {
-        "path": "runs/v3_ant_g0.97_peb_s8/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/anticipatory/seed8/restaurant_dqn.pt",
         "sha256": "efee6d8959c6452cb0a8ad4c85880a783157af79ef07a93662f37bc7b7ce53f4"
       },
       "16": {
-        "path": "runs/v3_ant_g0.97_peb_s16/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/anticipatory/seed16/restaurant_dqn.pt",
         "sha256": "313d8e67e8ad38b67550d6313702df781c64ff2eff664eb18584f42ee9f75959"
       }
     },
     "myopic_dqn_beta1": {
       "0": {
-        "path": "runs/v3_myo_g0.97_peb/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/myopic/seed0/restaurant_dqn.pt",
         "sha256": "87d8b0e2eefe6085816ee043515333f7a7e732699c639c9fecf9b3fa193c9565"
       },
       "4": {
-        "path": "runs/v3_myopic_g0.97_peb_s4/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/myopic/seed4/restaurant_dqn.pt",
         "sha256": "ccc5f58c277175ab33d2c3ec7d3a06254506235239cb9d0e9b3dac6413bdbee5"
       },
       "8": {
-        "path": "runs/v3_myopic_g0.97_peb_s8/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/myopic/seed8/restaurant_dqn.pt",
         "sha256": "67b91f4c4fddbb4f4c1347ca642c2dae65f5ce2132818d7a6e1f0de4814206c3"
       },
       "16": {
-        "path": "runs/v3_myopic_g0.97_peb_s16/restaurant_dqn.pt",
+        "path": "results/canonical_planner/checkpoints/myopic/seed16/restaurant_dqn.pt",
         "sha256": "4875ded89e8fd5bd45a1f89dcb1bea2f784d7cdfb8d2c89f4fec3034c9a336b7"
       }
     }

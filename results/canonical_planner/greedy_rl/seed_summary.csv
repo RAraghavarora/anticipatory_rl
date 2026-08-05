@@ -1,0 +1,9 @@
+method_id,checkpoint_seed,checkpoint_variant,task_count,success_rate,auto_success_rate,mean_steps,mean_cost_pddl
+myopic_dqn_greedy,0,final,500,0.984,0.234,8.186,1435.25
+myopic_dqn_greedy,4,final,500,0.984,0.236,8.156,1393.35
+myopic_dqn_greedy,8,final,500,0.974,0.242,8.618,1424.0
+myopic_dqn_greedy,16,best,500,0.758,0.206,20.732,1966.5
+anticipatory_dqn_greedy,0,final,500,0.958,0.234,9.552,1377.05
+anticipatory_dqn_greedy,4,final,500,0.966,0.23,9.098,1419.1
+anticipatory_dqn_greedy,8,final,500,0.966,0.244,9.036,1494.45
+anticipatory_dqn_greedy,16,final,500,0.948,0.238,10.022,1436.85
