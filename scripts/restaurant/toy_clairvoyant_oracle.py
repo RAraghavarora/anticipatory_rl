@@ -61,6 +61,8 @@ def run_oracle(
     k: int,
     timeout_s: float,
     seed: int,
+    alias: str = "seq-sat-lama-2011",
+    search: str | None = None,
 ) -> dict[str, Any]:
     if k < 1:
         raise ValueError("K must be at least 1.")
@@ -85,6 +87,8 @@ def run_oracle(
                 window,
                 planner_path=planner_path,
                 domain_path=domain_path,
+                alias=alias,
+                search=search,
                 timeout_s=timeout_s,
             )
             success = result.success
@@ -144,11 +148,19 @@ def run_oracle(
     sequence_complete = completions == requested_task_count
     prefix_mean = total_cost / completions if completions else None
     output = {
+        # An optimal --search (e.g. astar(hmax())) makes each window cost a true optimum,
+        # so the "not optima" caveat must not be recorded for those runs.
         "research_object": (
+            "finite-K clairvoyant OPTIMAL planner benchmark over undiscounted PDDL "
+            "physical cost; each window cost is that window's exact optimum, so a "
+            "refusal to act is a proof rather than a search failure; still not V_AP, "
+            "non-clairvoyant anticipation, or RL return"
+            if search else
             "finite-K clairvoyant satisficing planner benchmark over undiscounted "
             "PDDL physical cost; window costs are plan costs, not lower bounds "
             "or optima; not V_AP, non-clairvoyant anticipation, or RL return"
         ),
+        "planner": f"search:{search}" if search else f"alias:{alias}",
         "config": str(config_path),
         "seed": seed,
         "sequence_id": sequence_id,
@@ -188,6 +200,14 @@ def main() -> None:
     parser.add_argument("--domain-path", type=Path, default=Path("pddl/toy_restaurant_sequence_domain.pddl"))
     parser.add_argument("--planner-path", type=Path, default=Path("downward/fast-downward.py"))
     parser.add_argument("--timeout-s", type=float, default=120.0)
+    parser.add_argument("--alias", type=str, default="seq-sat-lama-2011",
+                        help="FD alias. Satisficing (seq-sat-*) plan cost depends on the "
+                             "search budget, which confounds comparisons across K; an "
+                             "optimal alias (seq-opt-*) removes that dependence.")
+    parser.add_argument("--search", type=str, default=None,
+                        help="FD --search string; bypasses --alias. The seq-opt-* aliases all "
+                             "reject this domain's axioms, but astar(hmax()) is optimal, "
+                             "axiom-safe, and far faster than satisficing lama here.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-path", type=Path, default=Path("runs/toy_clairvoyant_oracle/results.json"))
     args = parser.parse_args()
@@ -201,6 +221,8 @@ def main() -> None:
         k=args.K,
         timeout_s=args.timeout_s,
         seed=args.seed,
+        alias=args.alias,
+        search=args.search,
     )
     print(json.dumps({key: value for key, value in output.items() if key != "windows"}, indent=2))
 

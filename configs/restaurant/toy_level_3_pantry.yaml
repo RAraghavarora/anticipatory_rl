@@ -1,0 +1,134 @@
+# Proposal 1: Far-pantry jug
+# pantry is 35 steps from everything. jar_0 starts full at pantry, never depletes.
+# Only one jar exists, so nothing nearer can cannibalize the far-pantry investment.
+# The name must stay jar_0: experiments/sequences/*.json are generated from
+# toy_level_3.yaml and reference jar_0 in pick_place tasks.
+locations:
+  - name: countertop
+    coord: [0, 0]
+  - name: coffeemachine
+    coord: [1, 0]
+  - name: dishwasher
+    coord: [2, 0]
+  - name: shelf
+    coord: [0, 1]
+  - name: servingtable
+    coord: [1, 1]
+  - name: fountain
+    coord: [2, 1]
+  - name: pantry
+    coord: [10, 10]
+
+stations:
+  water: fountain
+  coffee: coffeemachine
+  fruit: countertop
+  wash: dishwasher
+  countertop: countertop
+
+service_locations:
+  - servingtable
+
+wash_ready_locations:
+  - countertop
+
+dirty_drop_locations:
+  - dishwasher
+
+object_kinds: [cup, water, apple, bowl, knife, jar, plate]
+contents: [empty, water, coffee]
+
+task_types:
+  - serve_water
+  - make_coffee
+  - make_fruit_bowl
+  - clear_containers
+  - wash_objects
+  - pick_place
+
+object_specs:
+  - [cup_0, cup]
+  - [cup_1, cup]
+  - [water_fountain, water]
+  - [water_machine, water]
+  - [apple_0, apple]
+  - [bowl_0, bowl]
+  - [knife_0, knife]
+  - [jar_0, jar]
+  - [plate_0, plate]
+
+reset_location_distribution:
+  cup:
+    countertop: 1.0
+  apple:
+    countertop: 1.0
+  bowl:
+    countertop: 1.0
+  knife:
+    countertop: 1.0
+  jar:
+    pantry: 1.0
+
+service_location_distribution:
+  servingtable: 1.0
+
+wash_kind_distribution:
+  bowl: 0.5
+  knife: 0.5
+
+pick_place_object_distribution:
+  cup_0: 1.0
+  cup_1: 1.0
+  bowl_0: 1.0
+  knife_0: 1.0
+  jar_0: 1.0
+  plate_0: 1.0
+
+reset_dirty_probability:
+  knife: 0.6
+  bowl: 0.6
+  cup: 0.0
+  apple: 0.0
+  jar: 0.0
+
+reset_object_overrides:
+  water_fountain:
+    location: fountain
+  water_machine:
+    location: coffeemachine
+  cup_0:
+    location: countertop
+    dirty: false
+  cup_1:
+    location: dishwasher
+    dirty: true
+  jar_0:
+    location: pantry
+    dirty: false
+    filled_with: water
+  plate_0:
+    location: servingtable
+    dirty: false
+    filled_with:
+
+task_distribution:
+  serve_water: 0.25
+  wash_objects: 0.30
+  make_coffee: 0.30
+  clear_containers: 0.05
+  make_fruit_bowl: 0.05
+  pick_place: 0.05
+
+paper2_cost:
+  enabled: true
+  move:
+    scale: 25.0
+
+movement_costs:
+  countertop:     {countertop: 0, coffeemachine: 1, dishwasher: 2, shelf: 1, servingtable: 8, fountain: 9, pantry: 35}
+  coffeemachine:  {countertop: 1, coffeemachine: 0, dishwasher: 1, shelf: 2, servingtable: 7, fountain: 8, pantry: 35}
+  dishwasher:     {countertop: 2, coffeemachine: 1, dishwasher: 0, shelf: 3, servingtable: 8, fountain: 9, pantry: 35}
+  shelf:          {countertop: 1, coffeemachine: 2, dishwasher: 3, shelf: 0, servingtable: 7, fountain: 8, pantry: 35}
+  servingtable:   {countertop: 8, coffeemachine: 7, dishwasher: 8, shelf: 7, servingtable: 0, fountain: 2, pantry: 35}
+  fountain:       {countertop: 9, coffeemachine: 8, dishwasher: 9, shelf: 8, servingtable: 2, fountain: 0, pantry: 35}
+  pantry:         {countertop: 35, coffeemachine: 35, dishwasher: 35, shelf: 35, servingtable: 35, fountain: 35, pantry: 0}
