@@ -1,4 +1,4 @@
-"""Cumulative PDDL cost vs. number of tasks, from results/canonical_planner/task_results.csv.
+"""Cumulative PDDL cost vs. number of tasks, from the canonical planner task results.
 
 At each task_index, cost is AVERAGED across the 10 canonical sequences, then
 cumsum'd over task_index -- so the y-axis is the expected cumulative cost of
@@ -12,8 +12,8 @@ import argparse
 import matplotlib.pyplot as plt
 import pandas as pd
 
-CSV_PATH = "results/canonical_planner/task_results.csv"
-OUT_PATH = "results/canonical_planner/cumulative_cost_plot.png"
+CSV_PATH = "results/canonical_planner/planner/task_results.csv"
+OUT_PATH = "results/canonical_planner/figures/cumulative_cost_plot.png"
 
 FD_METHODS = {
     "myopic_fd_optimal": ("Myopic FD (optimal)", "#000000"),

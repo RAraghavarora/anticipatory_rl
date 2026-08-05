@@ -8,9 +8,9 @@
 # -- a more honest uncertainty picture at n=4 than a parametric mean+-std band.
 #
 # Guided methods (myopic_dqn_beta1, anticipatory_dqn_beta1_25) come from
-# results/canonical_planner/task_results.csv and pool all 4 checkpoint seeds
+# results/canonical_planner/planner/task_results.csv and pool all 4 checkpoint seeds
 # as-is. Greedy methods (direct policy rollout, no FD guidance) come from
-# results/canonical_planner/greedy_direct_task_results.csv; myopic-greedy uses
+# results/canonical_planner/greedy_rl/task_results.csv; myopic-greedy uses
 # seed 16's `best` checkpoint variant instead of `final` -- the final
 # checkpoint diverged late in training (see train_summary.json /
 # metrics.csv for v3_myopic_g0.97_peb_s16) and pooling that outlier in would
@@ -21,9 +21,9 @@ library(tidyverse)
 library(ggdist)
 library(ggrepel)
 
-guided_csv <- "results/canonical_planner/task_results.csv"
-greedy_csv <- "results/canonical_planner/greedy_direct_task_results.csv"
-out_path <- "results/canonical_planner/cumulative_cost_ggdist.pdf"
+guided_csv <- "results/canonical_planner/planner/task_results.csv"
+greedy_csv <- "results/canonical_planner/greedy_rl/task_results.csv"
+out_path <- "results/canonical_planner/figures/cumulative_cost_ggdist.pdf"
 
 fd_methods <- list(
   list(id = "myopic_fd_optimal", label = "Myopic FD (optimal)", color = "#000000"),

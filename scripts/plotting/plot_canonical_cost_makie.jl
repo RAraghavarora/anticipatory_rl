@@ -10,8 +10,8 @@ using DataFrames
 using Statistics
 using CairoMakie
 
-const CSV_PATH = "results/canonical_planner/task_results.csv"
-const OUT_PATH = "results/canonical_planner/cumulative_cost_makie.png"
+const CSV_PATH = "results/canonical_planner/planner/task_results.csv"
+const OUT_PATH = "results/canonical_planner/figures/cumulative_cost_makie.png"
 
 const FD_METHODS = [
     ("myopic_fd_optimal", "Myopic FD (optimal)", RGBf(0.0, 0.0, 0.0)),

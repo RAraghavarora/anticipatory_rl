@@ -2,12 +2,12 @@
 #
 # Density is over mean_cost_pddl (a full 50-task sequence average). The two
 # FD baselines and the two RL-guided methods come from
-# results/canonical_planner/run_summary.csv: 10 runs for the FD baselines (no
+# results/canonical_planner/planner/run_summary.csv: 10 runs for the FD baselines (no
 # seed), 40 runs for the guided DQN methods (4 checkpoint seeds x 10
 # sequences) -- total variability, seed and sequence pooled together.
 #
 # The two RL-greedy (direct policy rollout, no FD guidance) methods come from
-# results/canonical_planner/greedy_direct_run_summary.csv and use only the
+# results/canonical_planner/greedy_rl/run_summary.csv and use only the
 # best (checkpoint_seed, checkpoint_variant) combo, matching the headline
 # table -- NOT pooled across seeds like the guided rows. Reason: myopic-greedy
 # seed 16's *final* checkpoint catastrophically fails (3% success, ~8571 mean
@@ -24,12 +24,12 @@
 library(tidyverse)
 library(ggdist)
 
-out_path <- "results/canonical_planner/cost_raincloud.pdf"
+out_path <- "results/canonical_planner/figures/cost_raincloud.pdf"
 
-guided <- read_csv("results/canonical_planner/run_summary.csv", show_col_types = FALSE) %>%
+guided <- read_csv("results/canonical_planner/planner/run_summary.csv", show_col_types = FALSE) %>%
   select(method_id, checkpoint_seed, mean_cost_pddl)
 
-greedy_all <- read_csv("results/canonical_planner/greedy_direct_run_summary.csv", show_col_types = FALSE) %>%
+greedy_all <- read_csv("results/canonical_planner/greedy_rl/run_summary.csv", show_col_types = FALSE) %>%
   select(method_id, checkpoint_seed, checkpoint_variant, mean_cost_pddl)
 
 best_seeds <- greedy_all %>%

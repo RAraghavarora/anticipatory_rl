@@ -10,7 +10,7 @@ Usage (on 5080):
     export PYTHONPATH=/home/robocup/raghav/anticipatory_rl
     python scripts/restaurant/debug_guided_vs_oracle.py \
         --seed 0 --seq 2 --tasks 5 7 \
-        --q-weights runs/v3_myo_g0.97_peb/restaurant_dqn.pt \
+        --q-weights results/canonical_planner/checkpoints/myopic/seed0/restaurant_dqn.pt \
         --gamma 0.97
 """
 
