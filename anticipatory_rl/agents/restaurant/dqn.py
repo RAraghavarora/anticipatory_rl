@@ -597,7 +597,7 @@ def _select_action(
     epsilon: float,
     device: torch.device,
 ) -> Dict[str, int]:
-    if random.random() < epsilon:
+    if epsilon > 0.0 and random.random() < epsilon:
         action_type = random_valid_index(masks["valid_action_type_mask"])
         object1 = random_valid_index(masks["valid_object1_mask"][action_type])
         location = random_valid_index(masks["valid_location_mask"][action_type])
@@ -1095,22 +1095,41 @@ def _greedy_success_rate(
     n_tasks: int,
     max_steps: int,
     seed_base: int,
+    env_reset_tasks: int,
 ) -> float:
-    """Greedy (epsilon=0) success rate over n_tasks fresh tasks. Diagnostics only."""
+    """Greedy (epsilon=0) success rate over n_tasks in a PERSISTENT world.
+
+    Matches the training objective's MDP: the world resets only every
+    env_reset_tasks outcomes (mirroring the training run's own world horizon),
+    not per task -- carried-over state, auto-successes, and the consequences
+    of trap/prepared states all count, same as during training. `max_steps`
+    is not used as an inner-loop cap: `env` already self-truncates via its own
+    max_steps_per_task, which every caller constructs to match this value.
+    """
     was_training = q_net.training
     q_net.eval()
     successes = 0
-    for i in range(n_tasks):
-        obs, info = env.reset(seed=seed_base + i)
-        for _ in range(max_steps):
-            masks = extract_masks(info)
-            action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
-            obs, reward, success, truncated, info = env.step(action)
+    outcomes = 0
+    world_index = 0
+    obs, info = env.reset(seed=seed_base + 100_003 * world_index)
+    world_index += 1
+    while outcomes < n_tasks:
+        masks = extract_masks(info)
+        action = _select_action(q_net, obs, masks, epsilon=0.0, device=device)
+        obs, reward, success, truncated, info = env.step(action)
+        if success or truncated:
+            outcomes += 1
             if success:
                 successes += 1
-                break
-            if truncated:
-                break
+            # Reset only once, right when the threshold is crossed -- checking
+            # this at the top of the loop instead (per primitive step, not per
+            # completed task) re-fires every step while `outcomes` sits on the
+            # threshold, since a single task spans multiple steps: the world
+            # gets reset on step 1 of the next task before it can ever
+            # accumulate enough steps to succeed or truncate, forever.
+            if env_reset_tasks > 0 and outcomes < n_tasks and outcomes % env_reset_tasks == 0:
+                obs, info = env.reset(seed=seed_base + 100_003 * world_index)
+                world_index += 1
     if was_training:
         q_net.train()
     return successes / max(1, n_tasks)
@@ -1244,15 +1263,15 @@ def train(args: argparse.Namespace) -> Path:
     diagnostics = bool(getattr(args, "diagnostics", False))
     diag_interval = max(1, int(getattr(args, "diagnostics_interval", 1000)))
     positive_reward_transitions = 0
-    diag_env: RestaurantSymbolicEnv | None = None
-    if diagnostics:
-        diag_env = RestaurantSymbolicEnv(
-            config_path=args.config_path,
-            max_steps_per_task=args.max_steps_per_task,
-            success_reward=args.success_reward,
-            invalid_action_penalty=args.invalid_action_penalty,
-            rng_seed=args.seed + 7_000_000,
-        )
+    # Always created: greedy_success_rate below drives best-checkpoint selection,
+    # not just --diagnostics logging.
+    diag_env = RestaurantSymbolicEnv(
+        config_path=args.config_path,
+        max_steps_per_task=args.max_steps_per_task,
+        success_reward=args.success_reward,
+        invalid_action_penalty=args.invalid_action_penalty,
+        rng_seed=args.seed + 7_000_000,
+    )
 
     demo_path = getattr(args, "demo_transitions", None)
     offline_transitions = None
@@ -1466,20 +1485,41 @@ def train(args: argparse.Namespace) -> Path:
                 if not np.isnan(optimize_stats.value_vs_meanq_gap):
                     logger.track(optimize_stats.value_vs_meanq_gap, name="value_vs_meanq_gap", step=global_step)
 
-        if diagnostics and diag_env is not None and (global_step + 1) % diag_interval == 0:
-            logger.track(
-                positive_reward_transitions / float(global_step + 1),
-                name="replay_positive_reward_fraction",
-                step=global_step,
-            )
+        if (global_step + 1) % diag_interval == 0:
+            # Deterministic (epsilon=0), PERSISTENT-world eval (world resets every
+            # env_reset_tasks outcomes, matching the training objective's own MDP,
+            # not per task). Unlike the old on-policy rolling-success ratchet, this
+            # can't be fooled by a lucky streak under a noisy small window, and
+            # unlike a per-task-reset eval it can't be won by a purely-reactive
+            # policy that ignores anticipatory consequences.
+            eval_n_tasks = max(40, 2 * env_reset_tasks) if env_reset_tasks and env_reset_tasks > 0 else 20
             greedy_success = _greedy_success_rate(
                 q_net, diag_env, device,
-                n_tasks=20, max_steps=args.max_steps_per_task, seed_base=args.seed + 8_000_000,
+                n_tasks=eval_n_tasks, max_steps=args.max_steps_per_task,
+                seed_base=args.seed + 8_000_000, env_reset_tasks=env_reset_tasks,
             )
-            logger.track(greedy_success, name="greedy_success_rolling", step=global_step)
-            q_by_type = _q_by_action_type(q_net, diag_env, device, seed=args.seed + 9_000_000)
-            for name, q_val in q_by_type.items():
-                logger.track(q_val, name="q_by_action_type", step=global_step, context={"action_type": name})
+            if greedy_success >= best_success_rate:
+                best_success_rate = greedy_success
+                torch.save(q_net.state_dict(), best_path)
+                best_checkpoint_info = {
+                    "best_checkpoint_path": str(best_path),
+                    "best_checkpoint_metric": "persistent_greedy_success_rate",
+                    "best_checkpoint_value": greedy_success,
+                    "best_checkpoint_eval_n_tasks": int(eval_n_tasks),
+                    "best_checkpoint_eval_env_reset_tasks": int(env_reset_tasks),
+                    "best_checkpoint_step": int(global_step + 1),
+                    "best_checkpoint_task": int(total_tasks),
+                }
+            if diagnostics:
+                logger.track(
+                    positive_reward_transitions / float(global_step + 1),
+                    name="replay_positive_reward_fraction",
+                    step=global_step,
+                )
+                logger.track(greedy_success, name="greedy_success_rolling", step=global_step)
+                q_by_type = _q_by_action_type(q_net, diag_env, device, seed=args.seed + 9_000_000)
+                for name, q_val in q_by_type.items():
+                    logger.track(q_val, name="q_by_action_type", step=global_step, context={"action_type": name})
 
         if args.tau < 1.0:
             with torch.no_grad():
@@ -1568,20 +1608,6 @@ def train(args: argparse.Namespace) -> Path:
             current_task_actions = []
             current_task_action_strings = []
 
-            # Best checkpoint: save q_net whenever rolling training success rate reaches a new maximum.
-            if len(recent_success) == recent_success.maxlen:
-                current_success_rate = float(np.mean(recent_success))
-                if current_success_rate > best_success_rate:
-                    best_success_rate = current_success_rate
-                    torch.save(q_net.state_dict(), best_path)
-                    best_checkpoint_info = {
-                        "best_checkpoint_path": str(best_path),
-                        "best_checkpoint_metric": "success_rate_rolling",
-                        "best_checkpoint_value": current_success_rate,
-                        "best_checkpoint_step": int(global_step + 1),
-                        "best_checkpoint_task": int(total_tasks),
-                    }
-
         if env_reset_flag or trunc_reset_flag:
             episode_index += 1
             reset_seed = args.seed + 100_003 * episode_index
@@ -1661,6 +1687,8 @@ def train(args: argparse.Namespace) -> Path:
         "best_checkpoint_value": best_checkpoint_info["best_checkpoint_value"] if best_checkpoint_info else None,
         "best_checkpoint_step": best_checkpoint_info["best_checkpoint_step"] if best_checkpoint_info else None,
         "best_checkpoint_task": best_checkpoint_info["best_checkpoint_task"] if best_checkpoint_info else None,
+        "best_checkpoint_eval_n_tasks": best_checkpoint_info["best_checkpoint_eval_n_tasks"] if best_checkpoint_info else None,
+        "best_checkpoint_eval_env_reset_tasks": best_checkpoint_info["best_checkpoint_eval_env_reset_tasks"] if best_checkpoint_info else None,
     }
     with (run_dir / "train_summary.json").open("w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)

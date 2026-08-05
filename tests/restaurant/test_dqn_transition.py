@@ -203,14 +203,18 @@ def test_myopic_and_anticipatory_timeout_parity():
 
 
 def test_best_checkpoint_saved_and_valid(monkeypatch, tmp_path):
-    """Best checkpoint written when 100-task rolling success window fills.
+    """Best checkpoint written periodically from a deterministic greedy eval.
 
-    Verifies exact metadata by recomputing rolling success from task_records.json
-    and asserting the recorded best is the first strict global maximum."""
+    Verifies exact metadata by reloading the saved best weights and re-running
+    the same deterministic _greedy_success_rate call, confirming the recorded
+    value is exactly reproducible (not a noisy on-policy training statistic)."""
     import json
     import torch
-    import numpy as np
-    from anticipatory_rl.agents.restaurant.dqn import build_parser, train
+    from anticipatory_rl.agents.restaurant.dqn import (
+        build_parser, train, RestaurantQNetwork, _greedy_success_rate,
+    )
+    from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv
+    from anticipatory_rl.utils import select_device
 
     config_abs = Path("configs/restaurant/toy_level_3.yaml").resolve()
     monkeypatch.chdir(tmp_path)
@@ -220,6 +224,7 @@ def test_best_checkpoint_saved_and_valid(monkeypatch, tmp_path):
 
     args = build_parser().parse_args([
         "--total-steps", "500",
+        "--diagnostics-interval", "100",
         "--tasks-per-episode", "200",
         "--max-steps-per-task", "4",
         "--config-path", str(config_abs),
@@ -234,39 +239,82 @@ def test_best_checkpoint_saved_and_valid(monkeypatch, tmp_path):
     assert final_path.exists(), f"Final checkpoint missing: {final_path}"
     assert best_path.exists(), f"Best checkpoint missing: {best_path}"
 
-    # --- Exact recomputation from task_records.json ---
-    records = json.loads((run_dir / "task_records.json").read_text())
-    assert len(records) >= 100, f"Need >=100 outcomes, got {len(records)}"
-
-    recomputed_best_value = -1.0
-    recomputed_best_task = 0
-    recomputed_best_step = 0
-    window_size = 100
-    for i in range(window_size, len(records) + 1):
-        window_success = np.mean([r["success"] for r in records[i - window_size : i]])
-        cum_steps = sum(r["steps"] for r in records[:i])
-        if window_success > recomputed_best_value:
-            recomputed_best_value = window_success
-            recomputed_best_task = i
-            recomputed_best_step = cum_steps
-
     summary = json.loads((run_dir / "train_summary.json").read_text())
-    assert summary["best_checkpoint_metric"] == "success_rate_rolling"
-    assert summary["best_checkpoint_value"] == recomputed_best_value, (
-        f"Expected {recomputed_best_value}, got {summary['best_checkpoint_value']}"
-    )
-    assert summary["best_checkpoint_task"] == recomputed_best_task, (
-        f"Expected task {recomputed_best_task}, got {summary['best_checkpoint_task']}"
-    )
-    assert summary["best_checkpoint_step"] == recomputed_best_step, (
-        f"Expected step {recomputed_best_step}, got {summary['best_checkpoint_step']}"
+    assert summary["best_checkpoint_metric"] == "persistent_greedy_success_rate"
+    assert 0.0 <= summary["best_checkpoint_value"] <= 1.0
+    assert summary["best_checkpoint_step"] % 100 == 0, (
+        "best checkpoint should land on a diagnostics_interval boundary, not an "
+        "arbitrary task-completion step"
     )
     assert str(best_path) in summary["best_checkpoint_path"]
 
-    # Also verify that the final checkpoint is untouched (unchanged behavior).
-    assert final_path.exists()
+    # --- Exact recomputation: reload best weights, re-run the same deterministic eval ---
+    device = select_device()
+    eval_env = RestaurantSymbolicEnv(
+        config_path=config_abs,
+        max_steps_per_task=args.max_steps_per_task,
+        success_reward=args.success_reward,
+        invalid_action_penalty=args.invalid_action_penalty,
+        rng_seed=args.seed + 7_000_000,
+    )
+    obs, _ = eval_env.reset(seed=args.seed)
+    obs_dim = int(obs.shape[0]) if hasattr(obs, "shape") else len(obs)
+    q_net = RestaurantQNetwork(
+        obs_dim,
+        int(eval_env.action_space["action_type"].n),
+        int(eval_env.action_space["object1"].n),
+        int(eval_env.action_space["location"].n),
+        hidden_dim=args.hidden_dim,
+        center_advantages=not getattr(args, "no_dueling_centering", False),
+    ).to(device)
+    q_net.load_state_dict(torch.load(best_path, map_location=device))
+
+    recomputed_value = _greedy_success_rate(
+        q_net, eval_env, device,
+        n_tasks=summary["best_checkpoint_eval_n_tasks"],
+        max_steps=args.max_steps_per_task,
+        seed_base=args.seed + 8_000_000,
+        env_reset_tasks=summary["best_checkpoint_eval_env_reset_tasks"],
+    )
+    assert recomputed_value == summary["best_checkpoint_value"], (
+        f"Saved best checkpoint does not reproduce its own recorded metric: "
+        f"expected {summary['best_checkpoint_value']}, got {recomputed_value}"
+    )
 
     # Quick sanity: best checkpoint is loadable and has same structure as final.
     best_state = torch.load(best_path, map_location="cpu")
     final_state = torch.load(final_path, map_location="cpu")
     assert set(best_state.keys()) == set(final_state.keys())
+
+
+def test_select_action_epsilon_zero_does_not_consume_rng():
+    """epsilon=0.0 must never draw from the global `random` stream.
+
+    A mid-training diagnostic/checkpoint eval that calls _select_action with
+    epsilon=0.0 in a loop must not perturb the shared global RNG state that
+    the main training loop's own epsilon-greedy exploration depends on --
+    otherwise subsequent training-time exploration silently desynchronizes
+    depending on checkpoint quality, breaking run reproducibility."""
+    import random
+
+    from anticipatory_rl.agents.restaurant.dqn import RestaurantQNetwork, _select_action
+
+    config_abs = Path("configs/restaurant/toy_level_3.yaml").resolve()
+    device = torch.device("cpu")
+    env = RestaurantSymbolicEnv(config_path=config_abs, max_steps_per_task=4)
+    obs, info = env.reset(seed=0)
+    masks = extract_masks(info)
+    q_net = RestaurantQNetwork(
+        int(obs.shape[0]) if hasattr(obs, "shape") else len(obs),
+        int(env.action_space["action_type"].n),
+        int(env.action_space["object1"].n),
+        int(env.action_space["location"].n),
+    ).to(device)
+
+    random.seed(12345)
+    state_before = random.getstate()
+    for _ in range(20):
+        _select_action(q_net, obs, masks, epsilon=0.0, device=device)
+    assert random.getstate() == state_before, (
+        "_select_action(epsilon=0.0) consumed from the global random stream"
+    )
