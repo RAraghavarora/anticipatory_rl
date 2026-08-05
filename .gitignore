@@ -48,3 +48,4 @@ opencode.json
 package.json
 node_modules/
 .opencode/
+results/
