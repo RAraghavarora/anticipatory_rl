@@ -7,17 +7,22 @@
 #
 # Concurrency is capped below core count on purpose: planner timeouts are wall-clock,
 # so oversubscription can manufacture fake timeouts in the exact measurement we care about.
-set -u
+set -eu
 
-# Portable: override REPO/CONDA/ENVNAME per machine.
-#   REPO=~/raghav/anticipatory_rl CONDA=~/miniconda3/etc/profile.d/conda.sh ./scripts/run_v5_eval.sh
-REPO=${REPO:-$HOME/raghav/anticipatory_rl}
+# Portable: override REPO/CONDA/ENVNAME per machine. These must be EXPORTED or set
+# inline on the SAME line as the command -- `VAR=x` on its own line is a shell
+# variable and is not inherited by this script.
+#   REPO=$PWD CONDA=/path/conda.sh ./scripts/run_v5_eval.sh
+REPO=${REPO:-$PWD}
 CONDA=${CONDA:-$HOME/miniconda3/etc/profile.d/conda.sh}
 ENVNAME=${ENVNAME:-ant_rl}
+[ -d "$REPO" ]  || { echo "ERROR: REPO not a directory: $REPO"; exit 1; }
+[ -f "$CONDA" ] || { echo "ERROR: conda profile not found: $CONDA"; exit 1; }
 cd "$REPO"
 source "$CONDA"
-conda activate "$ENVNAME"
+conda activate "$ENVNAME" || { echo "ERROR: cannot activate env: $ENVNAME"; exit 1; }
 export PYTHONPATH=.
+echo "repo=$REPO  env=$ENVNAME  python=$(which python)"
 
 CFG=configs/restaurant/toy_level_5.yaml
 Q=runs/v5_ant/restaurant_dqn_best.pt
