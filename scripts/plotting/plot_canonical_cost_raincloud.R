@@ -20,6 +20,17 @@
 # success) but still isn't as good as seeds 0/4/8's final checkpoints -- so it
 # doesn't change which (seed, variant) wins best-of, but both are kept in the
 # CSV for transparency rather than only keeping whichever looks better.
+#
+# The one-step GNN (Talukder) baseline comes from
+# results/canonical_planner/gnn/faithful_seed0_seq_cost.csv: per-task cost
+# rows (strategy = myopic/auto) for a single GNN-guided model, no seed
+# sweep, so it contributes 10 sequence-level points like the FD baselines.
+#
+# The augmented one-step GNN variant comes from
+# results/canonical_planner/gnn/counterfactual_seed0_seq_cost.csv: same
+# schema, but strategy includes aug+fill/aug+clean/aug+jar_position rows --
+# the GNN actually commits to an augmented candidate here instead of falling
+# back to myopic, which is why its cost is much lower than the faithful row.
 
 library(tidyverse)
 library(ggdist)
@@ -44,23 +55,42 @@ greedy <- greedy_all %>%
   semi_join(best_seeds, by = c("method_id", "checkpoint_seed", "checkpoint_variant")) %>%
   select(-checkpoint_variant)
 
-df_raw <- bind_rows(guided, greedy)
+gnn <- read_csv("results/canonical_planner/gnn/faithful_seed0_seq_cost.csv", show_col_types = FALSE) %>%
+  group_by(seq) %>%
+  summarise(mean_cost_pddl = sum(pddl_cost) / n(), .groups = "drop") %>%
+  transmute(method_id = "gnn_faithful", mean_cost_pddl)
 
-# Row order top-to-bottom matches the LaTeX table; coord_flip() puts the
-# first factor level at the bottom, so `methods` below is listed bottom-up.
+gnn_aug <- read_csv("results/canonical_planner/gnn/counterfactual_seed0_seq_cost.csv", show_col_types = FALSE) %>%
+  group_by(seq) %>%
+  summarise(mean_cost_pddl = sum(pddl_cost) / n(), .groups = "drop") %>%
+  transmute(method_id = "gnn_counterfactual", mean_cost_pddl)
+
+df_raw <- bind_rows(guided, greedy, gnn, gnn_aug)
+
+# Row order is by median cost (worst at top, best at bottom) rather than a
+# fixed table order; coord_flip() puts the first factor level at the bottom.
 methods <- tribble(
   ~method_id, ~label, ~color,
-  "clairvoyant_k3_lama", "Clairvoyant FD", "#E69F00",
-  "anticipatory_dqn_greedy", "Anticipatory RL, greedy", "#7FCFB4",
-  "anticipatory_dqn_beta1_25", "Anticipatory RL, guided", "#009E73",
-  "myopic_dqn_greedy", "Myopic RL, greedy", "#A6D8F0",
-  "myopic_dqn_beta1", "Myopic RL, guided", "#56B4E9",
+  "clairvoyant_k3_lama", "Clairvoyant Oracle", "#E69F00",
+  "anticipatory_dqn_greedy", "Anticipatory RL (greedy)", "#7FCFB4",
+  "anticipatory_dqn_beta1_25", "Anticipatory RL (guided)", "#009E73",
+  "myopic_dqn_greedy", "Myopic RL (greedy)", "#A6D8F0",
+  "myopic_dqn_beta1", "Myopic RL (guided)", "#56B4E9",
+  "gnn_counterfactual", "One-task GNN (augmented)", "#D55E00",
+  "gnn_faithful", "One-task GNN", "#CC79A7",
   "myopic_fd_optimal", "Myopic Oracle", "#000000"
 )
 
+level_order <- df_raw %>%
+  inner_join(methods, by = "method_id") %>%
+  group_by(label) %>%
+  summarise(median_cost = median(mean_cost_pddl), .groups = "drop") %>%
+  arrange(median_cost) %>%
+  pull(label)
+
 df <- df_raw %>%
   inner_join(methods, by = "method_id") %>%
-  mutate(label = factor(label, levels = methods$label))
+  mutate(label = factor(label, levels = level_order))
 
 colors <- setNames(methods$color, methods$label)
 
@@ -88,5 +118,5 @@ p <- ggplot(df, aes(x = label, y = mean_cost_pddl, fill = label, color = label))
     plot.margin = margin(10, 15, 10, 10)
   )
 
-ggsave(out_path, p, width = 9, height = 6.5, device = cairo_pdf)
+ggsave(out_path, p, width = 9, height = 8.5, device = cairo_pdf)
 cat("wrote", out_path, "\n")
