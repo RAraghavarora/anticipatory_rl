@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Generate GNN training data for v5, sharded by seed.
+# Generate faithful or augmented GNN training data for v5, sharded by seed.
 #
-# One state costs ~250 FD calls on v5 (1 chain solve + ~10 augmented solves, then a V_AP
-# label per surviving candidate, each needing all 48 enumerated tasks solved). Matching
-# level_3's 2000-state dataset is ~500k FD calls -- ~28h serial. The script is a sequential
-# loop, so shard by seed and merge.
+# An augmented chain state costs ~250 FD calls (candidate solves plus 48-task V_AP labels);
+# a faithful state costs 49. Matching level_3's 2000 chain states is therefore ~500k or
+# ~98k FD calls respectively. Each shard is serial, so run shards concurrently and merge.
 #
-#   REPO=/path/to/wt-gnn CONDA=/path/to/conda.sh SHARDS=20 PER=100 ./run_gnn_v5_data.sh
+#   MODE=aug REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
+#   MODE=faithful REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
 set -eu
 
 # NOTE: these must be EXPORTED or set inline on the same line as the command.
@@ -20,6 +20,22 @@ SHARDS=${SHARDS:-20}
 PER=${PER:-100}
 TIMEOUT=${TIMEOUT:-30}
 MAXAUGS=${MAXAUGS:-10}
+MODE=${MODE:-aug}
+
+case "$MODE" in
+  aug)
+    GENERATOR=scripts/gnn/generate_data_aug.py
+    GENERATOR_ARGS="--max-augs $MAXAUGS"
+    ;;
+  faithful)
+    GENERATOR=scripts/gnn/generate_data.py
+    GENERATOR_ARGS=""
+    ;;
+  *)
+    echo "ERROR: MODE must be 'aug' or 'faithful', got: $MODE"
+    exit 1
+    ;;
+esac
 
 # Fail loudly rather than generating hours of garbage in the wrong environment.
 [ -d "$REPO" ]  || { echo "ERROR: REPO not a directory: $REPO"; exit 1; }
@@ -29,15 +45,17 @@ source "$CONDA"
 conda activate "$ENVNAME" || { echo "ERROR: cannot activate env: $ENVNAME"; exit 1; }
 export PYTHONPATH=.
 for f in configs/restaurant/toy_level_5.yaml pddl/toy_restaurant_domain.pddl \
-         downward/builds/release/bin/downward scripts/gnn/generate_data_aug.py; do
+         downward/builds/release/bin/downward "$GENERATOR"; do
   [ -e "$f" ] || { echo "ERROR: missing $f (is Fast Downward built?)"; exit 1; }
 done
 python -c 'import torch_geometric, sentence_transformers' \
   || { echo "ERROR: torch_geometric / sentence_transformers missing in $ENVNAME"; exit 1; }
 echo "repo=$REPO  env=$ENVNAME  python=$(which python)"
 
-OUT=runs/v5_gnn_data
-LOG=logs/v5_gnn_data
+OUT=runs/v5_gnn_data/$MODE
+LOG=logs/v5_gnn_data/$MODE
+MERGED=runs/v5_gnn_data/train_data_v5_$MODE
+export OUT MERGED
 mkdir -p "$OUT" "$LOG"
 
 CFG=configs/restaurant/toy_level_5.yaml
@@ -49,9 +67,9 @@ date
 
 JOBS=$OUT/jobs.txt; : > "$JOBS"
 for i in $(seq 0 $((SHARDS-1))); do
-  echo "python scripts/gnn/generate_data_aug.py \
+  echo "python $GENERATOR \
 --config-path $CFG --domain-path $DOM --planner-path $FD \
---seed $((1000+i)) --num-states $PER --max-augs $MAXAUGS --timeout-s $TIMEOUT \
+--seed $((1000+i)) --num-states $PER $GENERATOR_ARGS --timeout-s $TIMEOUT \
 --log-interval 10 --output-path $OUT/shard_${i}.pt > $LOG/shard_${i}.log 2>&1" >> "$JOBS"
 done
 
@@ -64,7 +82,9 @@ xargs -a "$JOBS" -d '\n' -P "$PAR" -I{} bash -c '{}'
 echo "shards done, merging"
 python - <<'PY'
 import glob, torch, os
-shards = sorted(glob.glob("runs/v5_gnn_data/shard_*.pt"))
+out = os.environ["OUT"]
+merged = os.environ["MERGED"]
+shards = sorted(glob.glob(os.path.join(out, "shard_*.pt")))
 data, meta = [], None
 for f in shards:
     try:
@@ -75,14 +95,14 @@ for f in shards:
     data.extend(items)
     print(f"  {os.path.basename(f)}: {len(items)}")
 print(f"merged {len(data)} samples from {len(shards)} shards")
-torch.save(data, "runs/v5_gnn_data/train_data_v5_aug.pt")
+torch.save(data, merged + ".pt")
 # companion npz so the v_ap distribution can be eyeballed the same way as toy3_2k_aug.npz
 import numpy as np
 vs = [float(s["v_ap"]) for s in data if isinstance(s, dict) and "v_ap" in s]
 if vs:
-    np.savez("runs/v5_gnn_data/train_data_v5_aug.npz", v_ap=np.array(vs))
+    np.savez(merged + ".npz", v_ap=np.array(vs))
     a = np.array(vs)
-    print(f"v_ap min/mean/max = {a.min():.0f}/{a.mean():.0f}/{a.max():.0f}  (level_3 aug was 384/1148/1967)")
+    print(f"v_ap min/mean/max = {a.min():.0f}/{a.mean():.0f}/{a.max():.0f}")
 PY
 echo "ALL DONE"
 date

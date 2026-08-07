@@ -14,6 +14,7 @@ NODE_TYPES = ("agent", "room", "location", "object")
 ROOM_ASSIGNMENTS = {
     "Kitchen": ("countertop", "coffeemachine", "dishwasher", "shelf"),
     "Serving": ("servingtable", "fountain"),
+    "Storage": ("pantry",),
 }
 SBERT_DIM = 384
 
@@ -63,6 +64,12 @@ def state_to_graph(
     state: RestaurantPlannerState,
     env,
 ) -> Data:
+    room_assignments = {
+        room: tuple(loc for loc in locations if loc in env.location_coords)
+        for room, locations in ROOM_ASSIGNMENTS.items()
+    }
+    room_assignments = {room: locations for room, locations in room_assignments.items() if locations}
+
     names: list[str] = []
     types: list[int] = []
     positions: list[tuple[float, float]] = []
@@ -74,10 +81,10 @@ def state_to_graph(
     agent_pos = env.location_coords.get(agent_loc, (0, 0))
     positions.append((float(agent_pos[0]), float(agent_pos[1])))
 
-    for room_name in ROOM_ASSIGNMENTS:
+    for room_name in room_assignments:
         names.append(room_name)
         types.append(1)
-        locs_in_room = ROOM_ASSIGNMENTS[room_name]
+        locs_in_room = room_assignments[room_name]
         coords = [env.location_coords.get(loc, (0, 0)) for loc in locs_in_room if loc in env.location_coords]
         if coords:
             cx = sum(c[0] for c in coords) / len(coords)
@@ -86,7 +93,7 @@ def state_to_graph(
             cx, cy = 0.0, 0.0
         positions.append((cx, cy))
 
-    room_name_to_idx = {rn: i for i, rn in enumerate(ROOM_ASSIGNMENTS)}
+    room_name_to_idx = {rn: i for i, rn in enumerate(room_assignments)}
     loc_name_to_idx: dict[str, int] = {}
     for loc_name in env.locations:
         names.append(loc_name)
@@ -152,7 +159,7 @@ def state_to_graph(
             edge_src.extend([obj_node_idx, container_idx])
             edge_dst.extend([container_idx, obj_node_idx])
 
-    for room_name, locs in ROOM_ASSIGNMENTS.items():
+    for room_name, locs in room_assignments.items():
         room_idx = 1 + room_name_to_idx[room_name]
         for loc in locs:
             if loc in loc_name_to_idx:
