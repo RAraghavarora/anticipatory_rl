@@ -9,13 +9,8 @@
 #   MODE=faithful REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
 set -eu
 
-# NOTE: these must be EXPORTED or set inline on the same line as the command.
-#   VAR=x on its own line is a shell variable and is NOT inherited by this script.
-#   good:  REPO=$PWD CONDA=/path/conda.sh ./scripts/run_gnn_v5_data.sh
-#   good:  export REPO=$PWD; ./scripts/run_gnn_v5_data.sh
+# Activate the uv environment before running this script.
 REPO=${REPO:-$PWD}
-CONDA=${CONDA:-$HOME/miniconda3/etc/profile.d/conda.sh}
-ENVNAME=${ENVNAME:-ant_rl}
 SHARDS=${SHARDS:-20}
 PER=${PER:-100}
 TIMEOUT=${TIMEOUT:-30}
@@ -39,18 +34,15 @@ esac
 
 # Fail loudly rather than generating hours of garbage in the wrong environment.
 [ -d "$REPO" ]  || { echo "ERROR: REPO not a directory: $REPO"; exit 1; }
-[ -f "$CONDA" ] || { echo "ERROR: conda profile not found: $CONDA"; exit 1; }
 cd "$REPO"
-source "$CONDA"
-conda activate "$ENVNAME" || { echo "ERROR: cannot activate env: $ENVNAME"; exit 1; }
 export PYTHONPATH=.
 for f in configs/restaurant/toy_level_5.yaml pddl/toy_restaurant_domain.pddl \
          downward/builds/release/bin/downward "$GENERATOR"; do
   [ -e "$f" ] || { echo "ERROR: missing $f (is Fast Downward built?)"; exit 1; }
 done
 python -c 'import torch_geometric, sentence_transformers' \
-  || { echo "ERROR: torch_geometric / sentence_transformers missing in $ENVNAME"; exit 1; }
-echo "repo=$REPO  env=$ENVNAME  python=$(which python)"
+  || { echo "ERROR: torch_geometric / sentence_transformers missing from active environment"; exit 1; }
+echo "repo=$REPO  python=$(command -v python)"
 
 OUT=runs/v5_gnn_data/$MODE
 LOG=logs/v5_gnn_data/$MODE
