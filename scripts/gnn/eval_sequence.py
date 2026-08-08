@@ -147,6 +147,8 @@ def _generate_focused_augmentations(
     state: RestaurantPlannerState,
     initial_agent_location: str,
     env: RestaurantSymbolicEnv,
+    *,
+    unbounded_jar: bool = False,
 ) -> list[AugmentedClause]:
     # 1. Path locations: initial agent location + every move source/destination
     path_locations: set[str] = {initial_agent_location}
@@ -245,6 +247,31 @@ def _generate_focused_augmentations(
                         object_name=obj_name,
                         target_location=cm_loc,
                     ))
+
+    # 6. Steelman: unbounded jar fill+relocate, ignoring bounded_region and
+    # coffee_in_region. The GNN's candidate generator otherwise cannot propose
+    # "fetch a jar from a distant pantry, fill it, park it near a consumer";
+    # this hands it that candidate so a later refusal is attributable to the
+    # value horizon, not to candidate coverage. Conjunctive: the jar starts
+    # empty, so a position-only clause would be unsatisfiable-useless.
+    if unbounded_jar:
+        consumer_locs = coffeemachine_locs | set(env.service_locations)
+        for obj_name in sorted(state.objects):
+            obj = state.objects[obj_name]
+            if obj.kind != "jar":
+                continue
+            for consumer_loc in sorted(consumer_locs):
+                if obj.location == consumer_loc:
+                    continue
+                _emit(AugmentedClause(
+                    pddl_clause=(
+                        f"(filled-with water {obj_name})\n      "
+                        f"(is-at {obj_name} {consumer_loc})"
+                    ),
+                    clause_type="jar_prepared",
+                    object_name=obj_name,
+                    target_location=consumer_loc,
+                ))
 
     return clauses
 
@@ -504,6 +531,7 @@ def run_sequence(
         prefix = best["prefix"]
         clauses = _generate_focused_augmentations(
             prefix, state, initial_agent_location, env,
+            unbounded_jar=args.unbounded_jar_augmentation,
         )
 
         augments_tried = 0
@@ -624,6 +652,9 @@ def main() -> None:
     parser.add_argument("--max-augs", type=int, default=10)
     parser.add_argument("--policy", type=str, default="gnn_anticipatory",
                         choices=["gnn_anticipatory", "myopic", "both"])
+    parser.add_argument("--unbounded-jar-augmentation", action="store_true",
+                        help="Steelman: also propose fill+relocate jar candidates "
+                             "outside the bounded region (see _generate_focused_augmentations).")
     args = parser.parse_args()
 
     if args.policy == "both":
