@@ -86,13 +86,18 @@ def predict_v_ap(
 class AugmentedClause:
     """Immutable augmentation carrying the PDDL clause and metadata for validation.
 
-    Covers the four existing clause forms: clean object, object filled with
-    water, object at location, and machine water at coffee machine.  No
-    generic predicate framework — just enough metadata to validate and
-    describe each clause.
+    Covers the five clause forms: clean object, object filled with water,
+    object at location, machine water at coffee machine, and (steelman only)
+    a jar both filled with water and relocated to a consumer.  No generic
+    predicate framework — just enough metadata to validate and describe each
+    clause.
+
+    Every clause_type listed below MUST have a matching branch in
+    ``_p_add_is_satisfied``; without one the clause is silently rejected at
+    verification and never scored.
     """
     pddl_clause: str
-    clause_type: str        # "clean", "fill", "jar_position", "machine_water"
+    clause_type: str        # "clean", "fill", "jar_position", "machine_water", "jar_prepared"
     object_name: str
     target_location: str    # empty string when not applicable
 
@@ -111,6 +116,10 @@ def _p_add_is_satisfied(state: RestaurantPlannerState, clause: AugmentedClause) 
         return obj is not None and obj.filled_with == "water"
     elif clause.clause_type == "jar_position":
         return obj is not None and obj.location == clause.target_location
+    elif clause.clause_type == "jar_prepared":
+        # Conjunctive steelman clause: both PDDL conjuncts must hold.
+        return (obj is not None and obj.filled_with == "water"
+                and obj.location == clause.target_location)
     elif clause.clause_type == "machine_water":
         # Any concrete water-kind object at the target location matches the
         # abstract PDDL water constant (Talukder et al. 2024, Section 4).
@@ -140,6 +149,10 @@ def _p_add_is_satisfied(state: RestaurantPlannerState, clause: AugmentedClause) 
 #   • jar → coffee      — both jar location and coffee station in region
 #   • machine water     — non-fountain water-kind object depleted (location
 #                          is None) when coffee station is in region
+#   • jar prepared      — steelman only (``unbounded_jar=True``): jar filled
+#                          with water AND relocated to a consumer, ignoring
+#                          bounded_region entirely; prepended to the clause
+#                          list so it survives the caller's --max-augs cap
 
 
 def _generate_focused_augmentations(
@@ -254,8 +267,15 @@ def _generate_focused_augmentations(
     # this hands it that candidate so a later refusal is attributable to the
     # value horizon, not to candidate coverage. Conjunctive: the jar starts
     # empty, so a position-only clause would be unsatisfiable-useless.
+    #
+    # These are PREPENDED, not appended: callers truncate with
+    # ``clauses[: args.max_augs]`` (default 10), and at a mid-chain state the
+    # bounded rules alone already fill that budget, so appended steelman
+    # clauses would be cut before ever reaching the planner — indistinguishable
+    # from the baseline declining them.
     if unbounded_jar:
         consumer_locs = coffeemachine_locs | set(env.service_locations)
+        jar_clauses: list[AugmentedClause] = []
         for obj_name in sorted(state.objects):
             obj = state.objects[obj_name]
             if obj.kind != "jar":
@@ -263,7 +283,7 @@ def _generate_focused_augmentations(
             for consumer_loc in sorted(consumer_locs):
                 if obj.location == consumer_loc:
                     continue
-                _emit(AugmentedClause(
+                clause = AugmentedClause(
                     pddl_clause=(
                         f"(filled-with water {obj_name})\n      "
                         f"(is-at {obj_name} {consumer_loc})"
@@ -271,7 +291,13 @@ def _generate_focused_augmentations(
                     clause_type="jar_prepared",
                     object_name=obj_name,
                     target_location=consumer_loc,
-                ))
+                )
+                # Same dedup semantics as _emit, into a local list.
+                if clause.pddl_clause in seen:
+                    continue
+                seen.add(clause.pddl_clause)
+                jar_clauses.append(clause)
+        clauses[:0] = jar_clauses
 
     return clauses
 
@@ -536,7 +562,16 @@ def run_sequence(
 
         augments_tried = 0
         augments_accepted = 0
+        # Per-clause-type outcomes, so "the planner timed out" and "the
+        # candidate was scored and declined" are distinguishable in the output.
+        aug_outcomes: dict[str, dict[str, int]] = {}
         for clause in clauses[: args.max_augs]:
+            outcome = aug_outcomes.setdefault(clause.clause_type, {
+                "attempted": 0, "solved": 0, "failed": 0,
+                "invalid": 0, "scored": 0, "accepted": 0,
+            })
+            outcome["attempted"] += 1
+
             aug_result = solve_restaurant_task_with_fd(
                 env=env, state=state, task=task,
                 planner_path=args.planner_path, domain_path=args.domain_path,
@@ -547,7 +582,9 @@ def run_sequence(
             augments_tried += 1
 
             if not aug_result.success:
+                outcome["failed"] += 1
                 continue
+            outcome["solved"] += 1
 
             try:
                 aug_candidate = _evaluate_augmented_plan(
@@ -556,13 +593,16 @@ def run_sequence(
                     f"aug+{clause.clause_type}+{clause.object_name}",
                 )
             except ValueError:
+                outcome["invalid"] += 1
                 continue
             gnn_calls += 1
+            outcome["scored"] += 1
 
             if aug_candidate["score"] < best_score:
                 best = aug_candidate
                 best_score = aug_candidate["score"]
                 augments_accepted += 1
+                outcome["accepted"] += 1
 
         # --- Step 4: advance state ---
         state = best["post"]
@@ -576,6 +616,7 @@ def run_sequence(
             "trace": [f"{name}({', '.join(a)})" for name, a in best["prefix"]],
             "augments_tried": augments_tried,
             "augments_accepted": augments_accepted,
+            "aug_outcomes": aug_outcomes,
         })
         completed += 1
         total_cost += best["prefix_cost"]
@@ -586,6 +627,14 @@ def run_sequence(
     wall_seconds = time.perf_counter() - t_start
     attempted = len(tasks)
     mean_cost = total_cost / completed if completed > 0 else float("inf")
+
+    # Roll up per-clause-type augmentation outcomes over the whole sequence.
+    aug_outcome_totals: dict[str, dict[str, int]] = {}
+    for rec in records:
+        for ctype, counts in rec.get("aug_outcomes", {}).items():
+            tot = aug_outcome_totals.setdefault(ctype, {})
+            for key, val in counts.items():
+                tot[key] = tot.get(key, 0) + val
 
     summary = {
         "sequence_path": str(args.sequence_path),
@@ -600,6 +649,8 @@ def run_sequence(
         "total_fd_calls": total_fd_calls,
         "total_gnn_calls": total_gnn_calls,
         "strategy_distribution": strategy_counts,
+        "aug_outcomes_by_clause_type": aug_outcome_totals,
+        "unbounded_jar_augmentation": bool(getattr(args, "unbounded_jar_augmentation", False)),
         "wall_seconds": wall_seconds,
     }
 

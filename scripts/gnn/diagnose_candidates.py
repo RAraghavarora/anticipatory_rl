@@ -282,8 +282,13 @@ def run_diagnostic(
         generated = 1 + len(clauses)           # all candidates proposed
         attempted = 1 + min(len(clauses), args.max_augs)
 
-        # jar / machine counts from the full proposal list (before cap)
-        jar_pos_count = sum(1 for c in clauses if c.clause_type == "jar_position")
+        # jar / machine counts from the full proposal list (before cap).
+        # Both jar clause forms count: the bounded "jar_position" rule and the
+        # steelman "jar_prepared" (fill + relocate) rule, otherwise a steelman
+        # run reports zero jar proposals while proposing them.
+        jar_pos_count = sum(
+            1 for c in clauses if c.clause_type in {"jar_position", "jar_prepared"}
+        )
         machine_water_count = sum(1 for c in clauses if c.clause_type == "machine_water")
 
         solved = 1
@@ -352,6 +357,7 @@ def run_diagnostic(
             "index": idx, "task_type": task_type, "auto": False,
             "generated": generated, "attempted": attempted,
             "solved": solved, "valid": valid,
+            # jar_position + jar_prepared (steelman) proposals
             "jar_position_count": jar_pos_count,
             "machine_water_count": machine_water_count,
             "gnn_selected": gnn_strategy,
@@ -416,6 +422,7 @@ def run_diagnostic(
         "total_attempted": total_attempted,
         "total_solved": total_solved,
         "total_valid": total_valid,
+        # jar_position + jar_prepared (steelman) proposals
         "jar_position_proposals": total_jar_pos,
         "machine_water_proposals": total_machine_water,
         "tasks_with_exact_augmented_improvement": tasks_with_improvement,
