@@ -1,0 +1,12 @@
+run,demos,gamma,seed,jar_share,refill_water,fill,best_checkpoint,success_rate,non_auto_success_rate,avg_task_steps,mean_q,max_abs_q,diverged
+v5-myopic-g097-s0,myopic_K1,97,0,6.7,281,3944,0.55,0.5358,0.4173,33.47,11,391,False
+v5_ant_g0.97_s0,anticipatory_K3,97,0,32.9,4677,9538,0.93,0.815,0.7666,20.13,132,531,False
+v5_ant_g0.97_s16,anticipatory_K3,97,16,28.6,4472,11157,0.96,0.8475,0.8063,18.16,149,530,False
+v5_ant_g0.97_s4,anticipatory_K3,97,4,26.6,3831,10556,0.96,0.8158,0.7658,20.01,137,632,False
+v5_ant_g0.97_s8,anticipatory_K3,97,8,32.8,4483,9184,0.95,0.8058,0.7521,20.52,136,580,False
+v5_ant_g0.98_s0,anticipatory_K3,98,0,65.2,8104,4330,0.87,0.7497,0.6818,23.55,195,839,False
+v5_ant_g0.98_s4,anticipatory_K3,98,4,67.9,6482,3060,0.95,0.6364,0.5497,29.72,194,1056,False
+v5_ant_g0.98_s8,anticipatory_K3,98,8,60.5,3498,2287,0.77,0.4671,0.355,39.13,244649,70074704,True
+v5_ant_g099_s4,anticipatory_K3,99,4,8.8,753,7825,0.13,0.1513,0.0486,55.44,180446387,19384348672,True
+v5_ant_g099_s8,anticipatory_K3,99,8,62.4,4326,2606,0.85,0.533,0.4091,35.55,443,1457,False
+v5_nodemo_g0.97_s0,anticipatory_K3,97,0,6.7,281,3944,0.55,0.5358,0.4173,33.47,11,391,False

@@ -1,0 +1,3760 @@
+{
+  "research_object": "finite-K clairvoyant OPTIMAL planner benchmark over undiscounted PDDL physical cost; each window cost is that window's exact optimum, so a refusal to act is a proof rather than a search failure; still not V_AP, non-clairvoyant anticipation, or RL return",
+  "planner": "search:astar(hmax())",
+  "config": "configs/restaurant/toy_level_5.yaml",
+  "seed": 0,
+  "sequence_id": "iid-eval-seq-08",
+  "sequence_path": "experiments/sequences/iid-eval-seq-08.json",
+  "sequence_sha256": "87c009d1e3bd03fa5e16a46f7b275c56a6ef8a18ac407425f4650a7f4ca63248",
+  "K": 2,
+  "requested_task_count": 50,
+  "attempted_window_count": 50,
+  "valid_prefix_completion_count": 50,
+  "valid_prefix_completion_rate": 1.0,
+  "sequence_complete": true,
+  "failure_index": null,
+  "failure_error": null,
+  "valid_prefix_physical_cost": 74150.0,
+  "valid_prefix_mean_physical_cost_per_completion": 1483.0,
+  "whole_sequence_physical_cost": 74150.0,
+  "whole_sequence_mean_physical_cost_per_completion": 1483.0,
+  "valid_prefix_physical_action_count": 421,
+  "windows": [
+    {
+      "index": 0,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.09393948700744659,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 700.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 700.0,
+      "first_segment_actions": 7,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 1,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08436179999262094,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 0.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 2,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08873087400570512,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 0.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 3,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.0844115560175851,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1475.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 4,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.5528684289893135,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2375.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2375.0,
+      "first_segment_actions": 12,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "make-fruit-bowl",
+          [
+            "apple_0",
+            "bowl_0",
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 5,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08763021999038756,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1300.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 6,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.1381746920524165,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2100.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 7,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 40.823184989974834,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3125.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1050.0,
+      "first_segment_actions": 9,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_1",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_1",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_1",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_1",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_1",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_1",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 8,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 69.44471014896408,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 4600.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 9,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.6984251489629969,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2925.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2075.0,
+      "first_segment_actions": 10,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 10,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 4.0750211760168895,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3700.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3700.0,
+      "first_segment_actions": 21,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 11,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.7229800440836698,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3050.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 12,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 324.9113324760692,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 5575.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3500.0,
+      "first_segment_actions": 19,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 13,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.0926942239748314,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2075.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2075.0,
+      "first_segment_actions": 10,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 14,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.49727010901551694,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2850.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 15,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 39.89053330908064,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 4600.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3300.0,
+      "first_segment_actions": 18,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 16,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 1.3713545890059322,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2900.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2900.0,
+      "first_segment_actions": 19,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "apple_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "apple_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "make-fruit-bowl",
+          [
+            "apple_0",
+            "bowl_0",
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 17,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.0924965989543125,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2075.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 18,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 9.382410697988234,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3825.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 19,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.128614200046286,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2150.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 20,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.6030811569653451,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2925.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2925.0,
+      "first_segment_actions": 17,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 21,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.1119632429908961,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1200.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 22,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.18625729496125132,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1500.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1200.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "apple_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "place",
+          [
+            "apple_0",
+            "fountain"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "fountain"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_1",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_1",
+            "fountain"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "plate_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 23,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 3.8076222160598263,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3400.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 300.0,
+      "first_segment_actions": 2,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "servingtable",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "plate_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 24,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 428.4681197969476,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 5625.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3550.0,
+      "first_segment_actions": 19,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "countertop",
+            "fountain"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "fountain"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 25,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 13.461987146991305,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3825.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 26,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 4.324339144979604,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3375.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 27,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 15.077285152976401,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3750.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3750.0,
+      "first_segment_actions": 25,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "apple_0",
+            "fountain"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "apple_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "make-fruit-bowl",
+          [
+            "apple_0",
+            "bowl_0",
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 28,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 2.432292669080198,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2650.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 29,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 9.52833321003709,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3500.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2650.0,
+      "first_segment_actions": 22,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "apple_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "apple_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "make-fruit-bowl",
+          [
+            "apple_0",
+            "bowl_0",
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 30,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.0845350930467248,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 850.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 850.0,
+      "first_segment_actions": 7,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "bowl_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "bowl_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "bowl_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 31,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.10559309704694897,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2275.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 32,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 25.181621700990945,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 4350.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2275.0,
+      "first_segment_actions": 10,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "countertop",
+            "servingtable"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 33,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 14.943157542031258,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3825.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 34,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 5.040068792994134,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3375.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 35,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 15.084162703016773,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 3825.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 36,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08630550000816584,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1300.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 37,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08192241401411593,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 0.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 38,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08766264806035906,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 1300.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 39,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.6810109129874036,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2600.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 40,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.1593012809753418,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2200.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 1300.0,
+      "first_segment_actions": 5,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 41,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.8224048349075019,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2825.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2375.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "countertop"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ],
+        [
+          "move",
+          [
+            "countertop",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "knife_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "countertop"
+          ]
+        ],
+        [
+          "place",
+          [
+            "knife_0",
+            "countertop"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 42,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 22.362974098068662,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2975.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 900.0,
+      "first_segment_actions": 9,
+      "first_segment_plan": [
+        [
+          "move",
+          [
+            "countertop",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 43,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 68.35744343895931,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 4600.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2525.0,
+      "first_segment_actions": 14,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 44,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.09606391796842217,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2075.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2075.0,
+      "first_segment_actions": 10,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 45,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.08713173400610685,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 0.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 46,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.5459258700720966,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2850.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    },
+    {
+      "index": 47,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 266.93514348508324,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 5375.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 3300.0,
+      "first_segment_actions": 18,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "dishwasher"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "wash",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "dishwasher"
+          ]
+        ],
+        [
+          "move",
+          [
+            "dishwasher",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 48,
+      "window_size": 2,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.09494920901488513,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 2075.0,
+      "window_completion_count": 2,
+      "first_segment_cost": 2075.0,
+      "first_segment_actions": 10,
+      "first_segment_plan": [
+        [
+          "pick",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ],
+        [
+          "move",
+          [
+            "servingtable",
+            "fountain"
+          ]
+        ],
+        [
+          "fill",
+          [
+            "cup_0",
+            "fountain",
+            "water"
+          ]
+        ],
+        [
+          "move",
+          [
+            "fountain",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pour",
+          [
+            "cup_0",
+            "water",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "make-coffee",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "pick",
+          [
+            "cup_0",
+            "coffeemachine"
+          ]
+        ],
+        [
+          "move",
+          [
+            "coffeemachine",
+            "servingtable"
+          ]
+        ],
+        [
+          "place",
+          [
+            "cup_0",
+            "servingtable"
+          ]
+        ]
+      ],
+      "auto_success": false
+    },
+    {
+      "index": 49,
+      "window_size": 1,
+      "selected_search": "search:astar(hmax())",
+      "solve_time_s": 0.0886315880343318,
+      "success": true,
+      "error": null,
+      "window_plan_cost": 0.0,
+      "window_completion_count": 1,
+      "first_segment_cost": 0.0,
+      "first_segment_actions": 0,
+      "first_segment_plan": [],
+      "auto_success": true
+    }
+  ]
+}

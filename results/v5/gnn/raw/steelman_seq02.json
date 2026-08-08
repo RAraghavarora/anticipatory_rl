@@ -1,0 +1,3693 @@
+{
+  "myopic": {
+    "summary": {
+      "sequence_path": "experiments/sequences/iid-eval-seq-02.json",
+      "policy": "myopic",
+      "gnn_model": "runs/gnn_v5_steelman_matched/best_model.pt",
+      "gamma": 1.0,
+      "attempted": 50,
+      "completed": 50,
+      "auto_count": 8,
+      "total_cost": 78575.0,
+      "mean_cost": 1571.5,
+      "total_fd_calls": 42,
+      "total_gnn_calls": 0,
+      "strategy_distribution": {
+        "myopic": 42,
+        "auto": 8
+      },
+      "aug_outcomes_by_clause_type": {},
+      "unbounded_jar_augmentation": true,
+      "wall_seconds": 6.677553169429302
+    },
+    "tasks": [
+      {
+        "index": 0,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 650.0,
+        "actions": 7,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_0, countertop)",
+          "move(countertop, coffeemachine)",
+          "place(cup_0, coffeemachine)",
+          "make-coffee(cup_0, coffeemachine)",
+          "pick(cup_0, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_0, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 1,
+        "task_type": "make_fruit_bowl",
+        "auto": false,
+        "success": true,
+        "cost": 1600.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)",
+          "pick(knife_0, countertop)",
+          "make-fruit-bowl(apple_0, bowl_0, knife_0, countertop)",
+          "place(knife_0, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, servingtable)",
+          "place(bowl_0, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 2,
+        "task_type": "clear_containers",
+        "auto": false,
+        "success": true,
+        "cost": 1000.0,
+        "actions": 13,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(apple_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(apple_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(bowl_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(bowl_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(cup_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(cup_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(plate_0, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 3,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2750.0,
+        "actions": 13,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "place(plate_0, servingtable)",
+          "move(servingtable, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 4,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 900.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(knife_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(knife_0, dishwasher)",
+          "wash(knife_0, dishwasher)",
+          "pick(knife_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(knife_0, countertop)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 5,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2275.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 6,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 925.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, fountain)",
+          "pick(bowl_0, fountain)",
+          "move(fountain, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 7,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2275.0,
+        "actions": 11,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 8,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 9,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 10,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 11,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 12,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 13,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 14,
+        "task_type": "pick_place",
+        "auto": false,
+        "success": true,
+        "cost": 1950.0,
+        "actions": 4,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, pantry)",
+          "pick(jar_0, pantry)",
+          "move(pantry, fountain)",
+          "place(jar_0, fountain)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 15,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2125.0,
+        "actions": 11,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(fountain, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 16,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 17,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 18,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 19,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 20,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 21,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 22,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 23,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 24,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 25,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 26,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 27,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 28,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 29,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 30,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 31,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 32,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 33,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 34,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 35,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 36,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 37,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 38,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 39,
+        "task_type": "make_fruit_bowl",
+        "auto": false,
+        "success": true,
+        "cost": 1175.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, fountain)",
+          "pick(apple_0, fountain)",
+          "move(fountain, countertop)",
+          "place(apple_0, countertop)",
+          "pick(knife_0, countertop)",
+          "make-fruit-bowl(apple_0, bowl_0, knife_0, countertop)",
+          "place(knife_0, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, servingtable)",
+          "place(bowl_0, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 40,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 850.0,
+        "actions": 7,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(bowl_0, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 41,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 3050.0,
+        "actions": 15,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 42,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 43,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 44,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 900.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(knife_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(knife_0, dishwasher)",
+          "wash(knife_0, dishwasher)",
+          "pick(knife_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(knife_0, countertop)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 45,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 46,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 47,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2275.0,
+        "actions": 11,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 48,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 49,
+        "task_type": "clear_containers",
+        "auto": false,
+        "success": true,
+        "cost": 700.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 0.0,
+        "fd_calls": 1,
+        "gnn_calls": 0,
+        "trace": [
+          "pick(apple_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(apple_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "place(cup_1, fountain)",
+          "move(fountain, servingtable)",
+          "pick(plate_0, servingtable)"
+        ],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      }
+    ]
+  },
+  "gnn_anticipatory": {
+    "summary": {
+      "sequence_path": "experiments/sequences/iid-eval-seq-02.json",
+      "policy": "gnn_anticipatory",
+      "gnn_model": "runs/gnn_v5_steelman_matched/best_model.pt",
+      "gamma": 1.0,
+      "attempted": 50,
+      "completed": 50,
+      "auto_count": 8,
+      "total_cost": 55575.0,
+      "mean_cost": 1111.5,
+      "total_fd_calls": 232,
+      "total_gnn_calls": 229,
+      "strategy_distribution": {
+        "myopic": 40,
+        "auto": 8,
+        "aug+jar_prepared+jar_0": 1,
+        "aug+fill+cup_1": 1
+      },
+      "aug_outcomes_by_clause_type": {
+        "jar_prepared": {
+          "attempted": 57,
+          "solved": 54,
+          "failed": 3,
+          "invalid": 0,
+          "scored": 54,
+          "accepted": 1
+        },
+        "clean": {
+          "attempted": 49,
+          "solved": 49,
+          "failed": 0,
+          "invalid": 0,
+          "scored": 49,
+          "accepted": 0
+        },
+        "machine_water": {
+          "attempted": 32,
+          "solved": 32,
+          "failed": 0,
+          "invalid": 0,
+          "scored": 32,
+          "accepted": 0
+        },
+        "fill": {
+          "attempted": 29,
+          "solved": 29,
+          "failed": 0,
+          "invalid": 0,
+          "scored": 29,
+          "accepted": 1
+        },
+        "jar_position": {
+          "attempted": 23,
+          "solved": 23,
+          "failed": 0,
+          "invalid": 0,
+          "scored": 23,
+          "accepted": 0
+        }
+      },
+      "unbounded_jar_augmentation": true,
+      "wall_seconds": 1521.0718590151519
+    },
+    "tasks": [
+      {
+        "index": 0,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 650.0,
+        "actions": 7,
+        "strategy": "myopic",
+        "v_ap": 1371.3013916015625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_0, countertop)",
+          "move(countertop, coffeemachine)",
+          "place(cup_0, coffeemachine)",
+          "make-coffee(cup_0, coffeemachine)",
+          "pick(cup_0, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_0, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 1,
+        "task_type": "make_fruit_bowl",
+        "auto": false,
+        "success": true,
+        "cost": 1600.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 1683.0721435546875,
+        "fd_calls": 7,
+        "gnn_calls": 7,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)",
+          "pick(knife_0, countertop)",
+          "make-fruit-bowl(apple_0, bowl_0, knife_0, countertop)",
+          "place(knife_0, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, servingtable)",
+          "place(bowl_0, servingtable)"
+        ],
+        "augments_tried": 6,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 3,
+            "solved": 3,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 3,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 2,
+        "task_type": "clear_containers",
+        "auto": false,
+        "success": true,
+        "cost": 1000.0,
+        "actions": 13,
+        "strategy": "myopic",
+        "v_ap": 1739.08154296875,
+        "fd_calls": 6,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(apple_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(apple_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(bowl_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(bowl_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(cup_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(cup_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(plate_0, servingtable)"
+        ],
+        "augments_tried": 5,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 1,
+            "failed": 1,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 3,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2750.0,
+        "actions": 13,
+        "strategy": "myopic",
+        "v_ap": 1783.3798828125,
+        "fd_calls": 10,
+        "gnn_calls": 10,
+        "trace": [
+          "place(plate_0, servingtable)",
+          "move(servingtable, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 9,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 4,
+            "solved": 4,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 4,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 4,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 900.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 1661.025146484375,
+        "fd_calls": 6,
+        "gnn_calls": 6,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(knife_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(knife_0, dishwasher)",
+          "wash(knife_0, dishwasher)",
+          "pick(knife_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(knife_0, countertop)"
+        ],
+        "augments_tried": 5,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 5,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2275.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 1261.92236328125,
+        "fd_calls": 9,
+        "gnn_calls": 9,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 8,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 3,
+            "solved": 3,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 3,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 6,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 925.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 1155.3841552734375,
+        "fd_calls": 8,
+        "gnn_calls": 8,
+        "trace": [
+          "move(servingtable, fountain)",
+          "pick(bowl_0, fountain)",
+          "move(fountain, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)"
+        ],
+        "augments_tried": 7,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 7,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2275.0,
+        "actions": 11,
+        "strategy": "myopic",
+        "v_ap": 1347.8876953125,
+        "fd_calls": 7,
+        "gnn_calls": 7,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 6,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 8,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 1044.092041015625,
+        "fd_calls": 8,
+        "gnn_calls": 8,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 7,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 9,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 1044.092041015625,
+        "fd_calls": 6,
+        "gnn_calls": 6,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 5,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 10,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 1347.8876953125,
+        "fd_calls": 7,
+        "gnn_calls": 7,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 6,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 11,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 2075.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 1044.092041015625,
+        "fd_calls": 8,
+        "gnn_calls": 8,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 7,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 12,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1300.0,
+        "actions": 5,
+        "strategy": "myopic",
+        "v_ap": 1044.092041015625,
+        "fd_calls": 6,
+        "gnn_calls": 6,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, fountain)",
+          "fill(cup_1, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 5,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 13,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 14,
+        "task_type": "pick_place",
+        "auto": false,
+        "success": true,
+        "cost": 1950.0,
+        "actions": 4,
+        "strategy": "myopic",
+        "v_ap": 1196.329833984375,
+        "fd_calls": 7,
+        "gnn_calls": 5,
+        "trace": [
+          "move(servingtable, pantry)",
+          "pick(jar_0, pantry)",
+          "move(pantry, fountain)",
+          "place(jar_0, fountain)"
+        ],
+        "augments_tried": 6,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 0,
+            "failed": 2,
+            "invalid": 0,
+            "scored": 0,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 3,
+            "solved": 3,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 3,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 15,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2300.0,
+        "actions": 13,
+        "strategy": "aug+jar_prepared+jar_0",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 9,
+        "gnn_calls": 9,
+        "trace": [
+          "pick(jar_0, fountain)",
+          "fill(jar_0, fountain, water)",
+          "move(fountain, servingtable)",
+          "place(jar_0, servingtable)",
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 8,
+        "augments_accepted": 1,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 1
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 3,
+            "solved": 3,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 3,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 16,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 17,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 18,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 19,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 250.0,
+        "actions": 3,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 2,
+        "gnn_calls": 2,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 1,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 20,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 250.0,
+        "actions": 3,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 2,
+        "gnn_calls": 2,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 1,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 21,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 22,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 23,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 24,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 25,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 26,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 27,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 28,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 29,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 30,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 31,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 32,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 33,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 250.0,
+        "actions": 3,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 2,
+        "gnn_calls": 2,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 1,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 34,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 35,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 36,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 250.0,
+        "actions": 3,
+        "strategy": "myopic",
+        "v_ap": 471.3931884765625,
+        "fd_calls": 2,
+        "gnn_calls": 2,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 1,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 37,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 9,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 38,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1850.0,
+        "actions": 14,
+        "strategy": "myopic",
+        "v_ap": 807.7989501953125,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 39,
+        "task_type": "make_fruit_bowl",
+        "auto": false,
+        "success": true,
+        "cost": 1175.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 1047.1195068359375,
+        "fd_calls": 8,
+        "gnn_calls": 8,
+        "trace": [
+          "move(servingtable, fountain)",
+          "pick(apple_0, fountain)",
+          "move(fountain, countertop)",
+          "place(apple_0, countertop)",
+          "pick(knife_0, countertop)",
+          "make-fruit-bowl(apple_0, bowl_0, knife_0, countertop)",
+          "place(knife_0, countertop)",
+          "pick(bowl_0, countertop)",
+          "move(countertop, servingtable)",
+          "place(bowl_0, servingtable)"
+        ],
+        "augments_tried": 7,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 40,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 850.0,
+        "actions": 7,
+        "strategy": "myopic",
+        "v_ap": 1003.6192016601562,
+        "fd_calls": 7,
+        "gnn_calls": 7,
+        "trace": [
+          "pick(bowl_0, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(bowl_0, dishwasher)",
+          "wash(bowl_0, dishwasher)",
+          "pick(bowl_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(bowl_0, countertop)"
+        ],
+        "augments_tried": 6,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 3,
+            "solved": 3,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 3,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 41,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 2050.0,
+        "actions": 15,
+        "strategy": "myopic",
+        "v_ap": 962.264404296875,
+        "fd_calls": 6,
+        "gnn_calls": 6,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 5,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 42,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 646.3536987304688,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 43,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 44,
+        "task_type": "wash_objects",
+        "auto": false,
+        "success": true,
+        "cost": 900.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 567.21826171875,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "move(servingtable, countertop)",
+          "pick(knife_0, countertop)",
+          "move(countertop, dishwasher)",
+          "place(knife_0, dishwasher)",
+          "wash(knife_0, dishwasher)",
+          "pick(knife_0, dishwasher)",
+          "move(dishwasher, countertop)",
+          "place(knife_0, countertop)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 45,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 46,
+        "task_type": "wash_objects",
+        "auto": true,
+        "success": true,
+        "cost": 0.0,
+        "actions": 0,
+        "strategy": "auto",
+        "v_ap": 0.0,
+        "fd_calls": 0,
+        "gnn_calls": 0,
+        "trace": [],
+        "augments_tried": 0,
+        "augments_accepted": 0
+      },
+      {
+        "index": 47,
+        "task_type": "make_coffee",
+        "auto": false,
+        "success": true,
+        "cost": 1250.0,
+        "actions": 10,
+        "strategy": "myopic",
+        "v_ap": 795.14501953125,
+        "fd_calls": 4,
+        "gnn_calls": 4,
+        "trace": [
+          "move(countertop, servingtable)",
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, coffeemachine)",
+          "pour(cup_1, water, coffeemachine)",
+          "place(cup_1, coffeemachine)",
+          "make-coffee(cup_1, coffeemachine)",
+          "pick(cup_1, coffeemachine)",
+          "move(coffeemachine, servingtable)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 3,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 48,
+        "task_type": "serve_water",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 8,
+        "strategy": "myopic",
+        "v_ap": 479.2343444824219,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "move(servingtable, dishwasher)",
+          "place(cup_1, dishwasher)",
+          "wash(cup_1, dishwasher)",
+          "pick(cup_1, dishwasher)",
+          "move(dishwasher, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "place(cup_1, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 0,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "jar_position": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "machine_water": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          }
+        }
+      },
+      {
+        "index": 49,
+        "task_type": "clear_containers",
+        "auto": false,
+        "success": true,
+        "cost": 1050.0,
+        "actions": 14,
+        "strategy": "aug+fill+cup_1",
+        "v_ap": 500.5541687011719,
+        "fd_calls": 5,
+        "gnn_calls": 5,
+        "trace": [
+          "pick(cup_1, servingtable)",
+          "refill_water(cup_1, servingtable, jar_0)",
+          "move(servingtable, fountain)",
+          "place(cup_1, fountain)",
+          "move(fountain, servingtable)",
+          "pick(apple_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(apple_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(jar_0, servingtable)",
+          "move(servingtable, fountain)",
+          "place(jar_0, fountain)",
+          "move(fountain, servingtable)",
+          "pick(plate_0, servingtable)"
+        ],
+        "augments_tried": 4,
+        "augments_accepted": 1,
+        "aug_outcomes": {
+          "jar_prepared": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "clean": {
+            "attempted": 1,
+            "solved": 1,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 1,
+            "accepted": 0
+          },
+          "fill": {
+            "attempted": 2,
+            "solved": 2,
+            "failed": 0,
+            "invalid": 0,
+            "scored": 2,
+            "accepted": 1
+          }
+        }
+      }
+    ]
+  },
+  "cost_delta": -23000.0,
+  "cost_reduction_pct": -29.27
+}

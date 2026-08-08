@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-08-08T20:57:28.773057+00:00",
+  "git_commit": "720d038a31dd3f1cde4afc732467210b3321b383",
+  "domain": "toy_level_5.yaml (far pantry + empty jar)",
+  "units": {
+    "cost": "undiscounted PDDL physical cost"
+  },
+  "persistence": "one environment reset per 50-task sequence; no reset between tasks",
+  "method_definitions": {
+    "myopic_fd_optimal": "K=1 clairvoyant, astar(hmax()), exact",
+    "k2_fd_optimal": "K=2 clairvoyant, astar(hmax()), exact -- provably optimal one-task lookahead",
+    "gnn_faithful": "Talukder et al. without counterfactual augmentation",
+    "gnn_counterfactual": "Talukder et al. as published",
+    "anticipatory_dqn": "ours: DQN V_AP guiding cost-bounded Bellman+novelty search, cost_ratio=3.0",
+    "clairvoyant_k3_lama": "K=3 clairvoyant, satisficing, 600s/window -- UPPER BOUND",
+    "clairvoyant_k4_lama": "K=4 clairvoyant, satisficing, 600s/window -- UPPER BOUND"
+  },
+  "splits": {
+    "dev": [
+      "01",
+      "03",
+      "06"
+    ],
+    "held_out": [
+      "00",
+      "02",
+      "04",
+      "05",
+      "07",
+      "08",
+      "09"
+    ],
+    "jar_delivered": [
+      "00",
+      "02"
+    ]
+  },
+  "sequences": [
+    {
+      "sequence_id": "iid-eval-seq-00",
+      "task_count": 50,
+      "sha256": "b9f56299ab63913fe07b0e9513abfd1a83809107f9bef4cb614cbfb9f798f0e6"
+    },
+    {
+      "sequence_id": "iid-eval-seq-01",
+      "task_count": 50,
+      "sha256": "32e56cebf5f9b0b1dd315e65671f9c00c83dc4391f37f3267b59eb934aa25a27"
+    },
+    {
+      "sequence_id": "iid-eval-seq-02",
+      "task_count": 50,
+      "sha256": "0ebfe015cf9c9bedd6a2bb21e36385e39c163b34bafeaba83f5f732766f02cf2"
+    },
+    {
+      "sequence_id": "iid-eval-seq-03",
+      "task_count": 50,
+      "sha256": "e3437ffcac376bf3ea5d751859212f6778d88875db803026db7d34eef69e0714"
+    },
+    {
+      "sequence_id": "iid-eval-seq-04",
+      "task_count": 50,
+      "sha256": "502732a7ff83502a0dd3136bcb3499307773c560375b78df4b7c4eb5e4f94e94"
+    },
+    {
+      "sequence_id": "iid-eval-seq-05",
+      "task_count": 50,
+      "sha256": "b40350df15f01488efc79a2867bfbe2c0cac06e31d9b4bdcb7da6ba9eb3b31be"
+    },
+    {
+      "sequence_id": "iid-eval-seq-06",
+      "task_count": 50,
+      "sha256": "3aa36a695104f12fbab3d6c175726994f0cdf0279209a48b66ea7569f69bf19f"
+    },
+    {
+      "sequence_id": "iid-eval-seq-07",
+      "task_count": 50,
+      "sha256": "7b40cf629c8d104a7cc0dc2ba956ac0fc6f3039d4192e2db4a22aaed075133a8"
+    },
+    {
+      "sequence_id": "iid-eval-seq-08",
+      "task_count": 50,
+      "sha256": "87c009d1e3bd03fa5e16a46f7b275c56a6ef8a18ac407425f4650a7f4ca63248"
+    },
+    {
+      "sequence_id": "iid-eval-seq-09",
+      "task_count": 50,
+      "sha256": "6ae017f60a6803c7ca2238368acbdf87ed6411c70bc3fffa12bfce71f8dc731a"
+    }
+  ]
+}
