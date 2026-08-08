@@ -6,6 +6,7 @@ results/canonical_planner/{planner,greedy_rl}/*.csv, replacing the old rows.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -13,6 +14,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+
+# Resume support: a prior run of this script died (tmux server killed on the
+# remote host) partway through part_a_planner. Any raw output already
+# rewritten after this cutoff is trusted as correct (generated from the new
+# checkpoint) and is loaded from disk instead of recomputed.
+RESUME_CUTOFF = datetime.datetime(2026, 8, 6, 0, 0, 0)
 
 _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
@@ -41,26 +48,32 @@ def part_a_planner():
 
     for idx, seq_id in enumerate(SEQ_IDS):
         seq_path = SEQ_DIR / f"{seq_id}.json"
-        result = run_sequence(
-            policy="cost_bounded",
-            sequence_path=seq_path,
-            config_path=_REPO / "configs" / "restaurant" / "toy_level_3.yaml",
-            domain_path=_REPO / "pddl" / "toy_restaurant_domain.pddl",
-            planner_path=_REPO / "downward" / "fast-downward.py",
-            alias="seq-sat-lama-2011",
-            fd_timeout_s=20.0,
-            seed=0,
-            gamma=0.97,
-            success_reward=SUCCESS_REWARD,
-            hidden_dim=256,
-            max_depth=20,
-            max_expansions=5000,
-            cost_ratio=1.0,
-            q_weights=NEW_CKPT_DIR / "restaurant_dqn.pt",
-        )
         out_path = raw_dir / f"myopic_seed16_{seq_id}.json"
-        out_path.write_text(json.dumps(result, indent=2, default=str))
-        print(f"[planner] wrote {out_path}")
+
+        mtime = datetime.datetime.fromtimestamp(out_path.stat().st_mtime) if out_path.exists() else None
+        if mtime is not None and mtime >= RESUME_CUTOFF:
+            result = json.loads(out_path.read_text())
+            print(f"[planner] resume: reusing already-correct {out_path} (mtime {mtime})")
+        else:
+            result = run_sequence(
+                policy="cost_bounded",
+                sequence_path=seq_path,
+                config_path=_REPO / "configs" / "restaurant" / "toy_level_3.yaml",
+                domain_path=_REPO / "pddl" / "toy_restaurant_domain.pddl",
+                planner_path=_REPO / "downward" / "fast-downward.py",
+                alias="seq-sat-lama-2011",
+                fd_timeout_s=20.0,
+                seed=0,
+                gamma=0.97,
+                success_reward=SUCCESS_REWARD,
+                hidden_dim=256,
+                max_depth=20,
+                max_expansions=5000,
+                cost_ratio=1.0,
+                q_weights=NEW_CKPT_DIR / "restaurant_dqn.pt",
+            )
+            out_path.write_text(json.dumps(result, indent=2, default=str))
+            print(f"[planner] wrote {out_path}")
 
         smy = result["summary"]
         sm = seq_meta[seq_id]
