@@ -308,6 +308,10 @@ def main() -> None:
                      f"{'YES' if t['diverged'] else ''} |")
 
     L += ["", "## Protocol notes", "",
+          "- **The headline arm is gamma=0.97 only.** gamma=0.98 and 0.99 appear solely in the "
+          "training/stability table below; their guided evaluations are not part of the main "
+          "comparison. `planner/run_summary.csv` retains any gamma=0.98 evaluation rows that "
+          "were run, so the CSV is a superset of this table by design.",
           "- `cost_ratio=3.0` was selected on sequences 01/03/06 from {1.25, 3, 6, 8} -- one "
           "scalar, four candidates, no training contact. The held-out seven are "
           f"{', '.join(HELD_OUT)}.",

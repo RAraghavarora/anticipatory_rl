@@ -60,6 +60,7 @@ Exact search is intractable at K>=3, so the K=3/K=4 arms are satisficing with a 
 
 ## Protocol notes
 
+- **The headline arm is gamma=0.97 only.** gamma=0.98 and 0.99 appear solely in the training/stability table below; their guided evaluations are not part of the main comparison. `planner/run_summary.csv` retains any gamma=0.98 evaluation rows that were run, so the CSV is a superset of this table by design.
 - `cost_ratio=3.0` was selected on sequences 01/03/06 from {1.25, 3, 6, 8} -- one scalar, four candidates, no training contact. The held-out seven are 00, 02, 04, 05, 07, 08, 09.
 - Sequences 00 and 02 contain a `pick_place(jar_0, .)` task, so the task stream itself delivers the investment. They are retained (excluding them would condition the eval set on the mechanism) and act as a control: the advantage should shrink where the jar is handed over.
 - All costs are undiscounted PDDL physical cost; one environment reset per 50-task sequence, no reset between tasks.
