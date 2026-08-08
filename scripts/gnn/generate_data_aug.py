@@ -24,6 +24,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 import time
 from pathlib import Path
@@ -51,7 +53,21 @@ from generate_data import _compute_v_ap
 from gnn.graph_encoder import state_to_graph
 
 
-def main() -> None:
+def _build_metadata(args: argparse.Namespace) -> dict:
+    """Provenance for the generated dataset (saved as a JSON sidecar next to
+    the .pt output, since train_gnn.py loads the .pt as a flat sample list)."""
+    return {
+        "config_path": str(args.config_path.resolve()),
+        "config_hash": hashlib.sha256(args.config_path.read_bytes()).hexdigest(),
+        "seed": args.seed,
+        "num_states": args.num_states,
+        "max_augs": args.max_augs,
+        "timeout_s": args.timeout_s,
+        "unbounded_jar_augmentation": args.unbounded_jar_augmentation,
+    }
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Generate GNN training data with augmented states")
     ap.add_argument("--config-path", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=0)
@@ -63,7 +79,14 @@ def main() -> None:
     ap.add_argument("--timeout-s", type=float, default=30.0)
     ap.add_argument("--output-path", type=Path, required=True)
     ap.add_argument("--log-interval", type=int, default=10)
-    args = ap.parse_args()
+    ap.add_argument("--unbounded-jar-augmentation", action="store_true",
+                    help="Steelman: also propose fill+relocate jar candidates "
+                         "outside the bounded region (see _generate_focused_augmentations).")
+    return ap
+
+
+def main() -> None:
+    args = _build_arg_parser().parse_args()
 
     env = RestaurantSymbolicEnv(config_path=args.config_path)
     env.reset(seed=args.seed)
@@ -121,6 +144,7 @@ def main() -> None:
 
         clauses = _generate_focused_augmentations(
             result.plan_actions, state, initial_agent_location, env,
+            unbounded_jar=args.unbounded_jar_augmentation,
         )
         for clause in clauses[: args.max_augs]:
             aug_result = solve_restaurant_task_with_fd(
@@ -192,6 +216,11 @@ def main() -> None:
         npz_path = args.output_path.with_suffix(".npz")
         np.savez(npz_path, v_ap=v_aps)
         print(f"Saved v_ap array ({len(v_aps)},) to {npz_path}", flush=True)
+
+    meta_path = args.output_path.with_suffix(".meta.json")
+    with meta_path.open("w") as f:
+        json.dump(_build_metadata(args), f, indent=2)
+    print(f"Saved metadata to {meta_path}", flush=True)
 
 
 if __name__ == "__main__":
