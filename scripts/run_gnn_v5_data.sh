@@ -7,6 +7,7 @@
 #
 #   MODE=aug REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
 #   MODE=faithful REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
+#   MODE=steelman REPO=/path/to/repo SHARDS=40 PER=50 ./scripts/run_gnn_v5_data.sh
 set -eu
 
 # Activate the uv environment before running this script.
@@ -26,8 +27,16 @@ case "$MODE" in
     GENERATOR=scripts/gnn/generate_data.py
     GENERATOR_ARGS=""
     ;;
+  steelman)
+    # Same generator as `aug`, plus the jar-prepared candidate the bounded heuristic
+    # cannot propose. MAXAUGS defaults higher here: the jar clauses are PREPENDED so they
+    # survive the cap, which would otherwise displace two of the original candidates and
+    # make the steelman set non-comparable to the `aug` set.
+    GENERATOR=scripts/gnn/generate_data_aug.py
+    GENERATOR_ARGS="--max-augs ${MAXAUGS_STEELMAN:-12} --unbounded-jar-augmentation"
+    ;;
   *)
-    echo "ERROR: MODE must be 'aug' or 'faithful', got: $MODE"
+    echo "ERROR: MODE must be 'aug', 'faithful' or 'steelman', got: $MODE"
     exit 1
     ;;
 esac
