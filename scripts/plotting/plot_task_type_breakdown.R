@@ -15,11 +15,17 @@ out_path <- "results/canonical_planner/figures/task_type_breakdown.pdf"
 
 methods <- tribble(
   ~method_id, ~label, ~color,
-  "myopic_dqn_beta1", "Myopic RL (guided)", "#56B4E9",
+  "myopic_dqn_beta1_25", "Myopic RL (guided)", "#56B4E9",  # beta=1.25, matched to anticipatory
   "anticipatory_dqn_beta1_25", "Anticipatory RL (guided)", "#009E73"
 )
 
-df <- read_csv("results/canonical_planner/planner/task_results.csv", show_col_types = FALSE) %>%
+# Myopic RL (guided) beta=1.25 per-task rows come from the supplement CSV
+# (build_canonical_myopic_b125_per_task.py); task_results.csv still has only
+# the old beta=1.00 arm, so union the supplement before filtering.
+df <- bind_rows(
+  read_csv("results/canonical_planner/planner/task_results.csv", show_col_types = FALSE),
+  read_csv("results/canonical_planner/planner/myopic_b125_per_task.csv", show_col_types = FALSE)
+) %>%
   semi_join(methods, by = "method_id")
 
 per_seed <- df %>%

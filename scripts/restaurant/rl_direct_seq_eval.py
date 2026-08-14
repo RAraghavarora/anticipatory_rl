@@ -25,13 +25,21 @@ from anticipatory_rl.envs.restaurant.env import RestaurantSymbolicEnv, Restauran
 from anticipatory_rl.utils import select_device
 
 
-def _load_checkpoint_dir(ckpt_dir: Path) -> Dict[str, Any]:
-    """Load train_args.json from a checkpoint directory or a .pt file's parent dir."""
+def _load_checkpoint_dir(ckpt_dir: Path, fallback: Optional[Path] = None) -> Dict[str, Any]:
+    """Load train_args.json from a checkpoint directory or a .pt file's parent dir.
+
+    Some runs were archived with only the checkpoint and train_summary.json, so `fallback`
+    allows pointing at the train_args.json of a run sharing the same env and architecture.
+    Only env/architecture fields are read; a wrong hidden_dim fails the state_dict load.
+    """
     if ckpt_dir.suffix == ".pt":
         ckpt_dir = ckpt_dir.parent
     args_path = ckpt_dir / "train_args.json"
     if not args_path.exists():
-        raise FileNotFoundError(f"train_args.json not found in {ckpt_dir}")
+        if fallback is None:
+            raise FileNotFoundError(f"train_args.json not found in {ckpt_dir}")
+        print(f"[warn] no train_args.json in {ckpt_dir}; using {fallback}")
+        args_path = fallback
     with args_path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
 
@@ -233,36 +241,44 @@ def main() -> None:
         description="Paired greedy DQN evaluation on a fixed canonical task sequence."
     )
     p.add_argument("--ant-ckpt", type=Path, required=True, help="Anticipatory checkpoint .pt or directory")
-    p.add_argument("--myo-ckpt", type=Path, required=True, help="Myopic checkpoint .pt or directory")
+    p.add_argument("--myo-ckpt", type=Path, default=None,
+                   help="Myopic checkpoint .pt or directory. Omit to evaluate the "
+                        "anticipatory agent alone (the paired comparison is then skipped).")
+    p.add_argument("--train-args", type=Path, default=None,
+                   help="train_args.json to fall back on when a checkpoint dir lacks one")
     p.add_argument("--seq", type=Path, required=True, help="Canonical task sequence JSON")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", type=Path, required=True, help="Output JSON path")
     args = p.parse_args()
 
-    ant_meta = _load_checkpoint_dir(args.ant_ckpt)
-    myo_meta = _load_checkpoint_dir(args.myo_ckpt)
-    _validate_meta_pair(ant_meta, myo_meta)
+    ant_meta = _load_checkpoint_dir(args.ant_ckpt, args.train_args)
+    myo_meta = (_load_checkpoint_dir(args.myo_ckpt, args.train_args)
+                if args.myo_ckpt is not None else None)
+    if myo_meta is not None:
+        _validate_meta_pair(ant_meta, myo_meta)
 
     # Resolve actual .pt paths
     ant_pt = args.ant_ckpt if args.ant_ckpt.suffix == ".pt" else args.ant_ckpt / "restaurant_dqn.pt"
-    myo_pt = args.myo_ckpt if args.myo_ckpt.suffix == ".pt" else args.myo_ckpt / "restaurant_dqn.pt"
     if not ant_pt.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ant_pt}")
-    if not myo_pt.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {myo_pt}")
+    myo_pt = None
+    if args.myo_ckpt is not None:
+        myo_pt = args.myo_ckpt if args.myo_ckpt.suffix == ".pt" else args.myo_ckpt / "restaurant_dqn.pt"
+        if not myo_pt.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {myo_pt}")
 
     tasks = _load_sequence(args.seq)
     _ensure_sequence_consistent(ant_meta, len(tasks))
 
     ant_result = _eval_one_agent(ant_meta, ant_pt, tasks, args.seed)
-    myo_result = _eval_one_agent(myo_meta, myo_pt, tasks, args.seed)
 
     output = {
         "sequence": {"path": str(args.seq), "n_tasks": len(tasks)},
         "eval_seed": args.seed,
         "anticipatory": ant_result,
-        "myopic": myo_result,
     }
+    if myo_pt is not None:
+        output["myopic"] = _eval_one_agent(myo_meta, myo_pt, tasks, args.seed)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as fh:
         json.dump(output, fh, indent=2, default=str)

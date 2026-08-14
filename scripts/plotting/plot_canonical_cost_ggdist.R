@@ -18,12 +18,16 @@
 # (method, seed) combo uses its `final` checkpoint (seed 16's checkpoint was
 # retrained after a training-instability bug was fixed -- see manifest.json
 # "corrections" -- so the old best-checkpoint workaround no longer applies).
-# For the 4 RL methods, stat_lineribbon(.width = 1) gives the min/max band
-# across the 4 per-seed curves -- a literal statement of observed spread,
-# not a fabricated distributional claim the way a nested-quantile or
-# parametric band would be at n=4. GNN variants are single-seed (seed 0,
-# matching this dataset's eval_seed convention -- not the seed-42 data in
-# the separate wt-gnn repo), so like the FD oracles they get a plain line.
+# GNN variants now also pool 4 seeds (results/canonical_planner/gnn/
+# seed_task_costs.csv) -- the single-seed-0 CSVs this script originally
+# read were superseded by that 4-seed sweep (see
+# results/canonical_planner/gnn/README.md) and moved under
+# gnn/superseded_seed42/, so GNN gets the same stat_lineribbon(.width = 1)
+# treatment as the DQN methods now instead of a plain line. For all 6
+# seed-swept methods that band is a literal min/max across the 4 per-seed
+# curves, not a fabricated distributional claim the way a nested-quantile
+# or parametric band would be at n=4. Only the two FD oracles (no seed
+# concept) remain plain lines.
 
 library(tidyverse)
 library(ggdist)
@@ -39,7 +43,7 @@ methods <- tribble(
   "clairvoyant_k3_lama", "Clairvoyant Oracle", "#E69F00", "oracle",
   "gnn_faithful", "One-task GNN", "#CC79A7", "gnn",
   "gnn_counterfactual", "One-task GNN (augmented)", "#D55E00", "gnn",
-  "myopic_dqn_beta1", "Myopic RL (guided)", "#56B4E9", "guided",
+  "myopic_dqn_beta1_25", "Myopic RL (guided)", "#56B4E9", "guided",
   "anticipatory_dqn_beta1_25", "Anticipatory RL (guided)", "#009E73", "guided",
   "myopic_dqn_greedy", "Myopic RL (greedy)", "#A6D8F0", "greedy",
   "anticipatory_dqn_greedy", "Anticipatory RL (greedy)", "#7FCFB4", "greedy"
@@ -51,7 +55,14 @@ linetypes <- setNames(family_linetype[methods$family], methods$label)
 colors <- setNames(methods$color, methods$label)
 shapes <- setNames(c(16, 17, 15, 18, 3, 4, 8, 1), methods$label)
 
-df_guided <- read_csv(guided_csv, show_col_types = FALSE)
+# Myopic RL (guided) is now the beta=1.25 arm (matched to anticipatory).
+# Its per-task rows live only in a supplement CSV built from the raw JSONs
+# (build_canonical_myopic_b125_per_task.py) -- the canonical task_results.csv
+# still carries only the old beta=1.00 arm -- so union the supplement in.
+df_guided <- bind_rows(
+  read_csv(guided_csv, show_col_types = FALSE),
+  read_csv("results/canonical_planner/planner/myopic_b125_per_task.csv", show_col_types = FALSE)
+)
 df_greedy <- read_csv(greedy_csv, show_col_types = FALSE)
 
 # Base-R subsetting (not dplyr::filter NSE) so target_method/target_seed
@@ -70,28 +81,21 @@ cumulative_curve <- function(data, target_method, target_seed = NULL, target_var
 }
 
 deterministic_ids <- c("myopic_fd_optimal", "clairvoyant_k3_lama")
-gnn_specs <- list(
-  gnn_faithful = "results/canonical_planner/gnn/faithful_seed0_seq_cost.csv",
-  gnn_counterfactual = "results/canonical_planner/gnn/counterfactual_seed0_seq_cost.csv"
-)
-rl_ids <- c("myopic_dqn_beta1", "anticipatory_dqn_beta1_25", "myopic_dqn_greedy", "anticipatory_dqn_greedy")
+rl_ids <- c("myopic_dqn_beta1_25", "anticipatory_dqn_beta1_25", "myopic_dqn_greedy", "anticipatory_dqn_greedy")
+gnn_ids <- c("gnn_faithful", "gnn_counterfactual")
+
+df_gnn <- read_csv("results/canonical_planner/gnn/seed_task_costs.csv", show_col_types = FALSE) %>%
+  rename(task_cost_pddl = pddl_cost, checkpoint_seed = seed)
 
 deterministic_curves <- map_dfr(deterministic_ids, function(id) {
   m <- methods[methods$id == id, ]
   cumulative_curve(df_guided, id) %>% mutate(label = m$label)
 })
 
-gnn_curves <- imap_dfr(gnn_specs, function(path, id) {
+rl_curves <- map_dfr(c(rl_ids, gnn_ids), function(id) {
   m <- methods[methods$id == id, ]
-  d <- read_csv(path, show_col_types = FALSE) %>%
-    rename(task_cost_pddl = pddl_cost) %>%
-    mutate(method_id = id)
-  cumulative_curve(d, id) %>% mutate(label = m$label)
-})
-
-rl_curves <- map_dfr(rl_ids, function(id) {
-  m <- methods[methods$id == id, ]
-  data <- if (id %in% c("myopic_dqn_greedy", "anticipatory_dqn_greedy")) df_greedy else df_guided
+  data <- if (id %in% c("myopic_dqn_greedy", "anticipatory_dqn_greedy")) df_greedy else
+    if (id %in% gnn_ids) df_gnn else df_guided
   seeds <- sort(unique(na.omit(data$checkpoint_seed[data$method_id == id])))
   map_dfr(seeds, function(s) {
     cumulative_curve(data, id, target_seed = s, target_variant = "final") %>%
@@ -99,7 +103,7 @@ rl_curves <- map_dfr(rl_ids, function(id) {
   })
 })
 
-line_curves <- bind_rows(deterministic_curves, gnn_curves)
+line_curves <- deterministic_curves
 marker_curves <- bind_rows(line_curves, rl_curves %>% group_by(label, task) %>% summarise(cum_cost = median(cum_cost), .groups = "drop")) %>%
   filter(task %% MARKER_EVERY == 0 | task == 1)
 

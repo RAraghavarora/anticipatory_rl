@@ -118,7 +118,9 @@ learned rather than extrapolated.
 | failed (planner timeout) | 29 (3.9%) |
 | **accepted** | **1** |
 
-Total cost 654,275 vs the unmodified baseline's 650,775 — **no improvement**.
+Total cost 654,275 vs the unmodified baseline's 4-seed mean of 653,738 — a gap of 537, which
+is INSIDE that arm's own seed spread (+/-567). Not merely no improvement: statistically
+indistinguishable. (The original comparison used seed 42's 650,775, a single draw.)
 
 The decline is therefore **not** a candidate-generation failure: the candidate was present,
 solved, and evaluated 712 times. It is the value horizon, exactly as section 3 predicts.
@@ -133,10 +135,13 @@ invalidated by exactly that confound — see section 8.)
 The GNN's central contribution, measured on both domains with the same architecture, training
 protocol, encoder, and comparable sample counts:
 
+All four cells are now 4-seed means (seeds 0/4/8/16); the earlier version of this table used
+single seed-42 draws, which flattered the baseline in both domains.
+
 | domain | faithful | augmented | augmentation gain |
 |---|---|---|---|
-| level_3 (theirs) | 674,150 | 461,025 | **-31.6%** |
-| v5 (long-horizon) | 672,150 | 650,775 | **-3.2%** |
+| level_3 (theirs) | 670,669 +/- 5,968 | 472,594 +/- 1,852 | **-29.5%** |
+| v5 (long-horizon) | 671,238 +/- 2,970 | 653,738 +/- 567 | **-2.6%** |
 
 **A factor of ten.** And on v5 the faithful arm is only -0.81% against myopic, so without
 augmentation the method does essentially nothing.
@@ -152,9 +157,17 @@ has `n=40` for the DQN arms (4 seeds x 10 sequences):
 
 | | level_3 (theirs) | v5 (long-horizon) |
 |---|---|---|
-| GNN published | 461,025 | 650,775 |
-| ours | 457,138 | 498,644 |
-| **ours vs GNN** | **-0.8%** | **-23.4%** |
+| GNN published (4 seeds) | 472,594 +/- 1,852 | 653,738 +/- 567 |
+| ours | 457,138 | 498,644 +/- 69,214 |
+| **ours vs GNN** | **-3.3%** | **-23.7%** |
+| K=2 optimal (one-task ceiling) | 404,625 | 614,575 |
+| **ours vs that ceiling** | **+13.0%** | **-18.9%** |
+
+The last two rows are the sharpest form of the claim, and they are immune to the objections
+the cost comparison invites: the K=2 bound is an EXACT planner (astar(hmax()), 0/500 windows
+at cap in both domains) computed under the same P(tau) and the same sequences, so it cannot be
+contaminated by tuning or by baseline implementation quality. On their domain we do not exceed
+what one-task lookahead can achieve; on the long-horizon variant we go 18.9% past it.
 
 Statistically tied on their domain, decisively better on the long-horizon one. This is what
 makes v5 a controlled probe rather than an arena built for a win.

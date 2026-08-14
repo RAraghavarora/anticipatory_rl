@@ -55,17 +55,14 @@ greedy <- greedy_all %>%
   semi_join(best_seeds, by = c("method_id", "checkpoint_seed", "checkpoint_variant")) %>%
   select(-checkpoint_variant)
 
-gnn <- read_csv("results/canonical_planner/gnn/faithful_seed0_seq_cost.csv", show_col_types = FALSE) %>%
-  group_by(seq) %>%
-  summarise(mean_cost_pddl = sum(pddl_cost) / n(), .groups = "drop") %>%
-  transmute(method_id = "gnn_faithful", mean_cost_pddl)
+# GNN: the single-seed *_seed0_seq_cost.csv files this originally read were
+# superseded by the 4-seed sweep (moved to gnn/superseded_seed42/); read the
+# per-(seed, seq) mean cost from seed_summary.csv instead, matching the
+# thesis raincloud (plot_cost_raincloud_v5.R). Now 40 points per GNN arm.
+gnn_all <- read_csv("results/canonical_planner/gnn/seed_summary.csv", show_col_types = FALSE) %>%
+  select(method_id, mean_cost_pddl)
 
-gnn_aug <- read_csv("results/canonical_planner/gnn/counterfactual_seed0_seq_cost.csv", show_col_types = FALSE) %>%
-  group_by(seq) %>%
-  summarise(mean_cost_pddl = sum(pddl_cost) / n(), .groups = "drop") %>%
-  transmute(method_id = "gnn_counterfactual", mean_cost_pddl)
-
-df_raw <- bind_rows(guided, greedy, gnn, gnn_aug)
+df_raw <- bind_rows(guided, greedy, gnn_all)
 
 # Row order is by median cost (worst at top, best at bottom) rather than a
 # fixed table order; coord_flip() puts the first factor level at the bottom.
@@ -75,7 +72,7 @@ methods <- tribble(
   "anticipatory_dqn_greedy", "Anticipatory RL (greedy)", "#7FCFB4",
   "anticipatory_dqn_beta1_25", "Anticipatory RL (guided)", "#009E73",
   "myopic_dqn_greedy", "Myopic RL (greedy)", "#A6D8F0",
-  "myopic_dqn_beta1", "Myopic RL (guided)", "#56B4E9",
+  "myopic_dqn_beta1_25", "Myopic RL (guided)", "#56B4E9",  # beta=1.25, matched to anticipatory
   "gnn_counterfactual", "One-task GNN (augmented)", "#D55E00",
   "gnn_faithful", "One-task GNN", "#CC79A7",
   "myopic_fd_optimal", "Myopic Oracle", "#000000"

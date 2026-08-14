@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at_utc": "2026-08-08T21:07:38.797072+00:00",
-  "git_commit": "71c7133642fbe057c96c9879e1f2313a5760c3e9",
+  "generated_at_utc": "2026-08-12T18:06:57.320918+00:00",
+  "git_commit": "27aef9b37f3ea8895fa4f0fbceb604cea8923b44",
   "domain": "toy_level_5.yaml (far pantry + empty jar)",
   "units": {
     "cost": "undiscounted PDDL physical cost"

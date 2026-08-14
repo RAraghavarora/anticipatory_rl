@@ -149,13 +149,14 @@ def _run_cost_bounded(
     domain_path: Path,
     alias: str,
     fd_timeout_s: float,
+    value_fn=None,
 ) -> _CostBoundedResult:
     result = bnp.search_task(
         env=env, init_state=init_state.copy(), task=task,
         model=model, device=device,
         gamma=gamma, success_reward=success_reward,
         max_depth=max_depth, max_expansions=max_expansions,
-        scoring_mode="cost_bounded", cost_ratio=cost_ratio,
+        scoring_mode="cost_bounded", cost_ratio=cost_ratio, value_fn=value_fn,
         planner_path=planner_path, domain_path=domain_path,
         alias=alias, fd_timeout_s=fd_timeout_s,
     )
@@ -205,6 +206,7 @@ def run_sequence(
     q_weights: Optional[Path] = None,
     max_tasks: Optional[int] = None,
     search: Optional[str] = None,
+    value_fn=None,
 ) -> Dict[str, Any]:
     assert policy in ("myopic", "cost_bounded")
 
@@ -223,7 +225,7 @@ def run_sequence(
 
     device: Optional[torch.device] = None
     model: Optional[RestaurantQNetwork] = None
-    if policy == "cost_bounded":
+    if policy == "cost_bounded" and value_fn is None:
         if q_weights is None:
             raise ValueError("q_weights is required for cost_bounded policy")
         device = select_device()
@@ -238,6 +240,9 @@ def run_sequence(
             q_weights.expanduser().resolve(), map_location=device, weights_only=True,
         ))
         model.eval()
+    elif policy == "cost_bounded":
+        # value_fn supplies the terminal estimate, so no DQN is loaded.
+        device = select_device()
 
     t0 = time.perf_counter()
     records: List[Dict[str, Any]] = []
@@ -290,10 +295,11 @@ def run_sequence(
                 )
                 next_state = r.next_state
             else:
-                assert model is not None and device is not None
+                assert device is not None
+                assert model is not None or value_fn is not None
                 r = _run_cost_bounded(
                     env, state, task,
-                    model=model, device=device,
+                    model=model, device=device, value_fn=value_fn,
                     gamma=gamma, success_reward=success_reward,
                     max_depth=max_depth, max_expansions=max_expansions,
                     cost_ratio=cost_ratio,

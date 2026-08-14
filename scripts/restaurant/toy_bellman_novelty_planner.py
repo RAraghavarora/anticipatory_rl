@@ -278,6 +278,7 @@ def _myopic_fallback(
     v_ap_cache: Dict,
     scoring_mode: str = "bellman",
     task_gamma: float = 0.95,
+    value_fn=None,
     *,
     planner_path: Path,
     domain_path: Path,
@@ -323,6 +324,7 @@ def _myopic_fallback(
         source="myopic",
         scoring_mode=scoring_mode,
         task_gamma=task_gamma,
+        value_fn=value_fn,
     )
 
 
@@ -430,6 +432,7 @@ def _terminal_from_node(
     source: str,
     scoring_mode: str = "bellman",
     task_gamma: float = 0.95,
+    value_fn=None,
 ) -> TerminalCandidate:
     d = node.depth
     # G_complete still computed for diagnostics in both modes.
@@ -440,10 +443,17 @@ def _terminal_from_node(
     )
     consumed = node.state.copy()
     consume_delivery_from_state(consumed, task.task_type, task.target_location)
-    v_ap = _compute_v_q_ap(
-        consumed, env, future_tasks,
-        model=model, device=device, cache=v_ap_cache,
-    )
+    if value_fn is None:
+        v_ap = _compute_v_q_ap(
+            consumed, env, future_tasks,
+            model=model, device=device, cache=v_ap_cache,
+        )
+    else:
+        # Alternative terminal estimator (e.g. the one-task GNN's C_AP). The contract is
+        # HIGHER IS BETTER, matching _compute_v_q_ap's return semantics, because
+        # cost_bounded selection sorts by -v_ap. A cost-valued estimator must therefore be
+        # negated by the caller; passing a raw cost here would invert the search.
+        v_ap = value_fn(consumed, env, future_tasks, cache=v_ap_cache)
     if scoring_mode == "bellman":
         score = G_complete + (gamma ** d) * v_ap
     elif scoring_mode == "task_boundary":
@@ -553,6 +563,7 @@ def search_task(
     scoring_mode: str = "bellman",
     task_gamma: float = 0.95,
     cost_ratio: float = 1.25,
+    value_fn=None,
     planner_path: Path,
     domain_path: Path,
     alias: str,
@@ -592,7 +603,7 @@ def search_task(
     fb = _myopic_fallback(
         env, init_state, task, future_tasks, gamma, success_reward,
         model, device, v_ap_cache,
-        scoring_mode=scoring_mode, task_gamma=task_gamma,
+        scoring_mode=scoring_mode, task_gamma=task_gamma, value_fn=value_fn,
         planner_path=planner_path, domain_path=domain_path,
         alias=alias, timeout_s=fd_timeout_s,
     )
@@ -616,10 +627,17 @@ def search_task(
         seen[key] = child.G
 
         # Bellman priority
-        max_q = _compute_max_q_single(
-            child.state, env, task,
-            model=model, device=device, cache=max_q_cache,
-        )
+        if value_fn is None:
+            max_q = _compute_max_q_single(
+                child.state, env, task,
+                model=model, device=device, cache=max_q_cache,
+            )
+        else:
+            # No task-conditioned analogue exists for a task-agnostic estimator like the
+            # GNN's C_AP, so the same state value drives the Bellman lane's priority. This
+            # makes the run independent of any DQN checkpoint, at the cost of a lane that
+            # orders by expected next-task value rather than by current-task max-Q.
+            max_q = value_fn(child.state, env, future_tasks, cache=max_q_cache)
         priority = child.G + (gamma ** child.depth) * max_q
         _node_counter += 1
         heapq.heappush(bellman_heap, (-priority, _node_counter, child))
@@ -641,7 +659,7 @@ def search_task(
             term = _terminal_from_node(
                 child, env, task, future_tasks, gamma, success_reward,
                 model, device, v_ap_cache, source=source,
-                scoring_mode=scoring_mode, task_gamma=task_gamma,
+                scoring_mode=scoring_mode, task_gamma=task_gamma, value_fn=value_fn,
             )
             terminals.append(term)
         else:
